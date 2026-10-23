@@ -106,26 +106,35 @@
       });
     }
 
-    function claimSlot(code) {
+    function claimSlot(code, depth) {
+      depth = depth || 0;
       roomRef = db.ref('rooms/' + code);
       var uid = auth.currentUser.uid;
-      return roomRef.child('slots').transaction(function (cur) {
-        cur = cur || {};
-        if (cur.a && cur.a.uid === uid) { mySlot = 'a'; return cur; }
-        if (cur.b && cur.b.uid === uid) { mySlot = 'b'; return cur; }
-        if (!cur.a) {
-          cur.a = { uid: uid, joinedAt: firebase.database.ServerValue.TIMESTAMP, outfit: 'winter' };
-          mySlot = 'a'; return cur;
-        }
-        if (!cur.b) {
-          cur.b = { uid: uid, joinedAt: firebase.database.ServerValue.TIMESTAMP, outfit: 'winter' };
-          mySlot = 'b'; return cur;
-        }
-        return undefined; // 两个位置都被占用 → 事务中止
-      }).then(function (res) {
-        if (!res.committed || !mySlot) { onFull && onFull(); return false; }
-        bindRoomListeners();
-        return true;
+      // 先读当前占用情况，挑一个空槽位；再对该槽位本身做事务（规则只授权到槽位级别）
+      return roomRef.child('slots').once('value').then(function (snap) {
+        var cur = snap.val() || {};
+        var target = null;
+        if (cur.a && cur.a.uid === uid) target = 'a';
+        else if (cur.b && cur.b.uid === uid) target = 'b';
+        else if (!cur.a) target = 'a';
+        else if (!cur.b) target = 'b';
+        if (!target) { onFull && onFull(); return false; } // 两个位置都被占用
+
+        return roomRef.child('slots/' + target).transaction(function (leaf) {
+          if (leaf && leaf.uid !== uid) return undefined; // 被别人抢先占用了 → 中止重试
+          if (!leaf) {
+            return { uid: uid, joinedAt: firebase.database.ServerValue.TIMESTAMP, outfit: 'winter' };
+          }
+          return leaf; // 已经是我的
+        }).then(function (res) {
+          if (res.committed) {
+            mySlot = target;
+            bindRoomListeners();
+            return true;
+          }
+          if (depth >= 3) { onFull && onFull(); return false; }
+          return claimSlot(code, depth + 1); // 被抢 → 重新读取再试
+        });
       });
     }
 
