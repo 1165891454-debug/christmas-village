@@ -106,8 +106,13 @@
     <!-- 房间已满 -->
     <section id="screen-full" class="screen hidden">
       <h1>这个房间已经有两位玩家啦 🎅</h1>
-      <p class="muted">这是只属于两个人的私人小镇。如果你是房间主人，请在原来的手机上打开；或者创建一个新房间。</p>
-      <button id="btn-back-lobby" class="btn">返回大厅</button>
+      <p class="muted">如果其中一个角色本来就是你自己（比如换了手机、清了缓存、无痕模式），可以直接接管进入；正式游玩时由你们两人各占一个。</p>
+      <div class="join-row">
+        <button id="btn-take-a" class="btn primary">以玩家 A 进入</button>
+        <button id="btn-take-b" class="btn primary">以玩家 B 进入</button>
+      </div>
+      <p class="muted">接管会保留该角色原来的服装和进度。</p>
+      <button id="btn-back-lobby" class="btn ghost">返回大厅，创建新房间</button>
     </section>
   </main>
 

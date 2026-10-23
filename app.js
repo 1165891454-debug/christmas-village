@@ -159,6 +159,24 @@
       joinRoom: function (code) {
         return ensureAuth().then(function () { return claimSlot(code); });
       },
+      // 接管模式：拿着链接的人可以选择占用某个角色进入（保留该角色原有服装）
+      takeoverSlot: function (slot) {
+        return ensureAuth().then(function () {
+          return roomRef.child('slots/' + slot).once('value');
+        }).then(function (snap) {
+          var cur = snap.val() || {};
+          return roomRef.child('slots/' + slot).set({
+            uid: auth.currentUser.uid,
+            device: deviceId(),
+            joinedAt: cur.joinedAt || firebase.database.ServerValue.TIMESTAMP,
+            outfit: cur.outfit || 'winter'
+          });
+        }).then(function () {
+          mySlot = slot;
+          bindRoomListeners();
+          return true;
+        });
+      },
       setTreeStage: function (n) {
         return roomRef.child('tree').set({
           stage: n, updatedBy: mySlot, updatedAt: firebase.database.ServerValue.TIMESTAMP
@@ -219,6 +237,13 @@
         data.log['l' + Date.now()] = { slot: mySlot, what: '把圣诞树装饰到了「' + STAGES[n] + '」', at: Date.now() };
         save(); return Promise.resolve();
       },
+      takeoverSlot: function (slot) {
+        mySlot = slot;
+        if (!data.slots[slot]) data.slots[slot] = { device: deviceId(), joinedAt: Date.now(), outfit: 'winter' };
+        data.presence[slot] = true;
+        save();
+        return Promise.resolve(true);
+      },
       setOutfit: function (k) {
         data.slots[mySlot].outfit = k;
         data.log['l' + Date.now()] = { slot: mySlot, what: '换上了「' + OUTFITS[k] + '」', at: Date.now() };
@@ -238,6 +263,7 @@
 
   var backend = null;
   var lastData = null;
+  var pendingRoom = null; // 当前尝试进入的房间码（供"接管角色"使用）
 
   function avatarSVG(outfit, isMe) {
     var outfits = {
@@ -412,6 +438,7 @@
 
     var room = getRoomFromUrl();
     if (room) {
+      pendingRoom = room;
       toast('正在加入房间 ' + room + ' …', 3000);
       var timeout = new Promise(function (_, rej) {
         setTimeout(function () { rej(new Error('加入超时（10 秒），请检查网络后刷新重试')); }, 10000);
@@ -458,6 +485,7 @@
       if (!backend) initFirebaseBackend();
       $('#lobby-error').classList.add('hidden');
       backend.createRoom().then(function (code) {
+        pendingRoom = code;
         afterJoined(code);
       }).catch(function (e) { lobbyError('创建失败：' + e.message); });
     });
@@ -469,10 +497,20 @@
       }
       if (!backend) initFirebaseBackend();
       $('#lobby-error').classList.add('hidden');
+      pendingRoom = code;
       backend.joinRoom(code).then(function (ok) {
         if (ok) afterJoined(code);
       }).catch(function (e) { lobbyError('加入失败：' + e.message); });
     });
+    // 房间满员时的接管入口（只属于拿链接的人）
+    function takeover(slot) {
+      if (!pendingRoom || !backend) return;
+      backend.takeoverSlot(slot).then(function (ok) {
+        if (ok) afterJoined(pendingRoom);
+      }).catch(function (e) { toast('接管失败：' + ((e && e.message) || e)); });
+    }
+    $('#btn-take-a').addEventListener('click', function () { takeover('a'); });
+    $('#btn-take-b').addEventListener('click', function () { takeover('b'); });
     $('#btn-back-lobby').addEventListener('click', function () {
       try { history.replaceState(null, '', location.pathname); } catch (e) { }
       showScreen('screen-lobby');
