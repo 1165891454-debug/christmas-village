@@ -403,9 +403,15 @@
 
     var room = getRoomFromUrl();
     if (room) {
-      backend.joinRoom(room).then(function (ok) {
+      toast('正在加入房间 ' + room + ' …', 3000);
+      var timeout = new Promise(function (_, rej) {
+        setTimeout(function () { rej(new Error('加入超时（10 秒），请检查网络后刷新重试')); }, 10000);
+      });
+      Promise.race([backend.joinRoom(room), timeout]).then(function (ok) {
         if (ok) enterGame(room);
-      }).catch(function (e) { lobbyError('进入房间失败：' + e.message); });
+      }).catch(function (e) {
+        lobbyError('进入房间失败：' + ((e && e.message) || e));
+      });
     } else {
       showScreen('screen-lobby');
     }
@@ -417,9 +423,10 @@
   }
 
   function lobbyError(msg) {
+    showScreen('screen-lobby'); // 保证错误信息在可见的界面上
     var el = $('#lobby-error');
-    el.textContent = msg;
-    el.classList.remove('hidden');
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
   }
 
   // ---------- 启动 ----------
@@ -495,4 +502,9 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else boot();
+
+  // 任何未捕获的页面错误都以浮窗显示，方便非技术用户直接截图反馈
+  window.addEventListener('error', function (ev) {
+    toast('页面错误：' + ev.message, 5000);
+  });
 })();
