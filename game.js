@@ -156,6 +156,7 @@ window.Game = (function () {
     $('#dlg-next').addEventListener('click', function () { dlgNext(); });
     $('#tree-deco').addEventListener('click', function () { decorateTree(); });
     $('#tree-close').addEventListener('click', function () { closeAllPanels(); });
+    $('#outfit-close').addEventListener('click', function () { closeAllPanels(); });
     document.querySelectorAll('#outfit-list .outfit-btn').forEach(function (b) {
       b.addEventListener('click', function () {
         S.backend.setOutfit(b.dataset.outfit).then(function () {

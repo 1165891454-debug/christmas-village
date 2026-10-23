@@ -436,15 +436,6 @@
       try { history.replaceState(null, '', location.pathname); } catch (e) { }
       showScreen('screen-lobby');
     });
-    $('#btn-identity-reset').addEventListener('click', function () {
-      if (!backend) { localStorage.removeItem('omo_device_id'); localStorage.removeItem('omo_demo_room_v1'); }
-      else {
-        backend.resetIdentity().catch(function () { });
-        localStorage.removeItem('omo_demo_room_v1');
-      }
-      toast('已重置本机身份，即将重新进入');
-      setTimeout(function () { location.reload(); }, 800);
-    });
     window.addEventListener('offline', function () { setConn(false); });
     window.addEventListener('online', function () { toast('网络已恢复，正在重新同步…'); });
 
