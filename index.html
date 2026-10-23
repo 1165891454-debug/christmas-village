@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#b3282d" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <title>Omo's Christmas Village · 同步测试</title>
+  <title>Omo's Christmas Village</title>
   <link rel="stylesheet" href="style.css" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
@@ -19,7 +19,6 @@
 <body>
   <div id="snow" aria-hidden="true"></div>
 
-  <!-- 顶部状态栏 -->
   <header id="topbar">
     <div class="brand">🎄 Omo's Christmas Village</div>
     <div class="status-wrap">
@@ -30,13 +29,13 @@
   </header>
 
   <div id="offline-banner" class="hidden">⚠️ 网络连接已断开，恢复后将自动重新同步</div>
-  <div id="rotate-hint" class="rotate-hint">📱 建议横屏体验 · 竖屏也可正常使用</div>
+  <div id="rotate-hint" class="rotate-hint">📱 建议横屏体验 · 竖屏也可正常游玩</div>
 
   <main id="app">
     <!-- 场景：未配置 Firebase -->
     <section id="screen-config" class="screen hidden">
       <h1>需要先配置 Firebase ☁️</h1>
-      <p class="muted">本页是双人同步测试页，需要连接云端才能在两部手机间同步。</p>
+      <p class="muted">本页需要连接云端才能在两部手机间同步。</p>
       <ol class="setup-steps">
         <li>打开 <b>firebase-config.js</b>，按文件内注释填入你的 Firebase 配置</li>
         <li>在 Firebase 控制台开通 <b>Realtime Database</b>（建议新加坡区域）</li>
@@ -46,10 +45,10 @@
       <button id="btn-demo" class="btn primary">先本地演示预览界面（不连云端）</button>
     </section>
 
-    <!-- 场景：大厅（创建/加入房间） -->
+    <!-- 场景：大厅 -->
     <section id="screen-lobby" class="screen hidden">
-      <h1>圣诞小镇 · 双人同步测试</h1>
-      <p class="muted">一人创建房间，把邀请链接发给对方；两部手机将进入同一个房间，分别绑定玩家 A 和玩家 B。</p>
+      <h1>圣诞小镇 · 双人小游戏</h1>
+      <p class="muted">一人创建房间，把邀请链接发给对方；两部手机将进入同一个小镇，分别扮演 Charles 和 Julie。</p>
       <button id="btn-create" class="btn primary big">🏡 创建我们的房间</button>
       <div class="divider">— 或者 —</div>
       <div class="join-row">
@@ -59,48 +58,67 @@
       <p id="lobby-error" class="error hidden"></p>
     </section>
 
-    <!-- 场景：同步测试主界面 -->
+    <!-- 场景：小镇（游戏主界面） -->
     <section id="screen-game" class="screen hidden">
-      <div id="invite-row" class="invite-row">
-        <span>把邀请链接发给对方：</span>
-        <button id="btn-invite" class="btn small">📨 发送邀请 / 复制链接</button>
+      <canvas id="game-canvas"></canvas>
+
+      <!-- 顶部 HUD -->
+      <div id="hud-top">
+        <div class="hud-left">
+          <span id="hud-room" class="tag"></span>
+          <span id="partner-presence" class="presence"><i class="dot"></i><span>…</span></span>
+        </div>
+        <button id="btn-menu" class="hud-btn">☰</button>
       </div>
 
-      <div id="game-grid">
-        <!-- 左：圣诞树 -->
-        <div class="card tree-card">
-          <div class="card-title">共享圣诞树 <span id="tree-stage-label" class="tag"></span></div>
-          <div id="tree-holder"></div>
-          <div class="tree-actions">
-            <button id="btn-tree-next" class="btn primary">✨ 装饰圣诞树 → 下一阶段</button>
-            <button id="btn-tree-reset" class="btn small ghost">测试：重置为小树苗</button>
-          </div>
-        </div>
+      <!-- 交互按钮 -->
+      <button id="btn-interact" class="hidden">互动</button>
 
-        <!-- 右：角色与服装 -->
-        <div class="col">
-          <div class="card">
-            <div class="card-title">我的角色 <span id="my-slot-tag" class="tag me"></span></div>
-            <div id="my-avatar" class="avatar"></div>
-            <div class="outfits" id="outfit-picker"></div>
-          </div>
-          <div class="card">
-            <div class="card-title">对方角色 <span id="partner-presence" class="presence"><i class="dot"></i><span>离线</span></span></div>
-            <div id="partner-avatar" class="avatar"></div>
-            <div id="partner-outfit" class="muted center">等待对方加入…</div>
-          </div>
+      <!-- 虚拟摇杆 -->
+      <div id="joy-base"><div id="joy-knob"></div></div>
+
+      <!-- 对话框 -->
+      <div id="dlg" class="panel hidden">
+        <div id="dlg-name" class="panel-name"></div>
+        <div id="dlg-text"></div>
+        <div class="panel-actions">
+          <button id="dlg-next" class="btn primary">继续 ▸</button>
+          <button id="dlg-close" class="btn ghost small">关闭</button>
         </div>
       </div>
 
-      <div class="card log-card">
-        <div class="card-title">同步日志（验证对方操作是否实时到达）</div>
-        <ul id="log-list"></ul>
+      <!-- 圣诞树面板 -->
+      <div id="tree-panel" class="panel hidden">
+        <div class="panel-name">🎄 广场圣诞树</div>
+        <div id="tree-stage-text" class="panel-sub"></div>
+        <div id="tree-desc"></div>
+        <div class="panel-actions">
+          <button id="tree-deco" class="btn primary">✨ 装饰圣诞树</button>
+          <button id="tree-close" class="btn ghost small">关闭</button>
+        </div>
       </div>
 
-      <details class="danger-zone">
-        <summary>测试工具（重置本机身份）</summary>
-        <button id="btn-identity-reset" class="btn small ghost">清除本机绑定并重新进入（用于测试玩家绑定）</button>
-      </details>
+      <!-- 换装面板 -->
+      <div id="outfit-modal" class="panel hidden">
+        <div class="panel-name">👗 圣诞小铺 · 换装</div>
+        <p class="muted">选一套吧，对方会实时看到你的新造型。</p>
+        <div class="outfits" id="outfit-list">
+          <button class="outfit-btn" data-outfit="winter">🧣 冬日暖装</button>
+          <button class="outfit-btn" data-outfit="santa">🎅 圣诞装</button>
+          <button class="outfit-btn" data-outfit="home">🌙 居家睡衣</button>
+        </div>
+        <div class="panel-actions"><button id="outfit-close" class="btn ghost small">关闭</button></div>
+      </div>
+
+      <!-- 菜单 -->
+      <div id="menu-panel" class="panel hidden">
+        <div class="panel-name">☰ 菜单</div>
+        <button id="menu-outfit" class="menu-item">👗 换装</button>
+        <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
+        <button id="menu-invite" class="menu-item">📨 邀请对方</button>
+        <button id="menu-leave" class="menu-item danger">🚪 返回大厅</button>
+        <div class="panel-actions"><button id="menu-close" class="btn ghost small">关闭</button></div>
+      </div>
     </section>
 
     <!-- 房间已满 -->
@@ -119,6 +137,9 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="firebase-config.js"></script>
+  <script src="sprites.js"></script>
+  <script src="world.js"></script>
+  <script src="game.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

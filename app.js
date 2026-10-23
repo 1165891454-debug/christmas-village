@@ -186,6 +186,15 @@
         return roomRef.child('slots/' + mySlot + '/outfit').set(key)
           .then(function () { pushLog('换上了「' + OUTFITS[key] + '」'); });
       },
+      setPos: function (x, y, dir, moving) {
+        return roomRef.child('slots/' + mySlot + '/pos').set({
+          x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0,
+          t: firebase.database.ServerValue.TIMESTAMP
+        });
+      },
+      setWave: function () {
+        return roomRef.child('slots/' + mySlot + '/wave').set(firebase.database.ServerValue.TIMESTAMP);
+      },
       mySlot: function () { return mySlot; },
       resetIdentity: function () { return auth.signOut(); },
       onState: function (cb) { onState = cb; },
@@ -249,6 +258,16 @@
         data.log['l' + Date.now()] = { slot: mySlot, what: '换上了「' + OUTFITS[k] + '」', at: Date.now() };
         save(); return Promise.resolve();
       },
+      setPos: function (x, y, dir, moving) {
+        if (!data.slots[mySlot]) data.slots[mySlot] = {};
+        data.slots[mySlot].pos = { x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0, t: Date.now() };
+        save(); return Promise.resolve();
+      },
+      setWave: function () {
+        if (!data.slots[mySlot]) data.slots[mySlot] = {};
+        data.slots[mySlot].wave = Date.now();
+        save(); return Promise.resolve();
+      },
       mySlot: function () { return mySlot; },
       resetIdentity: function () { localStorage.removeItem('omo_device_id'); localStorage.removeItem('omo_demo_room_v1'); return Promise.resolve(); },
       onState: function (cb) { listeners.push(cb); },
@@ -265,104 +284,11 @@
   var lastData = null;
   var pendingRoom = null; // 当前尝试进入的房间码（供"接管角色"使用）
 
-  function avatarSVG(outfit, isMe) {
-    var outfits = {
-      winter: { hat: '#c0392b', body: '#3b6ea5', scarf: '#e8d9b5' },
-      santa: { hat: '#d63b2f', body: '#c0392b', scarf: '#ffffff' },
-      home: { hat: null, body: '#b784a9', scarf: null }
-    };
-    var o = outfits[outfit] || outfits.winter;
-    var hair = isMe ? '#2b2119' : '#5a3b23'; // 深棕 / 栗色，便于区分两位角色
-    var hat = o.hat
-      ? '<path d="M18 18 Q32 2 46 18 L46 22 L18 22 Z" fill="' + o.hat + '"/><circle cx="32" cy="4" r="4" fill="#fff"/>'
-      : '<path d="M20 20 Q32 6 44 20 L44 26 L20 26 Z" fill="' + hair + '"/>';
-    return '<svg viewBox="0 0 64 84" xmlns="http://www.w3.org/2000/svg">' +
-      '<rect x="20" y="40" width="24" height="30" rx="9" fill="' + o.body + '"/>' +
-      (o.scarf ? '<rect x="21" y="38" width="22" height="6" rx="3" fill="' + o.scarf + '"/><rect x="36" y="42" width="6" height="14" rx="3" fill="' + o.scarf + '"/>' : '') +
-      '<circle cx="32" cy="27" r="14" fill="#f2c9a5"/>' +
-      hat +
-      '<circle cx="27" cy="28" r="1.8" fill="#3a2c22"/><circle cx="37" cy="28" r="1.8" fill="#3a2c22"/>' +
-      '<circle cx="24" cy="32" r="2.2" fill="#f0a8a0" opacity=".7"/><circle cx="40" cy="32" r="2.2" fill="#f0a8a0" opacity=".7"/>' +
-      '<rect x="23" y="68" width="7" height="10" rx="3" fill="#2c2c34"/><rect x="34" y="68" width="7" height="10" rx="3" fill="#2c2c34"/>' +
-      '</svg>';
-  }
-
-  function treeSVG() {
-    return '<svg id="tree-svg" data-stage="0" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
-      '<defs>' +
-      '<radialGradient id="glowGrad"><stop offset="0%" stop-color="#ffd77a" stop-opacity=".55"/><stop offset="100%" stop-color="#ffd77a" stop-opacity="0"/></radialGradient>' +
-      '</defs>' +
-      '<g class="g-glow"><circle cx="100" cy="105" r="86" fill="url(#glowGrad)"/></g>' +
-      '<circle cx="30" cy="30" r="3" fill="#fff" opacity=".5"/><circle cx="170" cy="55" r="2.4" fill="#fff" opacity=".45"/>' +
-      '<circle cx="150" cy="18" r="2" fill="#fff" opacity=".5"/><circle cx="55" cy="70" r="2.2" fill="#fff" opacity=".4"/>' +
-      '<polygon points="100,38 64,100 136,100" fill="#2f7a4d"/>' +
-      '<polygon points="100,66 52,146 148,146" fill="#3c8f5c"/>' +
-      '<rect x="90" y="146" width="20" height="22" rx="4" fill="#7a4a2b"/>' +
-      '<g class="g-decor">' +
-      '<circle cx="88" cy="88" r="5" fill="#e0563f"/><circle cx="112" cy="94" r="5" fill="#f0a83c"/>' +
-      '<circle cx="76" cy="122" r="5" fill="#f0a83c"/><circle cx="100" cy="128" r="5" fill="#e0563f"/><circle cx="124" cy="120" r="5" fill="#4f86d6"/>' +
-      '</g>' +
-      '<g class="g-lights">' +
-      '<circle cx="96" cy="74" r="3.4" fill="#ffe08a"/><circle cx="118" cy="108" r="3.4" fill="#8ad2ff"/>' +
-      '<circle cx="84" cy="106" r="3.4" fill="#ff9d9d"/><circle cx="66" cy="136" r="3.4" fill="#ffe08a"/>' +
-      '<circle cx="110" cy="136" r="3.4" fill="#b6ff9d"/><circle cx="134" cy="140" r="3.4" fill="#ffe08a"/>' +
-      '</g>' +
-      '<g class="g-star"><polygon points="100,18 104,30 117,30 107,38 111,50 100,43 89,50 93,38 83,30 96,30" fill="#ffd75e" stroke="#f0a83c" stroke-width="1.5"/></g>' +
-      '<ellipse cx="100" cy="172" rx="70" ry="8" fill="#e8f0fa" opacity=".9"/>' +
-      '</svg>';
-  }
-
-  // ---------- 渲染 ----------
+  // ---------- 渲染：把房间状态喂给游戏层 ----------
   function render(d) {
     lastData = d;
     if (!d) return;
-
-    // 圣诞树
-    var stage = (d.tree && typeof d.tree.stage === 'number') ? d.tree.stage : 0;
-    var svg = $('#tree-svg');
-    if (svg) svg.setAttribute('data-stage', String(stage));
-    $('#tree-stage-label').textContent = STAGES[stage];
-    $('#btn-tree-next').disabled = stage >= 3;
-
-    // 我的角色
-    var mySlot = backend.mySlot();
-    if (mySlot) {
-      $('#my-slot-tag').textContent = SLOTS[mySlot];
-      var me = d.slots && d.slots[mySlot];
-      var myOutfit = (me && me.outfit) || 'winter';
-      $('#my-avatar').innerHTML = avatarSVG(myOutfit, mySlot === 'a');
-      document.querySelectorAll('.outfit-btn').forEach(function (b) {
-        b.classList.toggle('active', b.dataset.outfit === myOutfit);
-      });
-    }
-
-    // 对方角色
-    var other = mySlot === 'a' ? 'b' : 'a';
-    var po = d.slots && d.slots[other];
-    var pEl = $('#partner-outfit');
-    if (po) {
-      $('#partner-avatar').innerHTML = avatarSVG(po.outfit, other === 'a');
-      pEl.textContent = '当前服装：' + (OUTFITS[po.outfit] || '冬日暖装');
-    } else {
-      $('#partner-avatar').innerHTML = '<div class="muted" style="padding:26px 0">﹖</div>';
-      pEl.textContent = '等待对方加入…';
-    }
-    var online = !!(d.presence && d.presence[other]);
-    var pres = $('#partner-presence');
-    pres.querySelector('.dot').className = 'dot ' + (online ? 'on' : 'off');
-    pres.querySelector('span').textContent = online ? '在线' : '离线';
-
-    // 日志
-    var logEl = $('#log-list');
-    var entries = [];
-    if (d.log) {
-      Object.keys(d.log).forEach(function (k) { entries.push(d.log[k]); });
-      entries.sort(function (x, y) { return (y.at || 0) - (x.at || 0); });
-    }
-    logEl.innerHTML = entries.slice(0, 6).map(function (e) {
-      return '<li><b>' + (SLOTS[e.slot] || '?') + '</b> ' + e.what +
-        ' <span style="opacity:.6">' + fmtTime(e.at || Date.now()) + '</span></li>';
-    }).join('') || '<li>还没有操作记录，试着装饰圣诞树吧 🎄</li>';
+    if (window.Game && Game.active()) Game.onData(d);
   }
 
   function setConn(on) {
@@ -377,44 +303,39 @@
     ['screen-config', 'screen-lobby', 'screen-game', 'screen-full'].forEach(function (s) {
       $('#' + s).classList.toggle('hidden', s !== id);
     });
+    document.body.classList.toggle('playing', id === 'screen-game');
   }
 
   function enterGame(code) {
-    $('#room-code').textContent = backend.mode === 'demo' ? '演示模式' : ('房间 ' + code);
+    var roomLabel = backend.mode === 'demo' ? '演示模式' : ('房间 ' + code);
+    $('#room-code').textContent = roomLabel;
+    var hud = $('#hud-room');
+    if (hud) hud.textContent = roomLabel;
     showScreen('screen-game');
 
-    if (!$('#tree-holder').hasChildNodes()) {
-      $('#tree-holder').innerHTML = treeSVG();
-      var picker = $('#outfit-picker');
-      picker.innerHTML = '';
-      Object.keys(OUTFITS).forEach(function (k) {
-        var b = document.createElement('button');
-        b.className = 'outfit-btn';
-        b.dataset.outfit = k;
-        b.textContent = OUTFITS[k];
-        b.addEventListener('click', function () {
-          backend.setOutfit(k).catch(function (e) { toast('保存失败：' + e.message); });
-        });
-        picker.appendChild(b);
-      });
-    }
-    if (lastData) render(lastData); // 修正：先渲染过再插入 SVG 的情况
-
-    var url = backend.mode === 'demo' ? null : inviteUrl(code);
-    var shareText = '🎄 来我们的小镇吧！房间码：' + code;
     function copyInvite() {
-      var target = url || location.href;
+      var target = inviteUrl(code);
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(target).then(function () { toast('链接已复制，去发给对方吧 🎁'); },
           function () { window.prompt('长按复制这条邀请链接：', target); });
       } else window.prompt('长按复制这条邀请链接：', target);
     }
-    $('#btn-invite').onclick = function () {
+    function invite() {
+      var url = backend.mode === 'demo' ? null : inviteUrl(code);
+      var shareText = '🎄 来我们的小镇吧！房间码：' + code;
       if (navigator.share && url) {
         navigator.share({ title: "Omo's Christmas Village", text: shareText, url: url })
           .catch(function () { copyInvite(); });
       } else copyInvite();
-    };
+    }
+
+    Game.enter(code, backend, {
+      invite: invite,
+      onLeave: function () {
+        try { history.replaceState(null, '', location.pathname); } catch (e) { }
+        location.reload(); // 干净地回到大厅（清除所有监听与游戏状态）
+      }
+    });
   }
 
   function afterJoined(code) {
@@ -515,11 +436,6 @@
       try { history.replaceState(null, '', location.pathname); } catch (e) { }
       showScreen('screen-lobby');
     });
-    $('#btn-tree-next').addEventListener('click', function () {
-      var stage = parseInt($('#tree-svg').getAttribute('data-stage'), 10) || 0;
-      if (stage < 3) backend.setTreeStage(stage + 1).catch(function (e) { toast('保存失败：' + e.message); });
-    });
-    $('#btn-tree-reset').addEventListener('click', function () { backend.setTreeStage(0); });
     $('#btn-identity-reset').addEventListener('click', function () {
       if (!backend) { localStorage.removeItem('omo_device_id'); localStorage.removeItem('omo_demo_room_v1'); }
       else {
