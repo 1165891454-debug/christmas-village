@@ -73,6 +73,17 @@
     var mySlot = null;
     var onState = null, onConn = null, onFull = null;
 
+    // 全局连接监听：进入大厅时就能显示真实连接状态；断线重连后自动重新登记在线状态
+    db.ref('.info/connected').on('value', function (snap) {
+      var on = !!snap.val();
+      onConn && onConn(on);
+      if (on && mySlot && roomRef) {
+        var p = roomRef.child('presence/' + mySlot);
+        p.onDisconnect().remove();
+        p.set(true);
+      }
+    });
+
     // 匿名登录：无需注册，设备获得一个固定 UID（同一浏览器保持不变）。
     // 安全规则用它做访问控制：只有已登录 UID 且绑定了槽位的客户端才能写数据。
     function ensureAuth() {
@@ -86,14 +97,6 @@
     }
 
     function bindRoomListeners() {
-      db.ref('.info/connected').on('value', function (snap) {
-        onConn && onConn(!!snap.val());
-        if (snap.val() && mySlot) {
-          var p = roomRef.child('presence/' + mySlot);
-          p.onDisconnect().remove();
-          p.set(true);
-        }
-      });
       roomRef.on('value', function (snap) {
         onState && onState(snap.val());
       }, function (err) {
