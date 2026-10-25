@@ -134,14 +134,19 @@ body.playing #screen-game { border-radius: 0; }
 /* ---------- 交互按钮 ---------- */
 #btn-interact {
   position: absolute; right: 18px; bottom: calc(96px + var(--safe-b));
-  z-index: 10; border: none; cursor: pointer;
-  background: var(--accent); color: #fff;
-  font-size: 16px; font-weight: 700;
-  padding: 16px 22px; border-radius: 18px;
-  box-shadow: 0 6px 18px rgba(0,0,0,.35);
-  max-width: 60vw;
+  z-index: 10; border: 2px solid rgba(255,224,138,.85); cursor: pointer;
+  background: linear-gradient(180deg, #d64545 0%, #b3282d 100%); color: #ffe9a8;
+  font-size: 14px; font-weight: 700;
+  padding: 14px 20px; border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 18px rgba(255,120,90,.35);
+  max-width: 62vw;
+  animation: interact-pulse 1.6s ease-in-out infinite;
 }
-#btn-interact:active { transform: scale(.95); }
+#btn-interact:active { transform: scale(.94); }
+@keyframes interact-pulse {
+  0%, 100% { box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 12px rgba(255,120,90,.3); }
+  50% { box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 24px rgba(255,150,100,.55); }
+}
 
 /* ---------- 虚拟摇杆 ---------- */
 #joy-base {

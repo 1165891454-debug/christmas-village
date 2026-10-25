@@ -12,7 +12,15 @@ window.Game = (function () {
     cam: { x: 0, y: 0 },
     keys: {}, joy: { active: false, id: null, bx: 0, by: 0, dx: 0, dy: 0 },
     lastSent: 0, lastSentDir: -1, flakes: [], data: null, otherSlot: null,
-    npcIdx: {}, paused: false, curInteract: null
+    npcIdx: {}, paused: false, curInteract: null,
+    // Stage 3 新增
+    parts: [],              // 粒子（爱心/星星）
+    indoor: false,          // 是否在室内
+    outdoorPos: null,       // 进屋前的位置
+    remoteIndoor: 0,        // 对方所在场景（0室外 1室内）
+    prevPresence: null,     // 上一次对方在线状态（用于进出提示）
+    prevStage: 0,           // 上一次圣诞树阶段（用于点灯庆祝）
+    heartT: 0               // 爱心生成的节流计时
   };
 
   var SPEED = 150; // px/s
@@ -49,6 +57,10 @@ window.Game = (function () {
     S.remote.x = S.otherSlot === 'a' ? 640 : 860;
     S.remote.y = 720; S.remote.tx = S.remote.x; S.remote.ty = S.remote.y;
 
+    // Stage 3 状态复位
+    S.parts = []; S.indoor = false; S.outdoorPos = null; S.remoteIndoor = 0;
+    S.prevPresence = null; S.prevStage = 0; S.heartT = 0;
+
     // 雪花
     S.flakes = [];
     for (var i = 0; i < 55; i++) {
@@ -79,11 +91,33 @@ window.Game = (function () {
     if (!S.active || !d) return;
     var o = d.slots && d.slots[S.otherSlot];
     if (o) {
-      if (o.pos && typeof o.pos.x === 'number') { S.remote.tx = o.pos.x; S.remote.ty = o.pos.y; S.remote.dir = o.pos.dir || 0; S.remote.moving = !!o.pos.moving; S.remote.seen = true; }
+      if (o.pos && typeof o.pos.x === 'number') {
+        S.remote.tx = o.pos.x; S.remote.ty = o.pos.y; S.remote.dir = o.pos.dir || 0;
+        S.remote.moving = !!o.pos.moving; S.remote.seen = true;
+        S.remoteIndoor = o.pos.indoor || 0;
+      }
       if (o.wave && o.wave !== S._lastWave) { S._lastWave = o.wave; S.remote.waveUntil = performance.now() + 1500; }
     }
-    // 对方在线状态 HUD
+    // 对方进入 / 离开小镇的轻提示
     var online = !!(d.presence && d.presence[S.otherSlot]);
+    if (S.prevPresence !== null && online !== S.prevPresence) {
+      toast(online ? ('💚 ' + NAME[S.otherSlot] + ' 来到了小镇') : ('😮 ' + NAME[S.otherSlot] + ' 暂时离开了…'));
+      if (online && !S.indoor && S.remoteIndoor === 0) {
+        S.remote.seen = true;
+        burst(S.remote.tx, S.remote.ty - 40, 'heart', 4);
+      }
+    }
+    S.prevPresence = online;
+    // 圣诞树阶段变化 → 点灯庆祝
+    var stage = (d.tree && typeof d.tree.stage === 'number') ? d.tree.stage : 0;
+    if (S.prevStage !== stage && S.prevStage !== null) {
+      if (stage === 3 && S.prevStage === 2) {
+        toast('✨ 小镇的灯，为你们全部点亮了');
+        burst(World.tree.x, World.tree.y - 120, 'spark', 26);
+      }
+    }
+    S.prevStage = stage;
+    // 对方在线状态 HUD
     var p = $('#partner-presence');
     if (p) {
       p.querySelector('.dot').className = 'dot ' + (online ? 'on' : 'off');
@@ -172,8 +206,9 @@ window.Game = (function () {
   function hits(x, y) {
     // 脚底碰撞盒 24 x 14
     var bx = x - 12, by = y - 12, bw = 24, bh = 14;
-    for (var i = 0; i < World.obstacles.length; i++) {
-      var o = World.obstacles[i];
+    var list = S.indoor ? World.Interior.obstacles : World.obstacles;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
       if (bx < o.x + o.w && bx + bw > o.x && by < o.y + o.h && by + bh > o.y) return true;
     }
     return false;
@@ -206,8 +241,13 @@ window.Game = (function () {
       var ny = S.self.y + dy * SPEED * dt;
       if (!hits(nx, S.self.y)) S.self.x = nx;
       if (!hits(S.self.x, ny)) S.self.y = ny;
-      S.self.x = Math.max(30, Math.min(World.width - 30, S.self.x));
-      S.self.y = Math.max(70, Math.min(World.height - 24, S.self.y));
+      // 场地边界
+      var iw = S.indoor ? World.Interior.w : World.width;
+      var ih = S.indoor ? World.Interior.h : World.height;
+      S.self.x = Math.max(30, Math.min(iw - 30, S.self.x));
+      S.self.y = S.indoor
+        ? Math.max(150, Math.min(ih - 24, S.self.y))
+        : Math.max(70, Math.min(ih - 24, S.self.y));
       // 方向
       if (Math.abs(dx) > Math.abs(dy)) S.self.dir = dx < 0 ? 2 : 3;
       else S.self.dir = dy < 0 ? 1 : 0;
@@ -219,29 +259,100 @@ window.Game = (function () {
     }
     S.self.moving = moving;
 
-    // 位置同步（节流 150ms；方向变化立即发）
+    // 位置同步（节流 150ms；方向变化立即发；带室内标记）
     if (S.backend.mode !== 'demo') {
       var now = ts;
       var dirChanged = S.self.dir !== S.lastSentDir;
       if ((moving || dirChanged) && now - S.lastSent > 150) {
         S.lastSent = now; S.lastSentDir = S.self.dir;
-        S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, moving)
+        S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, moving, S.indoor ? 1 : 0)
           .catch(function () { });
       }
     }
 
-    // 远端插值
-    S.remote.x += (S.remote.tx - S.remote.x) * Math.min(1, dt * 8);
-    S.remote.y += (S.remote.ty - S.remote.y) * Math.min(1, dt * 8);
+    // 远端插值（只在同一场景时显示）
+    if (S.remoteIndoor === (S.indoor ? 1 : 0)) {
+      S.remote.x += (S.remote.tx - S.remote.x) * Math.min(1, dt * 8);
+      S.remote.y += (S.remote.ty - S.remote.y) * Math.min(1, dt * 8);
+    }
+
+    // 双人靠近时冒爱心（同一场景、距离 <140）
+    if (S.remote.seen && S.remoteIndoor === (S.indoor ? 1 : 0)) {
+      var pd = Math.sqrt(Math.pow(S.self.x - S.remote.x, 2) + Math.pow(S.self.y - S.remote.y, 2));
+      if (pd < 140 && ts - S.heartT > 1400) {
+        S.heartT = ts;
+        var mx = (S.self.x + S.remote.x) / 2, my = (S.self.y + S.remote.y) / 2;
+        burst(mx, my - 46, 'heart', 1);
+      }
+      // 两人一起站在圣诞树旁 → 树顶冒星星
+      if (!S.indoor) {
+        var dTreeSelf = Math.sqrt(Math.pow(S.self.x - World.tree.x, 2) + Math.pow(S.self.y - World.tree.y, 2));
+        var dTreeOther = Math.sqrt(Math.pow(S.remote.x - World.tree.x, 2) + Math.pow(S.remote.y - World.tree.y, 2));
+        if (dTreeSelf < 170 && dTreeOther < 170 && ts - S.heartT > 1000) {
+          S.heartT = ts;
+          burst(World.tree.x + (Math.random() - 0.5) * 90, World.tree.y - 140 - Math.random() * 60, 'spark', 2);
+        }
+      }
+    }
+
+    // 粒子更新
+    for (var pi = S.parts.length - 1; pi >= 0; pi--) {
+      var pt = S.parts[pi];
+      pt.life -= dt;
+      pt.y -= (pt.kind === 'heart' ? 26 : 12) * dt;
+      pt.x += Math.sin(pt.life * 5 + pt.ph) * 10 * dt;
+      if (pt.life <= 0) S.parts.splice(pi, 1);
+    }
 
     // 交互点检测
     S.curInteract = findInteract();
 
     // 相机
+    var iw2 = S.indoor ? World.Interior.w : World.width;
+    var ih2 = S.indoor ? World.Interior.h : World.height;
     var targetCx = S.self.x - S.view.w / 2;
     var targetCy = S.self.y - S.view.h / 2;
-    S.cam.x = World.width <= S.view.w ? (World.width - S.view.w) / 2 : Math.max(0, Math.min(World.width - S.view.w, targetCx));
-    S.cam.y = World.height <= S.view.h ? (World.height - S.view.h) / 2 : Math.max(0, Math.min(World.height - S.view.h, targetCy));
+    S.cam.x = iw2 <= S.view.w ? (iw2 - S.view.w) / 2 : Math.max(0, Math.min(iw2 - S.view.w, targetCx));
+    S.cam.y = ih2 <= S.view.h ? (ih2 - S.view.h) / 2 : Math.max(0, Math.min(ih2 - S.view.h, targetCy));
+  }
+
+  // ---------- 粒子 ----------
+  function burst(x, y, kind, n) {
+    for (var i = 0; i < n; i++) {
+      S.parts.push({
+        x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 16,
+        kind: kind, life: 1.1 + Math.random() * 0.5, max: 1.6,
+        ph: Math.random() * 7
+      });
+    }
+  }
+
+  function drawParticles(ctx) {
+    S.parts.forEach(function (pt) {
+      var a = Math.max(0, Math.min(1, pt.life / 0.9));
+      ctx.globalAlpha = a;
+      if (pt.kind === 'heart') {
+        var s = 6;
+        ctx.fillStyle = '#f26d7d';
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y + s * 0.35);
+        ctx.bezierCurveTo(pt.x - s, pt.y - s * 0.45, pt.x - s * 0.42, pt.y - s * 1.1, pt.x, pt.y - s * 0.4);
+        ctx.bezierCurveTo(pt.x + s * 0.42, pt.y - s * 1.1, pt.x + s, pt.y - s * 0.45, pt.x, pt.y + s * 0.35);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,.55)';
+        ctx.beginPath(); ctx.arc(pt.x - s * 0.28, pt.y - s * 0.32, s * 0.18, 0, 7); ctx.fill();
+      } else { // spark 四角星
+        var r1 = 4.5 + Math.sin(pt.life * 8 + pt.ph) * 1.4;
+        ctx.fillStyle = '#ffe9a8';
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y - r1); ctx.lineTo(pt.x + r1 * 0.32, pt.y - r1 * 0.32);
+        ctx.lineTo(pt.x + r1, pt.y); ctx.lineTo(pt.x + r1 * 0.32, pt.y + r1 * 0.32);
+        ctx.lineTo(pt.x, pt.y + r1); ctx.lineTo(pt.x - r1 * 0.32, pt.y + r1 * 0.32);
+        ctx.lineTo(pt.x - r1, pt.y); ctx.lineTo(pt.x - r1 * 0.32, pt.y - r1 * 0.32);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    });
   }
 
   /* ---------- 交互 ---------- */
@@ -249,13 +360,22 @@ window.Game = (function () {
     var best = null, bd = 1e9;
     function consider(type, x, y, r, label, ref) {
       var d = Math.sqrt(Math.pow(S.self.x - x, 2) + Math.pow(S.self.y - y, 2));
-      if (d < r && d < bd) { bd = d; best = { type: type, label: label, ref: ref }; }
+      if (d < r && d < bd) { bd = d; best = { type: type, label: label, ref: ref, x: x, y: y }; }
+    }
+    if (S.indoor) {
+      World.Interior.interactables.forEach(function (it) {
+        consider('roomItem', it.x, it.y, it.r, it.name, it);
+      });
+      consider('exit', World.Interior.exit.x, World.Interior.exit.y, 70, '🚪 回到小镇', World.Interior.exit);
+      return best;
     }
     World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, '💬 和 ' + n.name + ' 交谈', n); });
     World.doors.forEach(function (dr) { consider('door', dr.x, dr.y, 78, '🚪 进入 ' + dr.name, dr); });
     consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
+    // 旅行彩蛋
+    World.eggs.forEach(function (e) { consider('egg', e.x, e.y, 46, '✨ 拾起闪光的小东西', e); });
     // 对方玩家 → 打招呼
-    if (S.remote.seen) {
+    if (S.remote.seen && S.remoteIndoor === 0) {
       var o = S.data && S.data.slots && S.data.slots[S.otherSlot];
       if (o) consider('partner', S.remote.x, S.remote.y, 90, '👋 和 ' + NAME[S.otherSlot] + ' 打招呼', o);
     }
@@ -266,19 +386,53 @@ window.Game = (function () {
     if (!S.curInteract) return;
     var it = S.curInteract;
     if (it.type === 'npc') {
+      var stage = treeStage();
+      var lines = (stage >= 2 && it.ref.lateLines) ? it.ref.lateLines : it.ref.lines;
       var idx = (S.npcIdx[it.ref.id] || 0);
-      openDialog(it.ref.name, it.ref.lines[idx % it.ref.lines.length]);
+      openDialog(it.ref.name, lines[idx % lines.length]);
       S.npcIdx[it.ref.id] = idx + 1;
     } else if (it.type === 'door') {
       var b = World.buildings.filter(function (x) { return x.id === it.ref.id; })[0];
       if (b.kind === 'shop') openOutfit();
+      else if (b.kind === 'cabin') enterIndoor();
       else openDialog(b.name, b.hint);
     } else if (it.type === 'tree') {
       openTreePanel();
+    } else if (it.type === 'egg') {
+      burst(S.self.x, S.self.y - 50, 'spark', 6);
+      openDialog(it.ref.name, it.ref.line);
     } else if (it.type === 'partner') {
       S.self.waveUntil = performance.now() + 1600;
       S.backend.setWave().catch(function () { });
+      burst((S.self.x + S.remote.x) / 2, (S.self.y + S.remote.y) / 2 - 50, 'heart', 2);
       toast('你朝 ' + NAME[S.otherSlot] + ' 挥了挥手 👋');
+    } else if (it.type === 'roomItem') {
+      openDialog(it.ref.name, it.ref.lines);
+    } else if (it.type === 'exit') {
+      leaveIndoor();
+    }
+  }
+
+  /* ---------- 室内 / 室外切换 ---------- */
+  function enterIndoor() {
+    S.indoor = true;
+    S.outdoorPos = { x: S.self.x, y: S.self.y };
+    S.self.x = World.Interior.spawn.x;
+    S.self.y = World.Interior.spawn.y;
+    S.remote.seen = S.remoteIndoor === 1; // 对方不在同一场景就先不显示
+    toast('🏠 你们回到了自己的圣诞小屋');
+    if (S.backend.mode !== 'demo') {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 1).catch(function () { });
+    }
+  }
+  function leaveIndoor() {
+    S.indoor = false;
+    if (S.outdoorPos) { S.self.x = S.outdoorPos.x; S.self.y = S.outdoorPos.y; }
+    else { S.self.x = 400; S.self.y = 420; }
+    S.remote.seen = !!(S.data && S.data.slots && S.data.slots[S.otherSlot]) && S.remoteIndoor === 0;
+    toast('⛄ 回到了雪夜的小镇');
+    if (S.backend.mode !== 'demo') {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
     }
   }
 
@@ -347,75 +501,130 @@ window.Game = (function () {
     ctx.save();
     ctx.translate(-Math.round(S.cam.x), -Math.round(S.cam.y));
 
-    // 环境
-    World.drawGround(ctx, { x: S.cam.x, y: S.cam.y, w: S.view.w, h: S.view.h });
-    World.drawIceRink(ctx);
-    World.drawPond(ctx);
-    World.drawSnowPiles(ctx);
-    World.drawFence(ctx);
-    World.drawBorderTrees(ctx, ts);
-
-    // 按纵深排序绘制：建筑 / 圣诞树 / 长椅 / 路灯 / NPC / 玩家
-    var drawables = [];
-    World.buildings.forEach(function (b) { drawables.push({ y: b.y + b.h, fn: function () { World.drawBuilding(ctx, b, ts); } }); });
-    drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
-    World.benches.forEach(function (b) { drawables.push({ y: b.y, fn: function () { World.drawBench(ctx, b); } }); });
-    World.lamps.forEach(function (l) { drawables.push({ y: l.y, fn: function () { World.drawLamp(ctx, l, ts); } }); });
-
     var myOutfit = getOutfit(S.mySlot, 'winter');
     var theirOutfit = getOutfit(S.otherSlot, 'winter');
+    var showRemote = S.remote.seen && S.remoteIndoor === (S.indoor ? 1 : 0);
 
-    drawables.push({ y: S.remote.y, fn: function () {
-      if (!S.remote.seen) return;
-      var waving = ts < S.remote.waveUntil;
-      Sprites.drawCharacter(ctx, S.remote.x, S.remote.y, S.remote.dir, S.remote.moving ? Math.floor(ts / 140) % 4 : 0,
-        Object.assign({}, CHAROPT[S.otherSlot], { outfit: theirOutfit }), waving);
-      nameTag(ctx, S.remote.x, S.remote.y - 78, NAME[S.otherSlot], false);
-    } });
-    drawables.push({ y: S.self.y, fn: function () {
-      var waving = ts < S.self.waveUntil;
-      Sprites.drawCharacter(ctx, S.self.x, S.self.y, S.self.dir, S.self.frame,
-        Object.assign({}, CHAROPT[S.mySlot], { outfit: myOutfit }), waving);
-      nameTag(ctx, S.self.x, S.self.y - 78, NAME[S.mySlot] + '（你）', true);
-    } });
+    var drawables = [];
 
-    World.npcs.forEach(function (n) {
-      drawables.push({ y: n.y, fn: function () {
-        if (n.id === 'santa') Sprites.drawSanta(ctx, n.x, n.y, ts);
-        else if (n.id === 'snowman') Sprites.drawSnowman(ctx, n.x, n.y, ts);
-        else if (n.id === 'elf') Sprites.drawElf(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
-        else Sprites.drawBarista(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
-        nameTag(ctx, n.x, n.y - 66, n.name, false, '#ffe08a');
-      } });
-    });
-
-    drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
-
-    // 雪花（覆盖在场景上）
-    ctx.fillStyle = 'rgba(255,255,255,.85)';
-    S.flakes.forEach(function (f) {
-      f.y += f.v * 0.016; f.x += Math.sin(ts / 900 + f.ph) * 0.4;
-      if (f.y > World.height) { f.y = -6; f.x = Math.random() * World.width; }
-      if (f.x > S.cam.x - 10 && f.x < S.cam.x + S.view.w + 10 && f.y > S.cam.y - 10 && f.y < S.cam.y + S.view.h + 10) {
-        ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 7); ctx.fill();
+    if (S.indoor) {
+      // ---------- 室内：我们的圣诞小屋 ----------
+      World.Interior.draw(ctx, ts);
+      if (showRemote) {
+        drawables.push({ y: S.remote.y, fn: function () {
+          var waving = ts < S.remote.waveUntil;
+          Sprites.drawCharacter(ctx, S.remote.x, S.remote.y, S.remote.dir, S.remote.moving ? Math.floor(ts / 140) % 4 : 0,
+            Object.assign({}, CHAROPT[S.otherSlot], { outfit: theirOutfit }), waving, ts);
+          nameTag(ctx, S.remote.x, S.remote.y - 82, NAME[S.otherSlot], false);
+        } });
       }
-    });
+      drawables.push({ y: S.self.y, fn: function () {
+        var waving = ts < S.self.waveUntil;
+        Sprites.drawCharacter(ctx, S.self.x, S.self.y, S.self.dir, S.self.frame,
+          Object.assign({}, CHAROPT[S.mySlot], { outfit: myOutfit }), waving, ts);
+        nameTag(ctx, S.self.x, S.self.y - 82, NAME[S.mySlot] + '（你）', true);
+      } });
+      drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
+      // 室内暖色氛围
+      ctx.fillStyle = 'rgba(255,150,60,.045)';
+      ctx.fillRect(0, 0, World.Interior.w, World.Interior.h);
+    } else {
+      // ---------- 室外：雪夜小镇 ----------
+      World.drawGround(ctx, { x: S.cam.x, y: S.cam.y, w: S.view.w, h: S.view.h });
+      World.drawIceRink(ctx);
+      World.drawPond(ctx);
+      World.drawBridge(ctx);
+      World.drawSnowPiles(ctx);
+      World.drawFence(ctx);
+      World.drawBorderTrees(ctx, ts);
+      World.drawEggs(ctx, ts);
+
+      // 按纵深排序绘制：建筑 / 圣诞树 / 长椅 / 路灯 / NPC / 玩家
+      World.buildings.forEach(function (b) { drawables.push({ y: b.y + b.h, fn: function () { World.drawBuilding(ctx, b, ts); } }); });
+      drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
+      World.benches.forEach(function (b) { drawables.push({ y: b.y, fn: function () { World.drawBench(ctx, b); } }); });
+      World.lamps.forEach(function (l) { drawables.push({ y: l.y, fn: function () { World.drawLamp(ctx, l, ts); } }); });
+
+      if (showRemote) {
+        drawables.push({ y: S.remote.y, fn: function () {
+          var waving = ts < S.remote.waveUntil;
+          Sprites.drawCharacter(ctx, S.remote.x, S.remote.y, S.remote.dir, S.remote.moving ? Math.floor(ts / 140) % 4 : 0,
+            Object.assign({}, CHAROPT[S.otherSlot], { outfit: theirOutfit }), waving, ts);
+          nameTag(ctx, S.remote.x, S.remote.y - 78, NAME[S.otherSlot], false);
+        } });
+      }
+      drawables.push({ y: S.self.y, fn: function () {
+        var waving = ts < S.self.waveUntil;
+        Sprites.drawCharacter(ctx, S.self.x, S.self.y, S.self.dir, S.self.frame,
+          Object.assign({}, CHAROPT[S.mySlot], { outfit: myOutfit }), waving, ts);
+        nameTag(ctx, S.self.x, S.self.y - 78, NAME[S.mySlot] + '（你）', true);
+      } });
+
+      World.npcs.forEach(function (n) {
+        drawables.push({ y: n.y, fn: function () {
+          if (n.id === 'santa') Sprites.drawSanta(ctx, n.x, n.y, ts);
+          else if (n.id === 'snowman') Sprites.drawSnowman(ctx, n.x, n.y, ts);
+          else if (n.id === 'elf') Sprites.drawElf(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
+          else Sprites.drawBarista(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
+          nameTag(ctx, n.x, n.y - 66, n.name, false, '#ffe08a');
+        } });
+      });
+
+      drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
+
+      // 雪花（覆盖在场景上）
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      S.flakes.forEach(function (f) {
+        f.y += f.v * 0.016; f.x += Math.sin(ts / 900 + f.ph) * 0.4;
+        if (f.y > World.height) { f.y = -6; f.x = Math.random() * World.width; }
+        if (f.x > S.cam.x - 10 && f.x < S.cam.x + S.view.w + 10 && f.y > S.cam.y - 10 && f.y < S.cam.y + S.view.h + 10) {
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 7); ctx.fill();
+        }
+      });
+    }
+
+    // 粒子（爱心 / 星光）
+    drawParticles(ctx);
 
     ctx.restore();
 
     // 暗角氛围
     var vg = ctx.createRadialGradient(S.view.w / 2, S.view.h / 2, Math.min(S.view.w, S.view.h) * 0.42, S.view.w / 2, S.view.h / 2, Math.max(S.view.w, S.view.h) * 0.75);
     vg.addColorStop(0, 'rgba(10,20,40,0)');
-    vg.addColorStop(1, 'rgba(10,20,40,.42)');
+    vg.addColorStop(1, S.indoor ? 'rgba(40,20,10,.35)' : 'rgba(10,20,40,.42)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, S.view.w, S.view.h);
 
-    // 交互提示按钮
+    // 交互气泡（跟随目标物，而非只在屏幕角落）
+    if (S.curInteract && !S.paused) drawInteractBubble(ctx);
+    // 交互按钮
     var btn = $('#btn-interact');
     if (S.curInteract && !S.paused) {
       btn.textContent = S.curInteract.label;
       btn.classList.remove('hidden');
     } else btn.classList.add('hidden');
+  }
+
+  function drawInteractBubble(ctx) {
+    var it = S.curInteract;
+    var bob = Math.sin(performance.now() / 300) * 2.5;
+    var x = it.x, y = it.y - (it.type === 'npc' ? 96 : 108) + bob;
+    ctx.font = 'bold 13px "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    var w = ctx.measureText(it.label).width + 22;
+    var bx = Math.max(S.cam.x + w / 2 + 6, Math.min(S.cam.x + S.view.w - w / 2 - 6, x));
+    ctx.fillStyle = 'rgba(20,32,54,.85)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx - w / 2, y - 17, w, 26, 13); else ctx.rect(bx - w / 2, y - 17, w, 26);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,224,138,.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+    // 气泡小尾巴
+    ctx.fillStyle = 'rgba(20,32,54,.85)';
+    ctx.beginPath();
+    ctx.moveTo(bx - 5, y + 8); ctx.lineTo(bx + 5, y + 8); ctx.lineTo(bx, y + 15);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffe9a8';
+    ctx.fillText(it.label, bx, y + 1);
   }
 
   function nameTag(ctx, x, y, text, isSelf, color) {

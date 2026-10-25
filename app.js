@@ -186,9 +186,10 @@
         return roomRef.child('slots/' + mySlot + '/outfit').set(key)
           .then(function () { pushLog('换上了「' + OUTFITS[key] + '」'); });
       },
-      setPos: function (x, y, dir, moving) {
+      setPos: function (x, y, dir, moving, indoor) {
         return roomRef.child('slots/' + mySlot + '/pos').set({
           x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0,
+          indoor: indoor ? 1 : 0,
           t: firebase.database.ServerValue.TIMESTAMP
         });
       },
@@ -258,9 +259,9 @@
         data.log['l' + Date.now()] = { slot: mySlot, what: '换上了「' + OUTFITS[k] + '」', at: Date.now() };
         save(); return Promise.resolve();
       },
-      setPos: function (x, y, dir, moving) {
+      setPos: function (x, y, dir, moving, indoor) {
         if (!data.slots[mySlot]) data.slots[mySlot] = {};
-        data.slots[mySlot].pos = { x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0, t: Date.now() };
+        data.slots[mySlot].pos = { x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0, indoor: indoor ? 1 : 0, t: Date.now() };
         save(); return Promise.resolve();
       },
       setWave: function () {
