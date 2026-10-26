@@ -189,12 +189,21 @@
       setPos: function (x, y, dir, moving, indoor) {
         return roomRef.child('slots/' + mySlot + '/pos').set({
           x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0,
-          indoor: indoor ? 1 : 0,
+          indoor: indoor || 0, // 0 = 室外，否则为室内场景 id（cabin/cafe/greenhouse/workshop）
           t: firebase.database.ServerValue.TIMESTAMP
         });
       },
       setWave: function () {
         return roomRef.child('slots/' + mySlot + '/wave').set(firebase.database.ServerValue.TIMESTAMP);
+      },
+      // 共享世界数据（资源/花园/回忆/任务/热可可）事务写入。
+      // 用 transaction 保证两台设备同时操作（例如同时收获）不会重复计数。
+      // fn(cur) 返回新对象；返回 undefined 则放弃本次修改。
+      // ★ 需要在 Firebase 控制台为 rooms/{id}/world 放行写权限（见 README v2 规则）。
+      worldTransact: function (fn) {
+        return roomRef.child('world').transaction(fn).then(function (res) {
+          return { committed: !!res.committed, value: res.snapshot ? res.snapshot.val() : null };
+        });
       },
       mySlot: function () { return mySlot; },
       resetIdentity: function () { return auth.signOut(); },
@@ -261,13 +270,21 @@
       },
       setPos: function (x, y, dir, moving, indoor) {
         if (!data.slots[mySlot]) data.slots[mySlot] = {};
-        data.slots[mySlot].pos = { x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0, indoor: indoor ? 1 : 0, t: Date.now() };
+        data.slots[mySlot].pos = { x: Math.round(x), y: Math.round(y), dir: dir, moving: moving ? 1 : 0, indoor: indoor || 0, t: Date.now() };
         save(); return Promise.resolve();
       },
       setWave: function () {
         if (!data.slots[mySlot]) data.slots[mySlot] = {};
         data.slots[mySlot].wave = Date.now();
         save(); return Promise.resolve();
+      },
+      worldTransact: function (fn) {
+        var cur = data.world || {};
+        var next = fn(cur);
+        if (next === undefined) return Promise.resolve({ committed: false, value: JSON.parse(JSON.stringify(cur)) });
+        data.world = next;
+        save();
+        return Promise.resolve({ committed: true, value: JSON.parse(JSON.stringify(next)) });
       },
       mySlot: function () { return mySlot; },
       resetIdentity: function () { localStorage.removeItem('omo_device_id'); localStorage.removeItem('omo_demo_room_v1'); return Promise.resolve(); },

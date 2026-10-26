@@ -173,6 +173,9 @@ body.playing #screen-game { border-radius: 0; }
   position: absolute; left: 50%; bottom: calc(30px + var(--safe-b));
   transform: translateX(-50%);
   width: min(520px, calc(100% - 24px));
+  max-height: calc(100% - 70px);   /* 横屏修复：再矮的屏幕也不会溢出 */
+  overflow-y: auto;                /* 内容超高时在面板内滚动 */
+  -webkit-overflow-scrolling: touch;
   background: rgba(16,28,52,.94);
   border: 1px solid rgba(255,255,255,.16);
   border-radius: 16px; padding: 14px 16px;
@@ -289,8 +292,90 @@ body.playing #screen-game { border-radius: 0; }
 }
 #photo-title { color: #ffe08a; font-weight: 700; font-size: 16px; }
 #photo-canvas, #photo-img {
-  width: 100%; height: auto; border-radius: 12px;
+  max-height: 56vh;               /* 横屏修复：竖版照片在横屏中按高度约束 */
+  width: auto; max-width: 100%;
+  object-fit: contain;
+  border-radius: 12px;
   border: 2px solid rgba(240,192,64,.6);
   -webkit-touch-callout: default; user-select: text;
 }
 #photo-note { color: #cbb896; font-size: 12.5px; text-align: center; }
+
+/* ============================================================
+   v2.0.0 — 资源 / 回忆册 / 种植 / 制作 / 横屏细节
+   ============================================================ */
+
+/* 资源角标（HUD 右上） */
+.res-chip {
+  position: absolute; top: calc(64px + var(--safe-t)); right: 10px;
+  z-index: 9;
+  background: linear-gradient(180deg, rgba(58,40,24,.92), rgba(44,30,18,.92));
+  border: 1.5px solid #f0c040; border-radius: 999px;
+  color: #f4ead8; font-size: 12px; font-weight: 600;
+  padding: 6px 12px; line-height: 1.3; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,235,200,.25);
+  pointer-events: none;
+}
+.dev-chip {
+  position: absolute; top: calc(64px + var(--safe-t)); left: 50%; transform: translateX(-50%);
+  z-index: 9;
+  background: rgba(120,40,160,.85); border: 1.5px solid #d8b0ff; border-radius: 999px;
+  color: #fff; font-size: 11px; font-weight: 700;
+  padding: 4px 10px; pointer-events: none;
+}
+/* 任务角标让出右上空间 */
+.quest-chip { max-width: 56vw; }
+
+/* 回忆卡片像素插画 */
+.mem-art {
+  width: 100%; height: auto;
+  border-radius: 12px; margin: 6px 0;
+  border: 2px solid #f0c040;
+  display: block;
+  image-rendering: pixelated;
+  -webkit-touch-callout: default;
+}
+
+/* 旅行回忆册 */
+.book-panel { padding: 12px; }
+.book-list {
+  max-height: 48vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 4px 0 8px; padding-right: 4px;
+}
+.book-item {
+  display: flex; gap: 10px; align-items: stretch;
+  background: rgba(255,240,215,.07);
+  border: 1px solid rgba(240,192,64,.3);
+  border-radius: 12px; padding: 8px;
+}
+.book-item.locked { opacity: .62; }
+.book-item canvas {
+  width: 148px; height: 92.5px; flex: 0 0 148px;
+  border-radius: 8px; border: 1.5px solid rgba(240,192,64,.55);
+  image-rendering: pixelated; background: #243050;
+}
+.book-info { flex: 1; min-width: 0; }
+.book-info b { display: block; color: #ffe08a; font-size: 14px; margin-bottom: 3px; }
+.book-info span { display: block; color: #b8a688; font-size: 11.5px; margin-bottom: 5px; }
+.book-info p { margin: 0; color: #f4ead8; font-size: 12.5px; line-height: 1.55; }
+
+/* 种植地面板 */
+.plot-tip { font-size: 14.5px; line-height: 1.6; margin: 6px 0 4px; color: #f4ead8; }
+.plot-sub { font-size: 12.5px; color: #b8a688; line-height: 1.6; margin: 0 0 8px; }
+.plot-actions { flex-wrap: wrap; }
+
+/* 工坊制作面板 */
+.craft-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; }
+.craft-btn { width: 100%; text-align: left; font-size: 14px; }
+.small-note { font-size: 12px; margin: 6px 0 2px; }
+
+/* 横屏（矮屏）压缩：交互按钮与摇杆略上移，防止被裁切 */
+@media (max-height: 480px) {
+  #btn-interact { bottom: calc(84px + var(--safe-b)); padding: 11px 16px; font-size: 13px; max-width: 52vw; }
+  #joy-base { width: 100px; height: 100px; left: 14px; bottom: calc(18px + var(--safe-b)); }
+  .quest-chip { font-size: 11.5px; max-width: 46vw; }
+  .res-chip { font-size: 11px; }
+  .book-list { max-height: 44vh; }
+  .panel { padding: 10px 12px; }
+}

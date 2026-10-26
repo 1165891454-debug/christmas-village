@@ -73,6 +73,10 @@
 
       <!-- 主线任务角标 -->
       <div id="quest-chip" class="quest-chip"></div>
+      <!-- 资源角标（v2：木材/鲜花/种子/手工礼物） -->
+      <div id="res-chip" class="res-chip">🪵 0 · 🌸 0 · 🌱 0 · 🎁 0</div>
+      <!-- dev 测试模式角标 -->
+      <div id="dev-chip" class="dev-chip hidden">🛠️ DEV</div>
 
       <!-- 交互按钮 -->
       <button id="btn-interact" class="hidden">互动</button>
@@ -95,6 +99,7 @@
         <div class="panel-name">🎄 广场圣诞树</div>
         <div id="tree-stage-text" class="panel-sub"></div>
         <div id="tree-desc"></div>
+        <div id="tree-need" class="panel-sub"></div>
         <div class="panel-actions">
           <button id="tree-deco" class="btn primary">✨ 装饰圣诞树</button>
           <button id="tree-close" class="btn ghost small">关闭</button>
@@ -113,12 +118,45 @@
         <div class="panel-actions"><button id="outfit-close" class="btn ghost small">关闭</button></div>
       </div>
 
-      <!-- 回忆照片面板（有照片时） -->
+      <!-- 回忆卡片（原创像素插画 / 以后也可放照片） -->
       <div id="mem-photo" class="panel hidden">
         <div id="mem-photo-title" class="panel-name"></div>
-        <img id="mem-photo-img" class="mem-img" alt="回忆照片" />
+        <canvas id="mem-art-canvas" class="mem-art"></canvas>
+        <img id="mem-photo-img" class="mem-img" alt="回忆照片" style="display:none" />
         <div id="mem-photo-text"></div>
         <div class="panel-actions"><button id="mem-close" class="btn ghost small">合上回忆</button></div>
+      </div>
+
+      <!-- 旅行回忆册（16 段） -->
+      <div id="book-panel" class="panel book-panel hidden">
+        <div class="panel-name">📖 旅行回忆册 <span id="book-count" class="panel-sub"></span></div>
+        <div id="book-list" class="book-list"></div>
+        <div class="panel-actions"><button id="book-close" class="btn ghost small">合上册子</button></div>
+      </div>
+
+      <!-- 种植地面板（温室） -->
+      <div id="plot-panel" class="panel hidden">
+        <div id="plot-title" class="panel-name"></div>
+        <div id="plot-body"></div>
+        <div class="panel-actions plot-actions">
+          <button id="btn-plant-flower" class="btn primary hidden">🌱 种花（30 分钟）</button>
+          <button id="btn-plant-tree" class="btn primary hidden">🌲 种树（6 小时）</button>
+          <button id="btn-harvest" class="btn primary hidden">🧺 收获</button>
+          <button id="plot-close" class="btn ghost small">关闭</button>
+        </div>
+      </div>
+
+      <!-- 工坊制作面板 -->
+      <div id="craft-panel" class="panel hidden">
+        <div class="panel-name">🛠️ 礼物工坊 · 制作</div>
+        <div id="craft-res" class="panel-sub"></div>
+        <div class="craft-list">
+          <button id="craft-bird" class="btn craft-btn"></button>
+          <button id="craft-musicbox" class="btn craft-btn"></button>
+          <button id="craft-star" class="btn craft-btn"></button>
+        </div>
+        <p class="muted small-note">手工礼物 🎁 用来把广场圣诞树点到「全树点亮」。</p>
+        <div class="panel-actions"><button id="craft-close" class="btn ghost small">关闭</button></div>
       </div>
 
       <!-- 菜单 -->
@@ -126,6 +164,8 @@
         <div class="panel-name">☰ 菜单</div>
         <button id="menu-outfit" class="menu-item">👗 换装</button>
         <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
+        <button id="menu-book" class="menu-item">📖 旅行回忆册</button>
+        <button id="menu-music" class="menu-item">🔊 音乐音效：开</button>
         <button id="menu-photo" class="menu-item">📸 圣诞合影</button>
         <button id="menu-invite" class="menu-item">📨 邀请对方</button>
         <button id="menu-leave" class="menu-item danger">🚪 返回大厅</button>

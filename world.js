@@ -51,7 +51,9 @@ window.World = (function () {
     { id: 'cabin', x: 170, y: 200, w: 230, h: 150, kind: 'cabin', wall: '#9a7050', roof: '#8a5644', name: '我们的圣诞小屋', hint: '' },
     { id: 'cafe', x: 1170, y: 170, w: 250, h: 165, kind: 'cafe', wall: '#b8907a', roof: '#96604a', name: '暖冬咖啡', hint: '推开门，热可可的甜香混着肉桂味飘出来。' },
     { id: 'shop', x: 1160, y: 760, w: 250, h: 165, kind: 'shop', wall: '#8678ab', roof: '#655388', name: '圣诞小铺', hint: '' },
-    { id: 'stall', x: 560, y: 110, w: 150, h: 95, kind: 'stall', wall: '#a86454', roof: '#c0392b', name: '礼物小摊', hint: '摊主神秘地压低声音：「今年的圣诞礼物，我可是提前给你们俩留了最好的。」' }
+    { id: 'stall', x: 560, y: 110, w: 150, h: 95, kind: 'stall', wall: '#a86454', roof: '#c0392b', name: '礼物小摊', hint: '摊主神秘地压低声音：「今年的圣诞礼物，我可是提前给你们俩留了最好的。」' },
+    { id: 'greenhouse', x: 150, y: 870, w: 180, h: 125, kind: 'greenhouse', wall: '#bfe3f5', roof: '#8fc3d8', name: '星星温室', hint: '玻璃房里暖烘烘的，一排排花盆正在等你们来种点什么。' },
+    { id: 'workshop', x: 930, y: 110, w: 230, h: 140, kind: 'workshop', wall: '#a08a6a', roof: '#7a6450', name: '礼物工坊', hint: '叮叮当当——木屑的香味里，可以亲手做点小东西。' }
   ];
 
   var tree = { x: 750, y: 545 };
@@ -445,6 +447,81 @@ window.World = (function () {
       ctx.fillStyle = '#f4ead8'; ctx.fillRect(b.x + 110, wallTop + 10, 3.5, 18); ctx.fillRect(b.x + 100, wallTop + 17, 24, 3.5);
     }
 
+    if (b.kind === 'greenhouse') {
+      // 玻璃反光斜带
+      ctx.fillStyle = 'rgba(255,255,255,.30)';
+      ctx.beginPath();
+      ctx.moveTo(b.x + 12, wallTop + wallH - 8); ctx.lineTo(b.x + 74, wallTop + 6);
+      ctx.lineTo(b.x + 102, wallTop + 6); ctx.lineTo(b.x + 42, wallTop + wallH - 8);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.14)';
+      ctx.beginPath();
+      ctx.moveTo(b.x + 110, wallTop + wallH - 8); ctx.lineTo(b.x + 146, wallTop + 6);
+      ctx.lineTo(b.x + 158, wallTop + 6); ctx.lineTo(b.x + 108, wallTop + wallH - 8);
+      ctx.closePath(); ctx.fill();
+      // 白色格棂
+      ctx.strokeStyle = '#eef6fb'; ctx.lineWidth = 2.5;
+      for (var gm = 1; gm < 5; gm++) {
+        ctx.beginPath(); ctx.moveTo(b.x + gm * b.w / 5, wallTop + 4); ctx.lineTo(b.x + gm * b.w / 5, wallTop + wallH - 12); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(b.x + 4, wallTop + wallH * 0.5); ctx.lineTo(b.x + b.w - 4, wallTop + wallH * 0.5); ctx.stroke();
+      // 玻璃后的暖光与植物
+      drawGlow(ctx, b.x + b.w / 2, wallTop + wallH * 0.55, 'rgba(190,255,170,.35)', 70, 0.8);
+      for (var pl = 0; pl < 4; pl++) {
+        var pgx = b.x + 26 + pl * 40, pgy = wallTop + wallH - 30;
+        box(ctx, pgx, pgy, 28, 14, '#8a5a3a', { r: 2 });
+        ctx.fillStyle = '#2b7047';
+        ctx.beginPath(); ctx.arc(pgx + 14, pgy - 8, 11, 0, 7); ctx.fill();
+        ctx.fillStyle = '#35845a';
+        ctx.beginPath(); ctx.arc(pgx + 8, pgy - 13, 6, 0, 7); ctx.arc(pgx + 20, pgy - 11, 5, 0, 7); ctx.fill();
+        ball(ctx, pgx + 14, pgy - 18, 2.4, '#e0563f', { outline: false });
+      }
+      // 檐口挂着的星饰
+      ball(ctx, b.x + 24, wallTop - 4, 4, '#f0c040', { hi: false });
+      ball(ctx, b.x + b.w - 24, wallTop - 4, 4, '#f0c040', { hi: false });
+    }
+    if (b.kind === 'workshop') {
+      // 大工作窗（带暖光）+ 工具墙 + 木料堆
+      box(ctx, b.x + 30, wallTop + 22, b.w - 96, 64, '#5b3d29', { r: 3 });
+      ctx.fillStyle = '#ffd77a'; ctx.fillRect(b.x + 36, wallTop + 28, b.w - 108, 52);
+      drawGlow(ctx, b.x + b.w / 2 - 10, wallTop + 54, 'rgba(255,205,110,.55)', 70, 0.9);
+      ctx.fillStyle = '#5b3d29';
+      ctx.fillRect(b.x + b.w / 2 - 12, wallTop + 28, 4, 52);
+      ctx.fillRect(b.x + 36, wallTop + 52, b.w - 108, 4);
+      ctx.fillStyle = 'rgba(255,255,255,.5)';
+      ctx.fillRect(b.x + 40, wallTop + 32, 14, 8);
+      // 影子里的小人剪影（工作台）
+      ctx.fillStyle = 'rgba(90,60,30,.45)';
+      ctx.fillRect(b.x + b.w / 2 + 6, wallTop + 60, 26, 20);
+      // 工具：锯子 + 锤子
+      ctx.strokeStyle = '#4a3020'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(b.x + b.w - 52, wallTop + 20); ctx.lineTo(b.x + b.w - 52, wallTop + 52); ctx.stroke();
+      ctx.fillStyle = '#9aa8be';
+      ctx.beginPath(); ctx.moveTo(b.x + b.w - 58, wallTop + 20); ctx.lineTo(b.x + b.w - 34, wallTop + 20);
+      ctx.lineTo(b.x + b.w - 40, wallTop + 30); ctx.lineTo(b.x + b.w - 52, wallTop + 30); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#7a8496'; ctx.lineWidth = 1;
+      for (var tw = 0; tw < 4; tw++) {
+        ctx.beginPath(); ctx.moveTo(b.x + b.w - 56 + tw * 6, wallTop + 20); ctx.lineTo(b.x + b.w - 54 + tw * 6, wallTop + 30); ctx.stroke();
+      }
+      ctx.fillStyle = '#8a6244'; ctx.fillRect(b.x + b.w - 76, wallTop + 24, 4, 24);
+      ctx.fillStyle = '#9aa8be'; ctx.fillRect(b.x + b.w - 80, wallTop + 18, 12, 9);
+      // 木料堆（门口左侧）
+      for (var lw = 0; lw < 3; lw++) {
+        box(ctx, b.x + 18, wallTop + wallH - 22 - lw * 9, 34, 9, '#b8906a', { r: 2, outline: false });
+        ctx.fillStyle = '#d8b088'; ctx.fillRect(b.x + 50, wallTop + wallH - 22 - lw * 9, 3, 9);
+      }
+      // 烟囱白烟
+      var wsx = b.x + b.w - 44;
+      box(ctx, wsx, b.y - 18, 14, 32, '#6b4a2f', { outline: false });
+      for (var wp2 = 0; wp2 < 3; wp2++) {
+        var ph2 = (t / 800 + wp2 * 0.35) % 1;
+        ctx.fillStyle = 'rgba(255,255,255,' + (0.35 * (1 - ph2)) + ')';
+        ctx.beginPath();
+        ctx.arc(wsx + 7 + Math.sin(ph2 * 6 + wp2) * 7, b.y - 26 - ph2 * 40, 5 + ph2 * 9, 0, 7);
+        ctx.fill();
+      }
+    }
+
     // 雪顶 + 屋檐冰柱
     ctx.fillStyle = '#f2f7fd';
     ctx.fillRect(b.x - 8, b.y + 18, b.w + 16, 20);
@@ -496,7 +573,7 @@ window.World = (function () {
       }
     }
 
-    drawWindows(ctx, b, wallTop, t);
+    if (b.kind !== 'greenhouse') drawWindows(ctx, b, wallTop, t);
     drawDoor(ctx, b, wallTop, wallH, t);
     drawSign(ctx, b, wallTop);
 
@@ -1026,11 +1103,404 @@ window.World = (function () {
   };
 
   // ============================================================
+  // 室内：暖冬咖啡（每日热可可）
+  // ============================================================
+  var CafeInterior = {
+    w: 820, h: 540,
+    spawn: { x: 410, y: 445 },
+    exit: { x: 410, y: 502 },
+    obstacles: [
+      { x: 230, y: 55, w: 360, h: 85 },
+      { x: 90, y: 250, w: 130, h: 75 },
+      { x: 600, y: 250, w: 130, h: 75 }
+    ],
+    interactables: [
+      { id: 'cocoa', x: 410, y: 132, r: 120, name: '☕ 吧台', lines: [
+        '老板娘把两只马克杯推过来：「今天的热可可，还是请你们的哦。」',
+        '每天来一杯，暖暖手再走。'
+      ] },
+      { id: 'menuboard', x: 410, y: 62, r: 80, name: '📋 菜单黑板', lines: [
+        '黑板上用粉笔写着：',
+        '「热可可 · 双份棉花糖 · 每人每天一杯，免费。」',
+        '下面还有一行小字：谢谢你们常来。'
+      ] },
+      { id: 'windowseat', x: 155, y: 287, r: 85, name: '🪑 窗边座位', lines: [
+        '窗边的位置永远给你们留着，看雪最清楚。',
+        '玻璃上有雾气——正好用手指画一颗小爱心。'
+      ] },
+      { id: 'gramophone', x: 665, y: 287, r: 80, name: '🎵 老唱机', lines: [
+        '唱机放着很慢很慢的爵士，唱针转一圈，雪就落一层。',
+        '「圣诞歌单，」老板娘说，「十一月就开始排了。」'
+      ] }
+    ],
+    draw: function (ctx, t) {
+      var w = this.w, h = this.h;
+      ctx.fillStyle = '#b08a68'; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(90,60,35,.35)'; ctx.lineWidth = 1.5;
+      for (var py = 90; py < h; py += 34) { ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke(); }
+      for (var px = 0; px < w; px += 74) {
+        var off = ((px / 74) % 2) * 37;
+        ctx.beginPath(); ctx.moveTo(px + off, 90); ctx.lineTo(px + off, h); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,235,200,.06)';
+      for (var ph2 = 90; ph2 < h; ph2 += 34) ctx.fillRect(0, ph2 + 2, w, 4);
+      // 墙
+      ctx.fillStyle = '#9c6a50'; ctx.fillRect(0, 0, w, 90);
+      ctx.fillStyle = 'rgba(255,230,190,.08)';
+      for (var wp = 0; wp < w; wp += 26) ctx.fillRect(wp, 0, 13, 90);
+      ctx.fillStyle = 'rgba(245,250,255,.9)'; ctx.fillRect(0, 86, w, 6);
+      // 暖黄吊灯
+      for (var ld = 0; ld < 3; ld++) {
+        var lx = 170 + ld * 240;
+        ctx.strokeStyle = '#5b3d29'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, 26); ctx.stroke();
+        drawGlow(ctx, lx, 40, 'rgba(255,214,130,.55)', 60, 0.85 + 0.15 * Math.sin(t / 500 + ld));
+        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(lx - 14, 26, 28, 8);
+        ctx.fillStyle = '#ffe08a'; ctx.fillRect(lx - 10, 34, 20, 12);
+        ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.strokeRect(lx - 10, 34, 20, 12);
+      }
+      // 吧台
+      box(ctx, 230, 130, 360, 30, '#7a5236', { r: 4 });
+      box(ctx, 238, 160, 344, 26, '#8a5c3a', { r: 2 });
+      ctx.fillStyle = 'rgba(255,235,200,.15)'; ctx.fillRect(230, 130, 360, 5);
+      // 咖啡机
+      box(ctx, 300, 74, 56, 58, '#3a3f4a', { r: 4 });
+      ctx.fillStyle = '#2e333d'; ctx.fillRect(306, 80, 44, 10);
+      ball(ctx, 328, 132, 3, '#e0563f', { outline: false });
+      ball(ctx, 340, 132, 3, '#f0a83c', { outline: false });
+      drawGlow(ctx, 328, 108, 'rgba(255,190,110,.45)', 34, 0.9);
+      // 双杯热可可（吧台上）
+      [[470, 112], [540, 112]].forEach(function (m) {
+        box(ctx, m[0], m[1], 26, 22, '#f4ead8', { r: 3 });
+        ctx.fillStyle = '#6b4226'; ctx.fillRect(m[0] + 3, m[1] + 3, 20, 7);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(m[0] + 8, m[1] + 2, 4, 0, 7); ctx.arc(m[0] + 17, m[1] + 1, 4.5, 0, 7); ctx.fill();
+        ctx.strokeStyle = '#f4ead8'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(m[0] + 26, m[1] + 6); ctx.lineTo(m[0] + 32, m[1] + 6); ctx.stroke();
+        // 热气
+        for (var st = 0; st < 2; st++) {
+          var sp2 = (t / 700 + st * 0.5) % 1;
+          ctx.fillStyle = 'rgba(255,255,255,' + (0.4 * (1 - sp2)) + ')';
+          ctx.beginPath();
+          ctx.arc(m[0] + 13 + Math.sin(sp2 * 6 + st) * 5, m[1] - sp2 * 22, 3 + sp2 * 4, 0, 7);
+          ctx.fill();
+        }
+      });
+      // 菜单黑板
+      box(ctx, 355, 30, 130, 62, '#2e2a26', { r: 3, oc: '#8a5c3a' });
+      ctx.strokeStyle = 'rgba(244,234,216,.9)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(368, 46); ctx.lineTo(472, 46); ctx.moveTo(368, 60); ctx.lineTo(452, 60); ctx.stroke();
+      ctx.fillStyle = '#f4ead8'; ctx.font = '9px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('热可可 · 每日免费', 420, 42);
+      ctx.fillStyle = 'rgba(244,234,216,.75)'; ctx.font = '7px "PingFang SC", sans-serif';
+      ctx.fillText('双份棉花糖 · 谢谢常来', 420, 74);
+      // 左：窗边座位（圆桌+两椅+大窗）
+      var wx = 60;
+      ctx.fillStyle = '#16264a'; ctx.fillRect(wx, 14, 130, 70);
+      ctx.fillStyle = 'rgba(255,255,255,.8)';
+      for (var sf = 0; sf < 10; sf++) ctx.fillRect(wx + 8 + ((sf * 41 + t / 60) % 116), 20 + ((sf * 29) % 60), 2, 2);
+      ctx.strokeStyle = '#5b3d29'; ctx.lineWidth = 4;
+      ctx.strokeRect(wx, 14, 130, 70);
+      ctx.beginPath(); ctx.moveTo(wx + 65, 14); ctx.lineTo(wx + 65, 84); ctx.moveTo(wx, 49); ctx.lineTo(wx + 130, 49); ctx.stroke();
+      shadow(ctx, 155, 330, 44, 8);
+      ball(ctx, 155, 296, 26, '#9a7050', { hi: false });
+      ctx.fillStyle = '#f2f7fd'; ctx.beginPath(); ctx.ellipse(155, 272, 26, 8, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.stroke();
+      box(ctx, 96, 262, 22, 26, '#c0392b', { r: 4 });
+      box(ctx, 192, 262, 22, 26, '#4f86d6', { r: 4 });
+      box(ctx, 143, 266, 24, 12, '#f4ead8', { r: 3 });
+      ctx.fillStyle = '#6b4226'; ctx.fillRect(146, 269, 18, 5);
+      // 右：老唱机
+      box(ctx, 610, 250, 110, 72, '#7a5236', { r: 5 });
+      ctx.fillStyle = '#5b3d29'; ctx.fillRect(616, 256, 98, 24);
+      ball(ctx, 665, 268, 10, '#2b2119', { outline: false });
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.beginPath(); ctx.arc(665, 268, 10, 0, 7); ctx.fill();
+      ball(ctx, 665, 268, 3, '#f0c040', { outline: false });
+      ctx.fillStyle = '#2b2119'; ctx.fillRect(700, 240, 3, 26);
+      ctx.fillStyle = '#9aa8be'; ctx.beginPath();
+      ctx.moveTo(672, 260); ctx.lineTo(700, 244); ctx.lineTo(702, 246); ctx.lineTo(674, 262); ctx.closePath(); ctx.fill();
+      // 圣诞花环 + 彩旗
+      ctx.strokeStyle = '#2f7a3a'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(720, 40, 15, 0, 7); ctx.stroke();
+      ball(ctx, 720, 27, 3, '#e0563f', { outline: false });
+      ball(ctx, 708, 44, 3, '#f0a83c', { outline: false });
+      ball(ctx, 732, 44, 3, '#f0a83c', { outline: false });
+      var fc = ['#e0563f', '#f0a83c', '#58b368', '#4f86d6'];
+      for (var fi = 0; fi < 10; fi++) {
+        ctx.fillStyle = fc[fi % 4];
+        var fx2 = 60 + fi * 74, fy2 = 4 + (fi % 2) * 3;
+        ctx.beginPath(); ctx.moveTo(fx2 - 6, fy2); ctx.lineTo(fx2 + 6, fy2); ctx.lineTo(fx2, fy2 + 9); ctx.closePath(); ctx.fill();
+      }
+      // 出门垫
+      ctx.fillStyle = 'rgba(245,250,255,.5)';
+      ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
+      box(ctx, this.exit.x - 26, this.exit.y, 52, 24, '#5b3d29', { r: 3 });
+      ctx.fillStyle = '#f4ead8'; ctx.font = '10px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('出门 ▸ 小镇', this.exit.x, this.exit.y + 15);
+    }
+  };
+
+  // ============================================================
+  // 室内：星星温室（6 块真实时间种植地）
+  // ============================================================
+  var GHInterior = {
+    w: 820, h: 540,
+    spawn: { x: 410, y: 465 },
+    exit: { x: 410, y: 508 },
+    plots: [
+      { id: 'p1', x: 175, y: 255 }, { id: 'p2', x: 375, y: 255 }, { id: 'p3', x: 575, y: 255 },
+      { id: 'p4', x: 175, y: 400 }, { id: 'p5', x: 375, y: 400 }, { id: 'p6', x: 575, y: 400 }
+    ],
+    obstacles: [
+      { x: 40, y: 60, w: 110, h: 120 },
+      { x: 670, y: 60, w: 110, h: 120 }
+    ],
+    interactables: [],
+    draw: function (ctx, t, plots) {
+      var w = this.w, h = this.h;
+      // 陶土地面
+      ctx.fillStyle = '#c9a582'; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(120,85,55,.25)'; ctx.lineWidth = 1.5;
+      for (var py = 90; py < h; py += 30) { ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke(); }
+      ctx.fillStyle = 'rgba(255,240,220,.08)';
+      for (var ph2 = 90; ph2 < h; ph2 += 30) ctx.fillRect(0, ph2 + 2, w, 4);
+      // 墙：玻璃格棂 + 外面雪景
+      ctx.fillStyle = '#dceaf5'; ctx.fillRect(0, 0, w, 90);
+      ctx.fillStyle = 'rgba(255,255,255,.6)';
+      for (var sf = 0; sf < 14; sf++) ctx.fillRect((sf * 67 + t / 50) % (w - 4), 18 + ((sf * 31) % 66), 2, 2);
+      ctx.strokeStyle = '#eef6fb'; ctx.lineWidth = 3;
+      for (var gm = 0; gm <= 8; gm++) { ctx.beginPath(); ctx.moveTo(gm * w / 8, 0); ctx.lineTo(gm * w / 8, 90); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(0, 45); ctx.lineTo(w, 45); ctx.stroke();
+      // 远处雪松剪影
+      for (var tt = 0; tt < 7; tt++) {
+        var tx0 = 40 + tt * 118;
+        ctx.fillStyle = 'rgba(120,150,180,.5)';
+        ctx.beginPath(); ctx.moveTo(tx0, 76); ctx.lineTo(tx0 - 16, 86); ctx.lineTo(tx0 + 16, 86); ctx.closePath(); ctx.fill();
+      }
+      // 屋顶吊盆与暖灯
+      for (var hp = 0; hp < 4; hp++) {
+        var hx = 130 + hp * 190;
+        ctx.strokeStyle = '#5b3d29'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, 22); ctx.stroke();
+        box(ctx, hx - 10, 22, 20, 12, '#8a5a3a', { r: 4 });
+        ctx.fillStyle = '#2b7047';
+        ctx.beginPath(); ctx.arc(hx, 18, 9, Math.PI, 0); ctx.fill();
+        drawGlow(ctx, hx, 40, 'rgba(190,255,170,.30)', 40, 0.8);
+      }
+      // 两侧花架（装饰）
+      [[40, 60], [670, 60]].forEach(function (sh) {
+        box(ctx, sh[0], sh[1] + 20, 110, 14, '#8a5c3a', { r: 2 });
+        box(ctx, sh[0], sh[1] + 76, 110, 14, '#8a5c3a', { r: 2 });
+        for (var pp = 0; pp < 3; pp++) {
+          var bx = sh[0] + 16 + pp * 36;
+          box(ctx, bx, sh[1] + 4, 24, 16, '#8a5a3a', { r: 2 });
+          ctx.fillStyle = '#2b7047';
+          ctx.beginPath(); ctx.arc(bx + 12, sh[1] - 2, 9, 0, 7); ctx.fill();
+          ball(ctx, bx + 6, sh[1] - 7, 2.2, '#e0563f', { outline: false });
+          ball(ctx, bx + 17, sh[1] - 6, 2.2, '#f0a83c', { outline: false });
+          box(ctx, bx + 2, sh[1] + 60, 24, 16, '#8a5a3a', { r: 2 });
+          ctx.fillStyle = '#35845a';
+          ctx.beginPath(); ctx.arc(bx + 12, sh[1] + 54, 8, 0, 7); ctx.fill();
+        }
+      });
+      // ---- 6 块种植地（状态由 game.js 计算后传入 plots） ----
+      var self = this;
+      this.plots.forEach(function (p, i) {
+        var st = plots && plots[i] ? plots[i] : { stage: 0, kind: 'none', ready: false };
+        // 苗床
+        shadow(ctx, p.x, p.y + 26, 52, 9);
+        box(ctx, p.x - 52, p.y - 16, 104, 42, '#8a5c3a', { r: 5 });
+        ctx.fillStyle = '#5b3d29'; ctx.fillRect(p.x - 46, p.y - 10, 92, 30);
+        // 土壤纹理
+        ctx.fillStyle = 'rgba(80,50,25,.5)';
+        for (var d = 0; d < 4; d++) ctx.fillRect(p.x - 40 + d * 22, p.y - 6, 12, 3);
+        // 植物
+        var kind = st.kind, stage = st.stage || 0;
+        if (stage >= 1) {
+          var sway = Math.sin(t / 900 + i * 1.4) * 2;
+          if (stage === 1) { // 破土小芽
+            ctx.fillStyle = '#58b368';
+            ctx.beginPath(); ctx.moveTo(p.x + sway, p.y - 18); ctx.lineTo(p.x - 4, p.y - 4); ctx.lineTo(p.x + 4, p.y - 4); ctx.closePath(); ctx.fill();
+          } else if (stage === 2) { // 长叶
+            ctx.fillStyle = '#35845a';
+            ctx.beginPath(); ctx.moveTo(p.x + sway, p.y - 26); ctx.lineTo(p.x - 12, p.y - 2); ctx.lineTo(p.x + 12, p.y - 2); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#58b368';
+            ctx.beginPath(); ctx.moveTo(p.x + sway, p.y - 18); ctx.lineTo(p.x - 7, p.y); ctx.lineTo(p.x + 7, p.y); ctx.closePath(); ctx.fill();
+          } else { // 成熟：花 或 小树
+            if (kind === 'tree') {
+              ctx.fillStyle = '#5b3d29'; ctx.fillRect(p.x - 3, p.y - 14, 6, 14);
+              ctx.fillStyle = '#2b7047';
+              ctx.beginPath(); ctx.moveTo(p.x + sway, p.y - 48); ctx.lineTo(p.x - 22, p.y - 10); ctx.lineTo(p.x + 22, p.y - 10); ctx.closePath(); ctx.fill();
+              ctx.fillStyle = '#35845a';
+              ctx.beginPath(); ctx.moveTo(p.x + sway, p.y - 34); ctx.lineTo(p.x - 15, p.y - 8); ctx.lineTo(p.x + 15, p.y - 8); ctx.closePath(); ctx.fill();
+              ctx.fillStyle = '#f2f7fd';
+              ctx.beginPath(); ctx.moveTo(p.x + sway, p.y - 48); ctx.lineTo(p.x - 10, p.y - 28); ctx.lineTo(p.x + 10, p.y - 28); ctx.closePath(); ctx.fill();
+            } else {
+              ctx.strokeStyle = '#35845a'; ctx.lineWidth = 2.5;
+              ctx.beginPath(); ctx.moveTo(p.x, p.y - 2); ctx.quadraticCurveTo(p.x + sway, p.y - 18, p.x + sway * 0.6, p.y - 30); ctx.stroke();
+              ctx.fillStyle = '#58b368';
+              ctx.beginPath(); ctx.ellipse(p.x - 8, p.y - 12, 7, 3, -0.6, 0, 7); ctx.fill();
+              ctx.beginPath(); ctx.ellipse(p.x + 8, p.y - 16, 7, 3, 0.6, 0, 7); ctx.fill();
+              ball(ctx, p.x + sway * 0.6, p.y - 34, 7, '#e0563f', { hi: true });
+              ball(ctx, p.x + sway * 0.6 - 7, p.y - 27, 4.5, '#c86bb1', { hi: false, ol: 1 });
+              ball(ctx, p.x + sway * 0.6 + 7, p.y - 27, 4.5, '#f0a83c', { hi: false, ol: 1 });
+            }
+          }
+          if (st.ready) { // 可收获闪光
+            var tw = 0.5 + 0.5 * Math.sin(t / 350 + i * 2);
+            drawGlow(ctx, p.x, p.y - 26, 'rgba(255,240,170,.55)', 30, 0.5 + 0.5 * tw);
+            ctx.strokeStyle = 'rgba(255,255,240,' + (0.4 + 0.5 * tw) + ')'; ctx.lineWidth = 1.5;
+            var sy3 = p.y - 46 + Math.sin(t / 600 + i) * 2;
+            ctx.beginPath();
+            ctx.moveTo(p.x - 8, sy3); ctx.lineTo(p.x - 3, sy3);
+            ctx.moveTo(p.x - 5.5, sy3 - 2.5); ctx.lineTo(p.x - 5.5, sy3 + 2.5);
+            ctx.stroke();
+          }
+        }
+        // 地块编号小木牌
+        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(p.x - 3, p.y + 26, 6, 10);
+        box(ctx, p.x - 16, p.y + 16, 32, 14, '#c9a06a', { r: 2 });
+        ctx.fillStyle = '#5b3d29'; ctx.font = 'bold 9px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('地 ' + (i + 1), p.x, p.y + 27);
+      });
+      // 出门垫
+      ctx.fillStyle = 'rgba(245,250,255,.5)';
+      ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
+      box(ctx, this.exit.x - 26, this.exit.y, 52, 24, '#5b3d29', { r: 3 });
+      ctx.fillStyle = '#f4ead8'; ctx.font = '10px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('出门 ▸ 小镇', this.exit.x, this.exit.y + 15);
+    }
+  };
+  // 每块地生成一个可交互点（game.js 用它弹种植/收获菜单）
+  GHInterior.plots.forEach(function (p) {
+    GHInterior.interactables.push({ id: p.id, x: p.x, y: p.y, r: 74, name: '🌱 种植地', lines: [] });
+  });
+
+  // ============================================================
+  // 室内：礼物工坊（制作）
+  // ============================================================
+  var WSInterior = {
+    w: 820, h: 540,
+    spawn: { x: 410, y: 445 },
+    exit: { x: 410, y: 502 },
+    obstacles: [
+      { x: 250, y: 60, w: 320, h: 90 },
+      { x: 60, y: 240, w: 150, h: 80 },
+      { x: 620, y: 240, w: 150, h: 80 }
+    ],
+    interactables: [
+      { id: 'craft', x: 410, y: 140, r: 130, name: '🛠️ 大工作台', lines: [
+        '台上摆着你们俩的工具箱，木屑香香的。',
+        '「一起做点什么吧。」'
+      ] },
+      { id: 'plans', x: 135, y: 270, r: 90, name: '📐 图纸桌', lines: [
+        '图纸桌上摊着好多张手绘小图：木鸟、八音盒、星星挂饰……',
+        '每张图纸角上都签着两个名字：C & J。'
+      ] },
+      { id: 'shelf', x: 695, y: 270, r: 90, name: '📦 材料架', lines: [
+        '木头、松果、彩带、铃铛——分门别类码得整整齐齐。',
+        '（材料不够的时候，去温室和镇子里就能收集到。）'
+      ] }
+    ],
+    draw: function (ctx, t) {
+      var w = this.w, h = this.h;
+      // 木地板
+      ctx.fillStyle = '#9a7858'; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(80,55,30,.35)'; ctx.lineWidth = 1.5;
+      for (var py = 90; py < h; py += 34) { ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke(); }
+      for (var px = 0; px < w; px += 74) {
+        var off = ((px / 74) % 2) * 37;
+        ctx.beginPath(); ctx.moveTo(px + off, 90); ctx.lineTo(px + off, h); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,235,200,.06)';
+      for (var ph2 = 90; ph2 < h; ph2 += 34) ctx.fillRect(0, ph2 + 2, w, 4);
+      // 墙
+      ctx.fillStyle = '#8a7058'; ctx.fillRect(0, 0, w, 90);
+      ctx.fillStyle = 'rgba(255,230,190,.07)';
+      for (var wp = 0; wp < w; wp += 26) ctx.fillRect(wp, 0, 13, 90);
+      ctx.fillStyle = 'rgba(245,250,255,.85)'; ctx.fillRect(0, 86, w, 6);
+      // 吊着的工具（墙面）
+      var tools = ['saw', 'hammer', 'wrench', 'brush'];
+      tools.forEach(function (tl, i) {
+        var tx = 90 + i * 200;
+        if (tl === 'saw') {
+          ctx.fillStyle = '#9aa8be';
+          ctx.beginPath(); ctx.moveTo(tx, 20); ctx.lineTo(tx + 40, 20); ctx.lineTo(tx + 34, 34); ctx.lineTo(tx + 4, 34); ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = '#7a8496'; ctx.lineWidth = 1;
+          for (var s = 0; s < 5; s++) { ctx.beginPath(); ctx.moveTo(tx + 6 + s * 7, 20); ctx.lineTo(tx + 4 + s * 7, 34); ctx.stroke(); }
+        } else if (tl === 'hammer') {
+          ctx.fillStyle = '#8a6244'; ctx.fillRect(tx + 16, 26, 5, 22);
+          ctx.fillStyle = '#9aa8be'; ctx.fillRect(tx + 6, 18, 26, 10);
+        } else if (tl === 'wrench') {
+          ctx.fillStyle = '#9aa8be'; ctx.fillRect(tx + 16, 24, 6, 24);
+          ball(ctx, tx + 19, 22, 7, '#9aa8be', { outline: false });
+          ctx.fillStyle = '#8a7058'; ctx.fillRect(tx + 14, 16, 10, 6);
+        } else {
+          ctx.fillStyle = '#c9a06a'; ctx.fillRect(tx + 14, 20, 9, 26);
+          ctx.fillStyle = '#d8b088'; ctx.fillRect(tx + 15, 46, 7, 8);
+        }
+      });
+      // 大工作台
+      shadow(ctx, 410, 170, 190, 12);
+      box(ctx, 250, 108, 320, 26, '#7a5236', { r: 4 });
+      [[270, 134], [540, 134]].forEach(function (lg) {
+        box(ctx, lg[0], lg[1], 18, 26, '#5b3d29', { r: 2 });
+      });
+      ctx.fillStyle = 'rgba(255,235,200,.15)'; ctx.fillRect(250, 108, 320, 5);
+      // 台面上：半成品小木鸟 + 木屑 + 图纸
+      box(ctx, 360, 88, 34, 22, '#c9a06a', { r: 4 });
+      ball(ctx, 394, 92, 5, '#c9a06a', { hi: false });
+      ctx.fillStyle = '#f0c040'; ctx.beginPath();
+      ctx.moveTo(398, 90); ctx.lineTo(404, 88); ctx.lineTo(398, 94); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#2b2119'; ctx.fillRect(381, 96, 3, 3);
+      ctx.fillStyle = 'rgba(200,160,110,.7)';
+      for (var shx = 0; shx < 6; shx++) ctx.fillRect(440 + shx * 14, 100 + (shx % 3) * 3, 5, 2);
+      box(ctx, 470, 80, 40, 26, '#f4ead8', { r: 3 });
+      ctx.strokeStyle = 'rgba(120,90,60,.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(476, 94); ctx.quadraticCurveTo(490, 84, 504, 94); ctx.stroke();
+      drawGlow(ctx, 410, 96, 'rgba(255,214,130,.45)', 90, 0.9);
+      // 左：图纸桌
+      shadow(ctx, 135, 330, 60, 9);
+      box(ctx, 60, 250, 150, 18, '#8a6244', { r: 3 });
+      [[72, 268], [182, 268]].forEach(function (lg) { box(ctx, lg[0], lg[1], 12, 60, '#6b4a2f', { r: 2 }); });
+      ctx.fillStyle = '#f4ead8'; ctx.fillRect(70, 232, 60, 20);
+      ctx.strokeStyle = 'rgba(120,90,60,.5)';
+      ctx.strokeRect(70, 232, 60, 20);
+      ctx.beginPath(); ctx.moveTo(76, 248); ctx.lineTo(84, 240); ctx.lineTo(92, 248); ctx.moveTo(98, 248); ctx.lineTo(106, 242); ctx.stroke();
+      ball(ctx, 150, 240, 6, '#c0392b', { outline: false });
+      // 右：材料架
+      box(ctx, 620, 240, 150, 84, '#8a5c3a', { r: 4 });
+      for (var sh = 0; sh < 3; sh++) {
+        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(628, 268 + sh * 22, 134, 5);
+        for (var it = 0; it < 5; it++) {
+          var kinds = ['#b8906a', '#8a5a3a', '#f0c040', '#c0392b', '#35845a'];
+          ctx.fillStyle = kinds[(sh * 3 + it) % 5];
+          ctx.fillRect(634 + it * 26, 254 + sh * 22, 20, 13);
+          ctx.fillStyle = 'rgba(255,255,255,.25)';
+          ctx.fillRect(634 + it * 26, 254 + sh * 22, 20, 3);
+        }
+      }
+      // 落地灯暖光
+      drawGlow(ctx, 700, 120, 'rgba(255,214,130,.5)', 80, 0.9);
+      // 出门垫
+      ctx.fillStyle = 'rgba(245,250,255,.5)';
+      ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
+      box(ctx, this.exit.x - 26, this.exit.y, 52, 24, '#5b3d29', { r: 3 });
+      ctx.fillStyle = '#f4ead8'; ctx.font = '10px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('出门 ▸ 小镇', this.exit.x, this.exit.y + 15);
+    }
+  };
+
+  var interiors = { cabin: Interior, cafe: CafeInterior, greenhouse: GHInterior, workshop: WSInterior };
+  function getInterior(id) { return interiors[id] || Interior; }
+
+  // ============================================================
   return {
     width: width, height: height,
     buildings: buildings, obstacles: obstacles, npcs: npcs, doors: doors,
     tree: tree, lamps: lamps, benches: benches, snowPiles: snowPiles, props: props,
-    eggs: eggs, Interior: Interior, slotNames: slotNames,
+    eggs: eggs, Interior: Interior, interiors: interiors, getInterior: getInterior, slotNames: slotNames,
     getGroundCanvas: getGroundCanvas,
     drawGround: drawGround, drawSnowPiles: drawSnowPiles, drawFence: drawFence,
     drawBorderTrees: drawBorderTrees, drawBuilding: drawBuilding, drawBigTree: drawBigTree,

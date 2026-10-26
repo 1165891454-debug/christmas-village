@@ -65,10 +65,18 @@ window.Sprites = (function () {
     r(ctx, x0 + 4.8 * U, legY + legLen + step * U, 3 * U, 0.7 * U, 'rgba(255,255,255,.35)');
     r(ctx, x0 + 8.3 * U, legY + legLen - step * U, 3 * U, 0.7 * U, 'rgba(255,255,255,.35)');
 
-    // ---- 长发背面（Julie，背面时及腰长发覆盖）----
-    if (o.hairStyle === 'long' && dir === 1) {
-      r(ctx, x0 + 3 * U, y0 + 8 * U, 10 * U, (H - 10) * U, hair);
-      r(ctx, x0 + 3.6 * U, y0 + (H - 3) * U, 8.8 * U, 1.6 * U, '#5f4130'); // 发梢高光
+    // ---- 长发背面（Julie：在躯干之前绘制，垂发在身体后面，不会遮住身体）----
+    if (o.hairStyle === 'long' && dir !== 0) {
+      if (dir === 1) {
+        // 背视：整片背发
+        r(ctx, x0 + 3 * U, y0 + 8 * U, 10 * U, (H - 10) * U, hair);
+        r(ctx, x0 + 3.6 * U, y0 + (H - 3) * U, 8.8 * U, 1.6 * U, '#5f4130'); // 发梢高光
+      } else {
+        // 侧视：背后一侧的垂发（身体后面）
+        var backX = (dir === 2) ? x0 + 10.6 * U : x0 + 2.4 * U;
+        r(ctx, backX, y0 + 7.5 * U, 3.2 * U, (H - 11) * U, hair);
+        r(ctx, backX, y0 + (H - 3.5) * U, 3.2 * U, 1.5 * U, '#5f4130');
+      }
     }
 
     // ---- 裙摆（Julie）----
@@ -77,10 +85,11 @@ window.Sprites = (function () {
       r(ctx, x0 + 2.6 * U, y0 + 22 * U, 10.8 * U, 2.2 * U, outfit.trim);
     }
 
-    // ---- 躯干 ----
+    // ---- 躯干（带柔和轮廓）----
     var bodyW = isM ? 7.4 : 7.8;
     var bodyX = x0 + (16 - bodyW) / 2 * U;
     var bodyY = y0 + 12.6 * U;
+    r(ctx, bodyX - 0.45 * U, bodyY - 0.45 * U, (bodyW + 0.9) * U, 8.9 * U, 'rgba(42,28,18,.45)'); // 轮廓
     r(ctx, bodyX, bodyY, bodyW * U, 8 * U, outfit.top);
     // 衣服下摆/扣子
     if (o.outfit === 'santa') {
@@ -124,9 +133,10 @@ window.Sprites = (function () {
       r(ctx, armX_R, armY + 6.2 * U + (frame === 3 ? U : 0), 1.6 * U, 1.4 * U, glove);
     }
 
-    // ---- 头 ----
+    // ---- 头（带柔和轮廓）----
     var hw = 9 * U;
     var hx = x0 + 3.5 * U, hy = y0 + (isM ? 3.6 : 4.2) * U;
+    r(ctx, hx - 0.45 * U, hy - 0.45 * U, (hw + 0.9) * U, 9.4 * U, 'rgba(42,28,18,.45)'); // 轮廓
     r(ctx, hx, hy, hw, 8.5 * U, skin);
 
     // ---- 头发 ----
@@ -141,12 +151,13 @@ window.Sprites = (function () {
         r(ctx, hx - 0.4 * U, hy + 1.6 * U, 2.2 * U, 1.4 * U, hair);
         r(ctx, hx + hw - 1.8 * U, hy + 1.6 * U, 2.2 * U, 1.4 * U, hair);
         r(ctx, hx + 2.2 * U, hy - 0.4 * U, hw - 4.4 * U, 1.2 * U, hair);
-        // 及腰长发两侧（走路时轻摆）
+        // 侧发：正面只到肩（长发背面已画在身体后面，不再遮住躯干）
         var sway = (frame === 1 || frame === 3) ? 0.5 : 0;
-        r(ctx, hx - 0.7 * U - sway * U, hy + 1.4 * U, 2 * U, 15.5 * U, hair);
-        r(ctx, hx + hw - 1.3 * U + sway * U, hy + 1.4 * U, 2 * U, 15.5 * U, hair);
-        r(ctx, hx - 0.7 * U - sway * U, hy + 15 * U, 2 * U, 1.5 * U, '#5f4130');
-        r(ctx, hx + hw - 1.3 * U + sway * U, hy + 15 * U, 2 * U, 1.5 * U, '#5f4130');
+        var sideLen = (dir === 0) ? 6.5 : 8.5;
+        r(ctx, hx - 0.7 * U - sway * U, hy + 1.4 * U, 2 * U, sideLen * U, hair);
+        r(ctx, hx + hw - 1.3 * U + sway * U, hy + 1.4 * U, 2 * U, sideLen * U, hair);
+        r(ctx, hx - 0.7 * U - sway * U, hy + (sideLen - 1.2) * U, 2 * U, 1.2 * U, '#5f4130');
+        r(ctx, hx + hw - 1.3 * U + sway * U, hy + (sideLen - 1.2) * U, 2 * U, 1.2 * U, '#5f4130');
       } else {
         r(ctx, hx - 0.4 * U, hy - 1.4 * U, 1.7 * U, 5.5 * U, hair);
         r(ctx, hx + hw - 1.3 * U, hy - 1.4 * U, 1.7 * U, 5.5 * U, hair);
