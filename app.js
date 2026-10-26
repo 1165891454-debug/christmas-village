@@ -106,7 +106,7 @@
       });
     }
 
-    function claimSlot(code, depth) {
+    function claimSlot(code, depth, prefer) {
       depth = depth || 0;
       roomRef = db.ref('rooms/' + code);
       var uid = auth.currentUser.uid;
@@ -114,8 +114,11 @@
       return roomRef.child('slots').once('value').then(function (snap) {
         var cur = snap.val() || {};
         var target = null;
+        // v3：玩家在大厅选了角色时，优先坐自己选的那个位置（只在它是空位/本来就是自己的时候）
+        var preferFree = prefer && (prefer === 'a' || prefer === 'b') && (!cur[prefer] || cur[prefer].uid === uid);
         if (cur.a && cur.a.uid === uid) target = 'a';
         else if (cur.b && cur.b.uid === uid) target = 'b';
+        else if (preferFree) target = prefer;
         else if (!cur.a) target = 'a';
         else if (!cur.b) target = 'b';
         if (!target) { onFull && onFull(); return false; } // 两个位置都被占用
@@ -133,31 +136,32 @@
             return true;
           }
           if (depth >= 3) { onFull && onFull(); return false; }
-          return claimSlot(code, depth + 1); // 被抢 → 重新读取再试
+          return claimSlot(code, depth + 1, prefer); // 被抢 → 重新读取再试
         });
       });
     }
 
     return {
       mode: 'firebase',
-      createRoom: function () {
+      createRoom: function (prefer) {
         var code = randomCode(10);
+        var slot = (prefer === 'b') ? 'b' : 'a';
         return ensureAuth().then(function () {
-          // 房间通过写入 slots/a 创建（规则只允许在空槽位上这样写）
-          return db.ref('rooms/' + code + '/slots/a').set({
+          // 房间通过写入一个槽位创建（规则只允许在空槽位上这样写）
+          return db.ref('rooms/' + code + '/slots/' + slot).set({
             uid: auth.currentUser.uid,
             joinedAt: firebase.database.ServerValue.TIMESTAMP,
             outfit: 'winter'
           });
         }).then(function () {
-          mySlot = 'a';
+          mySlot = slot;
           roomRef = db.ref('rooms/' + code);
           bindRoomListeners();
           return code;
         });
       },
-      joinRoom: function (code) {
-        return ensureAuth().then(function () { return claimSlot(code); });
+      joinRoom: function (code, prefer) {
+        return ensureAuth().then(function () { return claimSlot(code, 0, prefer); });
       },
       // 接管模式：拿着链接的人可以选择占用某个角色进入（保留该角色原有服装）
       takeoverSlot: function (slot) {
@@ -239,11 +243,16 @@
 
     return {
       mode: 'demo',
-      createRoom: function () { data = freshRoom(); save(); return Promise.resolve('demo'); },
-      joinRoom: function () {
+      createRoom: function (prefer) {
+        data = freshRoom(); save();
+        mySlot = (prefer === 'b') ? 'b' : 'a';
+        return Promise.resolve('demo');
+      },
+      joinRoom: function (code, prefer) {
         var dev = deviceId();
         if (data.slots.a && data.slots.a.device === dev) mySlot = 'a';
         else if (data.slots.b && data.slots.b.device === dev) mySlot = 'b';
+        else if (prefer && !data.slots[prefer]) { mySlot = prefer; data.slots[prefer] = { device: dev, joinedAt: Date.now(), outfit: 'winter' }; }
         else if (!data.slots.a) { mySlot = 'a'; data.slots.a = { device: dev, joinedAt: Date.now(), outfit: 'winter' }; }
         else if (!data.slots.b) { mySlot = 'b'; data.slots.b = { device: dev, joinedAt: Date.now(), outfit: 'winter' }; }
         else { fullLs.forEach(function (cb) { cb(); }); return Promise.resolve(false); }
@@ -301,6 +310,7 @@
   var backend = null;
   var lastData = null;
   var pendingRoom = null; // 当前尝试进入的房间码（供"接管角色"使用）
+  var preferSlot = 'a';   // 大厅里选的角色（不强占别人的位置，空位才坐）
 
   // ---------- 渲染：把房间状态喂给游戏层 ----------
   function render(d) {
@@ -369,7 +379,7 @@
     if (backend.mode === 'demo') {
       setConn(true);
       toast('本地演示模式：仅预览界面，未连接云端');
-      backend.joinRoom('demo').then(function (ok) {
+      backend.joinRoom('demo', preferSlot).then(function (ok) {
         if (ok) enterGame('demo');
       });
       return;
@@ -382,7 +392,7 @@
       var timeout = new Promise(function (_, rej) {
         setTimeout(function () { rej(new Error('加入超时（10 秒），请检查网络后刷新重试')); }, 10000);
       });
-      Promise.race([backend.joinRoom(room), timeout]).then(function (ok) {
+      Promise.race([backend.joinRoom(room, preferSlot), timeout]).then(function (ok) {
         if (ok) enterGame(room);
       }).catch(function (e) {
         lobbyError('进入房间失败：' + ((e && e.message) || e));
@@ -416,6 +426,22 @@
       snow.appendChild(f);
     }
 
+    /* 大厅角色选择：只记录偏好；真正占位时只在「该位置是空的」情况下生效，
+       不会把已经在玩的对方顶掉。 */
+    var roleCards = document.querySelectorAll('.role-card');
+    if (roleCards.length) {
+      Array.prototype.forEach.call(roleCards, function (c) {
+        c.addEventListener('click', function () {
+          preferSlot = c.dataset.slot === 'b' ? 'b' : 'a';
+          Array.prototype.forEach.call(roleCards, function (x) {
+            var on = (x === c);
+            x.classList.toggle('is-active', on);
+            x.setAttribute('aria-checked', on ? 'true' : 'false');
+          });
+        });
+      });
+    }
+
     $('#btn-demo').addEventListener('click', function () {
       backend = createDemoBackend();
       startBackend();
@@ -423,7 +449,7 @@
     $('#btn-create').addEventListener('click', function () {
       if (!backend) initFirebaseBackend();
       $('#lobby-error').classList.add('hidden');
-      backend.createRoom().then(function (code) {
+      backend.createRoom(preferSlot).then(function (code) {
         pendingRoom = code;
         afterJoined(code);
       }).catch(function (e) { lobbyError('创建失败：' + e.message); });
@@ -437,7 +463,7 @@
       if (!backend) initFirebaseBackend();
       $('#lobby-error').classList.add('hidden');
       pendingRoom = code;
-      backend.joinRoom(code).then(function (ok) {
+      backend.joinRoom(code, preferSlot).then(function (ok) {
         if (ok) afterJoined(code);
       }).catch(function (e) { lobbyError('加入失败：' + e.message); });
     });
@@ -456,6 +482,20 @@
     });
     window.addEventListener('offline', function () { setConn(false); });
     window.addEventListener('online', function () { toast('网络已恢复，正在重新同步…'); });
+
+    /* 本地预览入口：?demo=1 直接用本地演示后端进游戏（不连云端）。
+       给开发/验收用，普通访问不受影响。 */
+    if (/[?&]demo=1/.test(location.search)) {
+      // ?slot=b 可让本地预览直接以 Julie 身份进入（验收用）
+      var dq = new URLSearchParams(location.search).get('slot');
+      if (dq === 'b' || dq === 'a') preferSlot = dq;
+      if (dq === 'b') {
+        try { localStorage.setItem('omo-dev-slot', 'b'); } catch (e) { }
+      }
+      backend = createDemoBackend();
+      startBackend();
+      return;
+    }
 
     var configured = window.FIREBASE_CONFIG &&
       typeof window.FIREBASE_CONFIG.apiKey === 'string' &&

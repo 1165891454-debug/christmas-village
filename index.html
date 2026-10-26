@@ -45,20 +45,137 @@
       <button id="btn-demo" class="btn primary">先本地演示预览界面（不连云端）</button>
     </section>
 
-    <!-- 场景：大厅 -->
-    <section id="screen-lobby" class="screen hidden">
-      <h1>圣诞小镇 · 双人小游戏</h1>
-      <p class="muted">一人创建房间，把邀请链接发给对方；两部手机将进入同一个小镇，分别扮演 Charles 和 Julie。</p>
-      <button id="btn-create" class="btn primary big">🏡 创建我们的房间</button>
-      <div class="divider">— 或者 —</div>
-      <div class="join-row">
-        <input id="input-code" type="text" inputmode="latin" placeholder="输入房间码" maxlength="10" autocomplete="off" />
-        <button id="btn-join" class="btn">加入</button>
+    <!-- ============================================================
+         场景：大厅（v3 重做）
+         ============================================================ -->
+    <section id="screen-lobby" class="screen lobby hidden">
+      <!-- 圣诞夜景插画（纯 SVG，随屏幕铺满，不拉变形） -->
+      <div class="lobby-art" aria-hidden="true">
+        <svg viewBox="0 0 800 620" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#0b1730"/><stop offset="0.45" stop-color="#14284a"/>
+              <stop offset="0.78" stop-color="#29456f"/><stop offset="1" stop-color="#4a6285"/>
+            </linearGradient>
+            <radialGradient id="moonG" cx="0.4" cy="0.35" r="0.7">
+              <stop offset="0" stop-color="#fff6dd"/><stop offset="1" stop-color="#f0dcae"/>
+            </radialGradient>
+            <radialGradient id="glowG" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0" stop-color="rgba(255,214,140,.55)"/><stop offset="1" stop-color="rgba(255,214,140,0)"/>
+            </radialGradient>
+            <linearGradient id="snowG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#eef4ff"/><stop offset="1" stop-color="#c9d9ef"/>
+            </linearGradient>
+            <linearGradient id="treeG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#2f6b47"/><stop offset="1" stop-color="#1c4630"/>
+            </linearGradient>
+          </defs>
+          <rect width="800" height="620" fill="url(#skyG)"/>
+          <!-- 星星 -->
+          <g fill="#fff" opacity=".9">
+            <circle cx="70" cy="60" r="1.6"/><circle cx="150" cy="110" r="1.1"/><circle cx="238" cy="48" r="1.4"/>
+            <circle cx="322" cy="96" r="1"/><circle cx="430" cy="52" r="1.5"/><circle cx="512" cy="118" r="1.1"/>
+            <circle cx="596" cy="66" r="1.3"/><circle cx="690" cy="108" r="1.6"/><circle cx="748" cy="46" r="1"/>
+            <circle cx="110" cy="170" r="1"/><circle cx="470" cy="168" r="1.1"/><circle cx="660" cy="180" r="1"/>
+          </g>
+          <!-- 月亮 + 光晕 -->
+          <circle cx="646" cy="112" r="86" fill="url(#glowG)"/>
+          <circle cx="646" cy="112" r="34" fill="url(#moonG)"/>
+          <circle cx="634" cy="102" r="5" fill="#e9d6a8" opacity=".5"/>
+          <circle cx="656" cy="122" r="3.4" fill="#e9d6a8" opacity=".45"/>
+          <!-- 远山 -->
+          <path d="M0 400 L120 330 L240 392 L360 320 L500 396 L640 336 L800 400 L800 620 L0 620 Z" fill="#1d3355"/>
+          <path d="M0 430 L140 372 L280 428 L430 366 L580 430 L720 380 L800 428 L800 620 L0 620 Z" fill="#223d63"/>
+          <!-- 雪地 -->
+          <path d="M0 470 Q200 440 400 468 T800 462 L800 620 L0 620 Z" fill="url(#snowG)"/>
+          <!-- 远处的小屋 -->
+          <g>
+            <rect x="86" y="404" width="86" height="62" rx="4" fill="#6b4a34"/>
+            <path d="M78 406 L129 372 L180 406 Z" fill="#8d3b32"/>
+            <path d="M78 406 L129 372 L180 406 Z" fill="none" stroke="#f4ead8" stroke-width="4" stroke-linejoin="round" opacity=".8"/>
+            <rect x="103" y="424" width="20" height="20" rx="2" fill="#ffd27a"/>
+            <rect x="137" y="424" width="20" height="20" rx="2" fill="#ffd27a"/>
+            <rect x="120" y="446" width="16" height="20" rx="2" fill="#3f2a1c"/>
+          </g>
+          <g opacity=".95">
+            <rect x="612" y="418" width="104" height="66" rx="4" fill="#7a5340"/>
+            <path d="M604 420 L664 382 L724 420 Z" fill="#a34a3a"/>
+            <path d="M604 420 L664 382 L724 420 Z" fill="none" stroke="#f4ead8" stroke-width="4" stroke-linejoin="round" opacity=".8"/>
+            <rect x="630" y="440" width="22" height="22" rx="2" fill="#ffd27a"/>
+            <rect x="672" y="440" width="22" height="22" rx="2" fill="#ffd27a"/>
+            <rect x="654" y="462" width="18" height="22" rx="2" fill="#3f2a1c"/>
+          </g>
+          <!-- 主角圣诞树 -->
+          <g transform="translate(360,300)">
+            <circle cx="0" cy="40" r="150" fill="url(#glowG)" opacity=".55"/>
+            <rect x="-12" y="150" width="24" height="52" rx="6" fill="#5a3d29"/>
+            <path d="M0 -60 L92 78 L-92 78 Z" fill="url(#treeG)"/>
+            <path d="M0 -10 L112 118 L-112 118 Z" fill="url(#treeG)"/>
+            <path d="M0 46 L130 156 L-130 156 Z" fill="url(#treeG)"/>
+            <g fill="#f4ead8" opacity=".9">
+              <path d="M0 -60 L34 -8 L-34 -8 Z" opacity=".18"/>
+              <circle cx="-30" cy="88" r="5"/><circle cx="34" cy="104" r="4.4"/><circle cx="-72" cy="140" r="5"/>
+              <circle cx="78" cy="132" r="4.6"/><circle cx="8" cy="126" r="4"/><circle cx="-118" cy="150" r="4.6"/>
+              <circle cx="118" cy="150" r="4.6"/>
+            </g>
+            <g fill="#ffd27a">
+              <circle cx="-30" cy="88" r="3.4"/><circle cx="34" cy="104" r="3"/><circle cx="-72" cy="140" r="3.4"/>
+              <circle cx="78" cy="132" r="3"/><circle cx="8" cy="126" r="2.8"/><circle cx="-118" cy="150" r="3"/>
+              <circle cx="118" cy="150" r="3"/>
+            </g>
+            <g fill="#e0563f"><circle cx="-52" cy="112" r="5"/><circle cx="56" cy="86" r="4.4"/><circle cx="-6" cy="150" r="5"/></g>
+            <path d="M0 -86 L11 -62 L37 -62 L16 -46 L24 -20 L0 -36 L-24 -20 L-16 -46 L-37 -62 L-11 -62 Z" fill="#ffd94a"/>
+            <path d="M0 -86 L11 -62 L37 -62 L16 -46 L24 -20 L0 -36 L-24 -20 L-16 -46 L-37 -62 L-11 -62 Z" fill="none" stroke="#fff3c4" stroke-width="1.6"/>
+          </g>
+          <!-- 前景雪堆 -->
+          <path d="M0 560 Q140 536 300 558 T600 552 T800 566 L800 620 L0 620 Z" fill="#ffffff" opacity=".92"/>
+          <path d="M0 590 Q180 572 380 590 T800 584 L800 620 L0 620 Z" fill="#ffffff"/>
+        </svg>
       </div>
-      <p id="lobby-error" class="error hidden"></p>
+
+      <div class="lobby-inner">
+        <div class="lobby-hero">
+          <p class="lobby-kicker">我们的圣诞小镇</p>
+          <h1 class="lobby-title">Omo's<br><span>Christmas Village</span></h1>
+          <p class="lobby-sub">两个人的小镇，一座等你们点亮的圣诞树。</p>
+          <p class="lobby-tip">一人创建房间，把邀请链接发给对方；两部手机进入同一个小镇。</p>
+        </div>
+
+        <div class="lobby-card">
+          <div class="role-head">
+            <span class="role-head-title">你想做谁？</span>
+            <span class="role-head-sub">选定后角色不能互换</span>
+          </div>
+          <div class="role-pick" role="radiogroup" aria-label="选择角色">
+            <button class="role-card is-active" data-slot="a" role="radio" aria-checked="true">
+              <span class="role-face role-a">C</span>
+              <span class="role-name">Charles</span>
+              <span class="role-desc">黑框眼镜 · 深蓝外套</span>
+            </button>
+            <button class="role-card" data-slot="b" role="radio" aria-checked="false">
+              <span class="role-face role-b">J</span>
+              <span class="role-name">Julie</span>
+              <span class="role-desc">长发 · 白色毛线帽</span>
+            </button>
+          </div>
+
+          <button id="btn-create" class="btn primary big">🏡 创建我们的房间</button>
+
+          <div class="or-row"><span>或者，输入房间码</span></div>
+
+          <div class="join-row">
+            <input id="input-code" type="text" inputmode="latin" placeholder="房间码" maxlength="10" autocomplete="off" />
+            <button id="btn-join" class="btn">加入</button>
+          </div>
+          <p id="lobby-error" class="error hidden"></p>
+          <p class="lobby-foot">2026 年 12 月 25 日 · 只属于你们两个人</p>
+        </div>
+      </div>
     </section>
 
-    <!-- 场景：小镇（游戏主界面） -->
+    <!-- ============================================================
+         场景：小镇（游戏主界面）
+         ============================================================ -->
     <section id="screen-game" class="screen hidden">
       <canvas id="game-canvas"></canvas>
 
@@ -68,14 +185,12 @@
           <span id="hud-room" class="tag"></span>
           <span id="partner-presence" class="presence"><i class="dot"></i><span>…</span></span>
         </div>
-        <button id="btn-menu" class="hud-btn">☰</button>
+        <button id="btn-menu" class="hud-btn" aria-label="菜单">☰</button>
       </div>
 
-      <!-- 主线任务角标 -->
-      <div id="quest-chip" class="quest-chip"></div>
-      <!-- 资源角标（v2：木材/鲜花/种子/手工礼物） -->
-      <div id="res-chip" class="res-chip">🪵 0 · 🌸 0 · 🌱 0 · 🎁 0</div>
-      <!-- dev 测试模式角标 -->
+      <!-- 主线任务 / 资源（可点开对应面板） -->
+      <button id="quest-chip" class="quest-chip" type="button"></button>
+      <button id="res-chip" class="res-chip" type="button">🪵 0 · 🌸 0 · 🌱 0 · 🎁 0</button>
       <div id="dev-chip" class="dev-chip hidden">🛠️ DEV</div>
 
       <!-- 交互按钮 -->
@@ -84,10 +199,16 @@
       <!-- 虚拟摇杆 -->
       <div id="joy-base"><div id="joy-knob"></div></div>
 
+      <!-- 面板遮罩：点击它才关闭面板（面板内部点击不会关闭） -->
+      <div id="panel-scrim" class="hidden"></div>
+
       <!-- 对话框 -->
-      <div id="dlg" class="panel hidden">
-        <div id="dlg-name" class="panel-name"></div>
-        <div id="dlg-text"></div>
+      <div id="dlg" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div id="dlg-name" class="panel-name"></div>
+          <button class="panel-x" data-close="dlg" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body"><div id="dlg-text"></div></div>
         <div class="panel-actions">
           <button id="dlg-next" class="btn primary">继续 ▸</button>
           <button id="dlg-close" class="btn ghost small">关闭</button>
@@ -95,11 +216,16 @@
       </div>
 
       <!-- 圣诞树面板 -->
-      <div id="tree-panel" class="panel hidden">
-        <div class="panel-name">🎄 广场圣诞树</div>
-        <div id="tree-stage-text" class="panel-sub"></div>
-        <div id="tree-desc"></div>
-        <div id="tree-need" class="panel-sub"></div>
+      <div id="tree-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🎄 广场圣诞树</div>
+          <button class="panel-x" data-close="tree-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <div id="tree-stage-text" class="panel-sub"></div>
+          <div id="tree-desc"></div>
+          <div id="tree-need" class="panel-sub"></div>
+        </div>
         <div class="panel-actions">
           <button id="tree-deco" class="btn primary">✨ 装饰圣诞树</button>
           <button id="tree-close" class="btn ghost small">关闭</button>
@@ -107,37 +233,53 @@
       </div>
 
       <!-- 换装面板 -->
-      <div id="outfit-modal" class="panel hidden">
-        <div class="panel-name">👗 圣诞小铺 · 换装</div>
-        <p class="muted">选一套吧，对方会实时看到你的新造型。</p>
-        <div class="outfits" id="outfit-list">
-          <button class="outfit-btn" data-outfit="winter">🧣 冬日暖装</button>
-          <button class="outfit-btn" data-outfit="santa">🎅 圣诞装</button>
-          <button class="outfit-btn" data-outfit="home">🌙 居家睡衣</button>
+      <div id="outfit-modal" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">👗 圣诞小铺 · 换装</div>
+          <button class="panel-x" data-close="outfit-modal" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <p class="muted">选一套吧，对方会实时看到你的新造型。</p>
+          <div class="outfits" id="outfit-list">
+            <button class="outfit-btn" data-outfit="winter">🧣 冬日暖装</button>
+            <button class="outfit-btn" data-outfit="santa">🎅 圣诞装</button>
+            <button class="outfit-btn" data-outfit="home">🌙 居家睡衣</button>
+          </div>
         </div>
         <div class="panel-actions"><button id="outfit-close" class="btn ghost small">关闭</button></div>
       </div>
 
-      <!-- 回忆卡片（原创像素插画 / 以后也可放照片） -->
-      <div id="mem-photo" class="panel hidden">
-        <div id="mem-photo-title" class="panel-name"></div>
-        <canvas id="mem-art-canvas" class="mem-art"></canvas>
-        <img id="mem-photo-img" class="mem-img" alt="回忆照片" style="display:none" />
-        <div id="mem-photo-text"></div>
+      <!-- 回忆卡片 -->
+      <div id="mem-photo" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div id="mem-photo-title" class="panel-name"></div>
+          <button class="panel-x" data-close="mem-photo" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <canvas id="mem-art-canvas" class="mem-art"></canvas>
+          <img id="mem-photo-img" class="mem-img" alt="回忆照片" style="display:none" />
+          <div id="mem-photo-text"></div>
+        </div>
         <div class="panel-actions"><button id="mem-close" class="btn ghost small">合上回忆</button></div>
       </div>
 
-      <!-- 旅行回忆册（16 段） -->
-      <div id="book-panel" class="panel book-panel hidden">
-        <div class="panel-name">📖 旅行回忆册 <span id="book-count" class="panel-sub"></span></div>
-        <div id="book-list" class="book-list"></div>
+      <!-- 旅行回忆册 -->
+      <div id="book-panel" class="panel book-panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">📖 旅行回忆册 <span id="book-count" class="panel-sub"></span></div>
+          <button class="panel-x" data-close="book-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body"><div id="book-list" class="book-list"></div></div>
         <div class="panel-actions"><button id="book-close" class="btn ghost small">合上册子</button></div>
       </div>
 
-      <!-- 种植地面板（温室） -->
-      <div id="plot-panel" class="panel hidden">
-        <div id="plot-title" class="panel-name"></div>
-        <div id="plot-body"></div>
+      <!-- 种植地面板 -->
+      <div id="plot-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div id="plot-title" class="panel-name"></div>
+          <button class="panel-x" data-close="plot-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body"><div id="plot-body"></div></div>
         <div class="panel-actions plot-actions">
           <button id="btn-plant-flower" class="btn primary hidden">🌱 种花（30 分钟）</button>
           <button id="btn-plant-tree" class="btn primary hidden">🌲 种树（6 小时）</button>
@@ -147,28 +289,93 @@
       </div>
 
       <!-- 工坊制作面板 -->
-      <div id="craft-panel" class="panel hidden">
-        <div class="panel-name">🛠️ 礼物工坊 · 制作</div>
-        <div id="craft-res" class="panel-sub"></div>
-        <div class="craft-list">
-          <button id="craft-bird" class="btn craft-btn"></button>
-          <button id="craft-musicbox" class="btn craft-btn"></button>
-          <button id="craft-star" class="btn craft-btn"></button>
+      <div id="craft-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🛠️ 礼物工坊 · 制作</div>
+          <button class="panel-x" data-close="craft-panel" aria-label="关闭">✕</button>
         </div>
-        <p class="muted small-note">手工礼物 🎁 用来把广场圣诞树点到「全树点亮」。</p>
+        <div class="panel-body">
+          <div id="craft-res" class="panel-sub"></div>
+          <div class="craft-list">
+            <button id="craft-bird" class="btn craft-btn"></button>
+            <button id="craft-musicbox" class="btn craft-btn"></button>
+            <button id="craft-star" class="btn craft-btn"></button>
+          </div>
+          <p class="muted small-note">手工礼物 🎁 用来把广场圣诞树点到「全树点亮」。</p>
+        </div>
         <div class="panel-actions"><button id="craft-close" class="btn ghost small">关闭</button></div>
       </div>
 
+      <!-- 资源面板 -->
+      <div id="res-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🎒 我们的家当</div>
+          <button class="panel-x" data-close="res-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body"><div id="res-body"></div></div>
+        <div class="panel-actions"><button class="btn ghost small" data-close="res-panel">关闭</button></div>
+      </div>
+
+      <!-- 任务面板 -->
+      <div id="quest-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">📜 今晚要做的事</div>
+          <button class="panel-x" data-close="quest-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body"><div id="quest-body"></div></div>
+        <div class="panel-actions"><button class="btn ghost small" data-close="quest-panel">关闭</button></div>
+      </div>
+
+      <!-- 设置面板 -->
+      <div id="settings-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">⚙️ 设置</div>
+          <button class="panel-x" data-close="settings-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <div class="set-row">
+            <div>
+              <b>音乐与音效</b>
+              <span>合成的小镇背景音乐和交互音效</span>
+            </div>
+            <button id="set-music" class="switch is-on" role="switch" aria-checked="true">开</button>
+          </div>
+          <div class="set-row">
+            <div>
+              <b>邀请对方</b>
+              <span>把房间链接发给 Julie</span>
+            </div>
+            <button id="set-invite" class="btn small">发送</button>
+          </div>
+          <div class="set-row">
+            <div>
+              <b>画面清晰度</b>
+              <span>已按设备像素比原生渲染，不再随帧率降低</span>
+            </div>
+            <span class="set-value">自动</span>
+          </div>
+          <button id="set-leave" class="btn danger-line">🚪 返回大厅</button>
+        </div>
+        <div class="panel-actions"><button class="btn ghost small" data-close="settings-panel">关闭</button></div>
+      </div>
+
       <!-- 菜单 -->
-      <div id="menu-panel" class="panel hidden">
-        <div class="panel-name">☰ 菜单</div>
-        <button id="menu-outfit" class="menu-item">👗 换装</button>
-        <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
-        <button id="menu-book" class="menu-item">📖 旅行回忆册</button>
-        <button id="menu-music" class="menu-item">🔊 音乐音效：开</button>
-        <button id="menu-photo" class="menu-item">📸 圣诞合影</button>
-        <button id="menu-invite" class="menu-item">📨 邀请对方</button>
-        <button id="menu-leave" class="menu-item danger">🚪 返回大厅</button>
+      <div id="menu-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">☰ 菜单</div>
+          <button class="panel-x" data-close="menu-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
+          <button id="menu-book" class="menu-item">📖 旅行回忆册</button>
+          <button id="menu-res" class="menu-item">🎒 我们的家当</button>
+          <button id="menu-quest" class="menu-item">📜 今晚要做的事</button>
+          <button id="menu-settings" class="menu-item">⚙️ 设置</button>
+          <button id="menu-music" class="menu-item">🔊 音乐音效：开</button>
+          <button id="menu-photo" class="menu-item">📸 圣诞合影</button>
+          <button id="menu-invite" class="menu-item">📨 邀请对方</button>
+          <button id="menu-leave" class="menu-item danger">🚪 返回大厅</button>
+        </div>
         <div class="panel-actions"><button id="menu-close" class="btn ghost small">关闭</button></div>
       </div>
 
@@ -210,6 +417,7 @@
 
   <script src="firebase-config.js"></script>
   <script src="memories.js"></script>
+  <script src="chars.js"></script>
   <script src="sprites.js"></script>
   <script src="world.js"></script>
   <script src="game.js"></script>

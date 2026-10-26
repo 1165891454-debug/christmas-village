@@ -112,7 +112,9 @@ body.playing #screen-game { border-radius: 0; }
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   background: #dde8f6;
-  image-rendering: pixelated;
+  /* v3：不再用 pixelated。画布已按设备像素比原生渲染，
+     再叠加最近邻放大只会让曲线和文字发毛。 */
+  image-rendering: auto;
   touch-action: none;
 }
 
@@ -379,3 +381,250 @@ body.playing #screen-game { border-radius: 0; }
   .book-list { max-height: 44vh; }
   .panel { padding: 10px 12px; }
 }
+
+/* ============================================================
+   v3.0 — 开始界面重做 + 面板体系整改
+   ============================================================ */
+
+/* ---------- 大厅：圣诞夜景 ---------- */
+#screen-lobby.lobby {
+  position: relative; overflow: hidden;
+  justify-content: center; align-items: center;
+  margin: 0; max-width: none; width: 100%;
+  border-radius: 14px;
+}
+.lobby-art { position: absolute; inset: 0; z-index: 0; overflow: hidden; }
+.lobby-art svg { width: 100%; height: 100%; display: block; }
+.lobby-art::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(8,16,32,.72) 0%, rgba(8,16,32,.30) 46%, rgba(8,16,32,.62) 100%);
+}
+.lobby-inner {
+  position: relative; z-index: 2;
+  width: 100%; max-width: 1060px;
+  padding: 14px 16px calc(14px + var(--safe-b));
+  display: flex; flex-direction: column; gap: 12px;
+  align-items: stretch;
+}
+.lobby-hero { color: #f7f0e2; text-align: left; }
+.lobby-kicker {
+  margin: 0 0 2px; font-size: 11.5px; letter-spacing: .32em;
+  color: #f0c040; font-weight: 700; text-transform: uppercase;
+  text-shadow: 0 1px 10px rgba(0,0,0,.7);
+}
+.lobby-title {
+  margin: 0; font-family: Georgia, "Songti SC", "Times New Roman", serif;
+  font-weight: 700; line-height: 1.02;
+  font-size: clamp(30px, 7.4vw, 58px);
+  letter-spacing: -.01em;
+  color: #fffaf0;
+  text-shadow: 0 2px 0 rgba(90,40,20,.35), 0 10px 34px rgba(0,0,0,.75);
+}
+.lobby-title span { color: #ffd98a; }
+.lobby-sub {
+  margin: 8px 0 0; font-size: clamp(13px, 2.2vw, 16px); line-height: 1.6;
+  color: #dfe8f5; text-shadow: 0 1px 12px rgba(0,0,0,.85);
+}
+.lobby-tip {
+  margin: 6px 0 0; font-size: 12.5px; line-height: 1.6;
+  color: rgba(223,232,245,.72); text-shadow: 0 1px 10px rgba(0,0,0,.8);
+  max-width: 46ch;
+}
+.lobby-card {
+  background: linear-gradient(180deg, rgba(30,44,70,.90), rgba(18,28,48,.94));
+  border: 1.5px solid rgba(240,192,64,.55);
+  border-radius: 20px;
+  padding: 14px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,235,200,.18);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.role-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.role-head-title { font-size: 13.5px; font-weight: 700; color: #ffe08a; }
+.role-head-sub { font-size: 11px; color: rgba(223,232,245,.55); }
+.role-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.role-card {
+  appearance: none; cursor: pointer; text-align: left;
+  display: grid; grid-template-columns: 38px 1fr; grid-template-rows: auto auto;
+  column-gap: 9px; align-items: center;
+  padding: 9px 10px; border-radius: 14px;
+  background: rgba(255,240,215,.07);
+  border: 1.5px solid rgba(240,192,64,.28);
+  color: var(--text); font: inherit;
+  transition: border-color .12s ease, background .12s ease, transform .08s ease;
+}
+.role-card:active { transform: scale(.985); }
+.role-card.is-active { border-color: #f0c040; background: rgba(240,192,64,.16); }
+.role-face {
+  grid-row: 1 / span 2; width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-family: Georgia, serif; font-weight: 700; font-size: 17px; color: #2a1c10;
+  box-shadow: inset 0 -3px 0 rgba(0,0,0,.18);
+}
+.role-a { background: linear-gradient(180deg, #cfe0f2, #9db6d4); }
+.role-b { background: linear-gradient(180deg, #f6d3c4, #dba28f); }
+.role-name { font-size: 14px; font-weight: 700; line-height: 1.2; }
+.role-desc { font-size: 10.5px; color: rgba(223,232,245,.6); line-height: 1.3; }
+.or-row { display: flex; align-items: center; gap: 10px; margin: 11px 0 8px; }
+.or-row::before, .or-row::after { content: ''; height: 1px; flex: 1; background: rgba(255,255,255,.14); }
+.or-row span { font-size: 11.5px; color: rgba(223,232,245,.55); }
+.lobby-card .join-row input {
+  background: rgba(10,18,32,.7); border: 1px solid rgba(255,255,255,.18);
+  min-height: 46px;
+}
+.lobby-card .btn { min-height: 48px; }
+.lobby-card .btn.primary.big {
+  background: linear-gradient(180deg, #d64545 0%, #b3282d 100%);
+  border: 1.5px solid rgba(255,224,138,.75);
+  box-shadow: 0 8px 22px rgba(140,20,26,.45), inset 0 1px 0 rgba(255,220,180,.3);
+}
+.lobby-foot {
+  margin: 10px 0 0; text-align: center;
+  font-size: 10.5px; color: rgba(223,232,245,.42); letter-spacing: .04em;
+}
+/* 横屏：左文右卡 */
+@media (min-width: 720px) {
+  .lobby-inner { flex-direction: row; align-items: flex-end; gap: 26px; padding: 20px 26px calc(20px + var(--safe-b)); }
+  .lobby-hero { flex: 1 1 auto; padding-bottom: 8px; }
+  .lobby-card { flex: 0 0 412px; max-width: 46vw; }
+}
+/* 矮屏横屏（iPhone 横放）：压缩纵向 */
+@media (max-height: 430px) and (min-width: 720px) {
+  .lobby-title { font-size: clamp(26px, 4.4vw, 40px); }
+  .lobby-card { padding: 11px 12px; }
+  .role-pick { margin-bottom: 9px; }
+  .role-card { padding: 7px 9px; }
+  .lobby-foot { display: none; }
+  .lobby-tip { display: none; }
+}
+
+/* ---------- 面板体系（统一头部 + 关闭 + 滚动） ---------- */
+#panel-scrim {
+  position: absolute; inset: 0; z-index: 19;
+  background: rgba(6,10,20,.55);
+  backdrop-filter: blur(1.5px); -webkit-backdrop-filter: blur(1.5px);
+}
+.panel {
+  position: absolute; left: 50%; top: 50%; bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 20px));
+  max-height: min(84%, 620px);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 18px;
+  z-index: 20;
+}
+.panel-head {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 12px 10px 16px;
+  border-bottom: 1px solid rgba(240,192,64,.22);
+  background: rgba(0,0,0,.14);
+}
+.panel-head .panel-name { margin: 0; font-size: 15px; }
+.panel-x {
+  flex: 0 0 auto;
+  width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(255,240,215,.12); border: 1px solid rgba(240,192,64,.45);
+  color: #ffe08a; font-size: 15px; line-height: 1; cursor: pointer;
+  touch-action: manipulation;
+}
+.panel-x:active { background: rgba(240,192,64,.3); transform: scale(.94); }
+.panel-body {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px 16px 6px;
+  overscroll-behavior: contain;
+}
+.panel-actions {
+  flex: 0 0 auto;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(240,192,64,.18);
+  background: rgba(0,0,0,.12);
+  flex-wrap: wrap;
+}
+.panel-actions .btn { min-height: 42px; }
+/* 面板打开时，摇杆 / 交互按钮 / 角标都退场，避免遮挡与误触 */
+#screen-game.panel-open #joy-base,
+#screen-game.panel-open #btn-interact,
+#screen-game.panel-open #quest-chip,
+#screen-game.panel-open #res-chip {
+  opacity: 0; visibility: hidden; pointer-events: none;
+}
+#joy-base, #btn-interact, .quest-chip, .res-chip { transition: opacity .16s ease; }
+
+/* 任务 / 资源角标改为可点按钮 */
+.quest-chip, .res-chip { pointer-events: auto; cursor: pointer; font-family: inherit; }
+.quest-chip { text-align: left; }
+.quest-chip:active, .res-chip:active { filter: brightness(1.18); }
+
+/* 资源 / 任务 / 设置面板内容 */
+.res-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 2px; border-bottom: 1px dashed rgba(240,192,64,.18);
+  font-size: 14px;
+}
+.res-line:last-child { border-bottom: none; }
+.res-line b { color: #ffe08a; font-weight: 700; }
+.res-line span { color: #d9cbb0; font-size: 12.5px; text-align: right; }
+.quest-line { display: flex; gap: 10px; padding: 9px 0; font-size: 13.5px; line-height: 1.5; border-bottom: 1px dashed rgba(240,192,64,.14); }
+.quest-line:last-child { border-bottom: none; }
+.quest-mark { flex: 0 0 20px; text-align: center; }
+.quest-line.done { color: rgba(217,203,176,.6); }
+.quest-line.done .quest-mark { color: #7fd18a; }
+.set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 0; border-bottom: 1px dashed rgba(240,192,64,.18);
+}
+.set-row:last-of-type { border-bottom: none; }
+.set-row b { display: block; font-size: 14px; color: #f4ead8; font-weight: 700; }
+.set-row span { display: block; font-size: 11.5px; color: rgba(217,203,176,.66); margin-top: 2px; line-height: 1.45; max-width: 30ch; }
+.set-value { color: #ffe08a !important; font-size: 13px !important; font-weight: 700; }
+.switch {
+  flex: 0 0 auto; min-width: 58px; min-height: 34px; padding: 0 12px;
+  border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700;
+  background: rgba(255,240,215,.12); border: 1px solid rgba(240,192,64,.4); color: #d9cbb0;
+}
+.switch.is-on { background: rgba(88,179,104,.28); border-color: #7fd18a; color: #d8f7de; }
+.btn.danger-line {
+  width: 100%; margin-top: 12px;
+  background: rgba(192,57,43,.22); border: 1px solid rgba(224,86,63,.55); color: #ffd9d0;
+}
+
+/* v3.1 — 面板可用性微调（横屏矮屏下不再裁切内容） */
+#panel-scrim { position: fixed; }          /* 连顶栏一起压暗，焦点更集中 */
+.panel { max-height: 92%; width: min(600px, calc(100% - 20px)); }
+.panel-head { padding: 10px 10px 8px 15px; }
+.panel-body { padding: 10px 15px 4px; }
+.panel-actions { padding: 8px 15px calc(8px + env(safe-area-inset-bottom, 0px)); }
+.res-line { padding: 8px 2px; font-size: 13.5px; }
+.quest-line { padding: 7px 0; font-size: 13px; }
+/* 横屏时资源面板两列排布，7 行也能一屏看完 */
+@media (min-width: 720px) {
+  #res-body { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; }
+  #res-body .res-line:nth-child(7) { grid-column: 1 / -1; }
+}
+/* 面板可滚动时，底部给一点渐隐提示 */
+.panel-body { scrollbar-width: thin; }
+
+/* v3.2 — 竖屏/窄屏修复 + 大厅去掉多余顶栏 */
+body:not(.playing) #topbar { display: none; }   /* 大厅不需要再重复一遍标题 */
+.lobby-inner { max-width: 100%; min-width: 0; }
+.lobby-card { width: 100%; min-width: 0; }
+.role-pick { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.role-card { min-width: 0; }
+.role-name, .role-desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#btn-join { flex: 0 0 auto; }
+.lobby-card .join-row { width: 100%; }
+/* 竖屏：内容靠下，天空留给插画 */
+@media (max-width: 719px) {
+  #screen-lobby.lobby { justify-content: flex-end; }
+  .lobby-inner { padding: 12px 12px calc(16px + var(--safe-b)); }
+  .lobby-art::after {
+    background: linear-gradient(180deg, rgba(8,16,32,.10) 0%, rgba(8,16,32,.35) 42%, rgba(8,16,32,.80) 78%, rgba(8,16,32,.92) 100%);
+  }
+  .lobby-title { font-size: clamp(28px, 8.6vw, 44px); }
+  .lobby-card { padding: 12px; }
+}
+body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏版式，不需要提示条 */
