@@ -335,28 +335,44 @@ window.Game = (function () {
     }
 
     bindInput();
+    watchPanels();
     S.active = true;
-    refreshHUD();
-    if (S.dev) {
+    refreshHUD();    if (S.dev) {
       var dc = $('#dev-chip');
       if (dc) dc.classList.remove('hidden');
       toast('🛠️ 开发测试模式：生长 6-10 秒 · 日期门放开', 4000);
     }
-    requestAnimationFrame(loop);
+    startLoop();
+
+    /* 仅 dev 模式：?dev=1&open=res|quest|settings|book|outfit|tree|menu
+       用于逐个截图验收面板（正常游玩不会触发）。 */
+    if (S.dev) {
+      var m = /[?&]open=([a-z]+)/.exec(location.search);
+      var openers = {
+        res: openResPanel, quest: openQuestPanel, settings: openSettings,
+        book: openBook, outfit: openOutfit, tree: openTreePanel, menu: toggleMenu
+      };
+      if (m && openers[m[1]]) setTimeout(openers[m[1]], 400);
+    }
   }
 
   function active() { return S.active; }
 
   function resize() {
     if (!S.canvas) return;
-    var cap = [1, 1.5, 2][S.q.lvl];
-    var dpr = Math.min(window.devicePixelRatio || 1, cap);
+    /* v3：分辨率不再随帧率降级。
+     * 旧代码按性能分级把 DPR 压到 1 或 1.5，再配合 CSS image-rendering:pixelated，
+     * 结果是真机上整屏被最近邻放大 2~3 倍——这是"画面粗糙"最直接的一环。
+     * 现在始终按设备像素比（上限 3）渲染；性能不够时只减粒子与光晕，不降清晰度。 */
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
     S.dpr = dpr;
     S.view.w = S.canvas.clientWidth;
     S.view.h = S.canvas.clientHeight;
     S.canvas.width = Math.round(S.view.w * dpr);
     S.canvas.height = Math.round(S.view.h * dpr);
     S.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    S.ctx.imageSmoothingEnabled = true;
+    S.ctx.imageSmoothingQuality = 'high';
   }
 
   /* ---------- 自适应性能分级 ---------- */
@@ -375,7 +391,7 @@ window.Game = (function () {
     while (S.flakes.length < target) {
       S.flakes.push({ x: Math.random() * World.width, y: Math.random() * World.height, r: 1 + Math.random() * 2.2, v: 22 + Math.random() * 40, ph: Math.random() * 7 });
     }
-    resize();
+    // 不再调用 resize()：清晰度固定，性能只通过粒子数量调节
   }
 
   /* ---------- 数据入口（app.js 调用）---------- */
@@ -416,6 +432,8 @@ window.Game = (function () {
 
   /* ---------- 输入 ---------- */
   function bindInput() {
+    if (S.inputBound) return;   // 防止重复 enter 时把监听器叠一层（重复监听会让摇杆/按键被处理多次）
+    S.inputBound = true;
     window.addEventListener('resize', resize);
 
     window.addEventListener('keydown', function (e) {
@@ -425,6 +443,16 @@ window.Game = (function () {
       if (e.key === 'Escape') { closeAllPanels(); }
     });
     window.addEventListener('keyup', function (e) { S.keys[e.key.toLowerCase()] = false; });
+
+    /* 任何"输入中断"都立刻归零：切后台 / 失焦 / 页面隐藏后，角色不许继续走 */
+    function dropInput() {
+      S.keys = {};
+      joyReset();
+      lastT = 0;   // 回来时不要把后台那段时间算成位移
+    }
+    window.addEventListener('blur', dropInput);
+    window.addEventListener('pagehide', dropInput);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) dropInput(); });
 
     document.addEventListener('touchmove', function (e) {
       if (S.active) e.preventDefault();
@@ -439,61 +467,123 @@ window.Game = (function () {
     }
     document.addEventListener('pointerdown', firstGesture);
 
-    // 虚拟摇杆（触摸）
+    /* 虚拟摇杆 —— v3 重写
+     * 旧实现的问题（已实测）：
+     *  1) touchstart 与 mousedown 双绑定，iOS 在 touchend 后会补发鼠标事件 → 摇杆可能残留输入；
+     *  2) 摇杆位移只要 >12% 就被归一化成满速 → "一碰就跑"，无法慢走；
+     *  3) 摇杆中心只在按下瞬间取一次，横竖屏切换或安全区变化后会偏移。
+     * 现在：只用 Pointer Events（单一输入源 + setPointerCapture），输出 0~1 的模拟量，
+     * 带死区与平滑曲线；任何中断（抬起 / 取消 / 失焦 / 切后台）都立刻归零。 */
     var base = $('#joy-base'), knob = $('#joy-knob');
-    function joyStart(e) {
-      var t = e.changedTouches ? e.changedTouches[0] : e;
-      S.joy.active = true; S.joy.id = t.identifier !== undefined ? t.identifier : 'm';
-      var rect = base.getBoundingClientRect();
-      S.joy.bx = rect.left + rect.width / 2; S.joy.by = rect.top + rect.height / 2;
-      joyMove(e);
+    var JOY_MAX = 46, JOY_DEAD = 0.14;
+    S.joy = { active: false, pid: null, bx: 0, by: 0, dx: 0, dy: 0, mag: 0 };
+
+    function joyCenter() {
+      var r = base.getBoundingClientRect();
+      S.joy.bx = r.left + r.width / 2;
+      S.joy.by = r.top + r.height / 2;
     }
-    function joyMove(e) {
-      if (!S.joy.active) return;
-      var list = e.changedTouches || [e];
-      for (var i = 0; i < list.length; i++) {
-        var t = list[i];
-        if (S.joy.id !== 'm' && t.identifier !== S.joy.id) continue;
-        var dx = t.clientX - S.joy.bx, dy = t.clientY - S.joy.by;
-        var len = Math.sqrt(dx * dx + dy * dy), max = 46;
-        if (len > max) { dx = dx / len * max; dy = dy / len * max; }
-        S.joy.dx = dx / max; S.joy.dy = dy / max;
-        knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    function joyReset() {
+      S.joy.active = false; S.joy.pid = null;
+      S.joy.dx = 0; S.joy.dy = 0; S.joy.mag = 0;
+      if (knob) knob.style.transform = 'translate(0,0)';
+    }
+    function joyApply(cx, cy) {
+      var dx = cx - S.joy.bx, dy = cy - S.joy.by;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      var nx = 0, ny = 0;
+      if (len > JOY_MAX) { nx = dx / len * JOY_MAX; ny = dy / len * JOY_MAX; }
+      else { nx = dx; ny = dy; }
+      var mag = Math.min(1, len / JOY_MAX);
+      var out = 0;
+      if (mag > JOY_DEAD) {
+        var f = (mag - JOY_DEAD) / (1 - JOY_DEAD);
+        out = f * f * (3 - 2 * f);            // smoothstep：轻推很慢，推到底才满速
       }
+      S.joy.dx = nx / JOY_MAX;
+      S.joy.dy = ny / JOY_MAX;
+      S.joy.mag = out;
+      if (knob) knob.style.transform = 'translate(' + nx + 'px,' + ny + 'px)';
+    }
+    base.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       e.preventDefault();
-    }
+      S.joy.active = true; S.joy.pid = e.pointerId;
+      joyCenter();
+      try { base.setPointerCapture(e.pointerId); } catch (err) { }
+      joyApply(e.clientX, e.clientY);
+    });
+    base.addEventListener('pointermove', function (e) {
+      if (!S.joy.active || e.pointerId !== S.joy.pid) return;
+      e.preventDefault();
+      joyApply(e.clientX, e.clientY);
+    });
     function joyEnd(e) {
-      var list = e.changedTouches || [e];
-      for (var i = 0; i < list.length; i++) {
-        var t = list[i];
-        if (S.joy.id === 'm' || t.identifier === S.joy.id) {
-          S.joy.active = false; S.joy.dx = 0; S.joy.dy = 0;
-          knob.style.transform = 'translate(0,0)';
-        }
-      }
+      if (!S.joy.active) return;
+      if (e && e.pointerId !== undefined && e.pointerId !== S.joy.pid) return;
+      joyReset();
     }
-    base.addEventListener('touchstart', joyStart, { passive: false });
-    base.addEventListener('touchmove', joyMove, { passive: false });
-    base.addEventListener('touchend', joyEnd);
-    base.addEventListener('touchcancel', joyEnd);
-    base.addEventListener('mousedown', joyStart);
-    window.addEventListener('mousemove', function (e) { if (S.joy.active && S.joy.id === 'm') joyMove(e); });
-    window.addEventListener('mouseup', function (e) { if (S.joy.id === 'm') joyEnd(e); });
+    base.addEventListener('pointerup', joyEnd);
+    base.addEventListener('pointercancel', joyEnd);
+    base.addEventListener('lostpointercapture', joyEnd);
 
     $('#btn-interact').addEventListener('click', function () { doInteract(); });
     $('#btn-menu').addEventListener('click', function () { toggleMenu(); });
     $('#menu-close').addEventListener('click', function () { closeAllPanels(); });
-    $('#menu-outfit').addEventListener('click', function () { closeAllPanels(); openOutfit(); });
+    var mo = $('#menu-outfit');
+    if (mo) mo.addEventListener('click', function () { closeAllPanels(); openOutfit(); });
     $('#menu-tree').addEventListener('click', function () { closeAllPanels(); openTreePanel(); });
     $('#menu-invite').addEventListener('click', function () { closeAllPanels(); S.opts.invite && S.opts.invite(); });
     $('#menu-photo').addEventListener('click', function () { closeAllPanels(); openPhoto(); });
     $('#menu-book').addEventListener('click', function () { closeAllPanels(); openBook(); });
-    var mMusic = $('#menu-music');
-    if (mMusic) mMusic.addEventListener('click', function () {
-      var nowOn = Snd.toggle();
-      mMusic.textContent = nowOn ? '🔊 音乐音效：开' : '🔈 音乐音效：关';
-      toast(nowOn ? '音乐已开启 🎵' : '音乐已关闭');
+    $('#menu-res').addEventListener('click', function () { closeAllPanels(); openResPanel(); });
+    $('#menu-quest').addEventListener('click', function () { closeAllPanels(); openQuestPanel(); });
+    $('#menu-settings').addEventListener('click', function () { closeAllPanels(); openSettings(); });
+
+    /* 统一的关闭入口：任何带 data-close 的按钮都走同一条路，
+       以后加面板只要写上按钮就一定能关。 */
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      var c = t && t.closest ? t.closest('[data-close]') : null;
+      if (c) { e.preventDefault(); closeAllPanels(); }
     });
+    var scrim = $('#panel-scrim');
+    if (scrim) scrim.addEventListener('click', function () { closeAllPanels(); });
+    // 面板内部点击不关闭面板；但面板自己的 ✕ / data-close 按钮必须有效
+    PANEL_IDS.forEach(function (s) {
+      var el = $(s);
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        var c = e.target && e.target.closest ? e.target.closest('[data-close]') : null;
+        if (c) { e.preventDefault(); closeAllPanels(); }
+        e.stopPropagation();   // 不要冒泡到遮罩/画布
+      });
+    });
+    // 任务 / 资源角标：点开对应面板
+    var qc = $('#quest-chip');
+    if (qc) qc.addEventListener('click', function () { openQuestPanel(); });
+    var rc = $('#res-chip');
+    if (rc) rc.addEventListener('click', function () { openResPanel(); });
+    function toggleMusic() {
+      var nowOn = Snd.toggle();
+      var m1 = $('#menu-music');
+      if (m1) m1.textContent = nowOn ? '🔊 音乐音效：开' : '🔈 音乐音效：关';
+      var m2 = $('#set-music');
+      if (m2) {
+        m2.textContent = nowOn ? '开' : '关';
+        m2.classList.toggle('is-on', nowOn);
+        m2.setAttribute('aria-checked', nowOn ? 'true' : 'false');
+      }
+      toast(nowOn ? '音乐已开启 🎵' : '音乐已关闭');
+    }
+    var mMusic = $('#menu-music');
+    if (mMusic) mMusic.addEventListener('click', toggleMusic);
+    var setMusic = $('#set-music');
+    if (setMusic) setMusic.addEventListener('click', toggleMusic);
+    var setInvite = $('#set-invite');
+    if (setInvite) setInvite.addEventListener('click', function () { closeAllPanels(); S.opts.invite && S.opts.invite(); });
+    var setLeave = $('#set-leave');
+    if (setLeave) setLeave.addEventListener('click', function () { S.opts.onLeave && S.opts.onLeave(); });
     $('#menu-leave').addEventListener('click', function () { S.opts.onLeave && S.opts.onLeave(); });
     $('#dlg-close').addEventListener('click', function () { closeAllPanels(); });
     $('#dlg-next').addEventListener('click', function () { dlgNext(); });
@@ -539,33 +629,62 @@ window.Game = (function () {
     return false;
   }
 
-  /* ---------- 主循环 ---------- */
-  var lastT = 0;
+  /* ---------- 主循环 ----------
+   * v3 修复（实测数据见 tools/README-move-test.md）：
+   *  旧代码 `Math.min((ts-lastT)/1000 || 0.016, 0.05)` 有两个隐患：
+   *   a) 当 (ts-lastT) 恰好为 0 时，`0 || 0.016` 会凭空补 16ms；
+   *   b) enter() 没有守卫，第二次 enter 会再起一条 rAF 循环，两条循环里总有一条拿到 dt=0 →
+   *      被补成 16ms，于是每帧多算 16ms。实测：60Hz 下速度 150→293 px/s，120Hz 下 150→438 px/s。
+   *      ——这正是"网页正常、主屏幕版明显更快"的技术原因（高刷屏更严重）。
+   *  现在：全局唯一循环令牌 + 真实 dt + 时间回退保护，绝不凭空造时间。 */
+  var lastT = 0, rafId = 0;
+  S.simT = 0;
   function loop(ts) {
-    if (!S.active) return;
-    var dt = Math.min((ts - lastT) / 1000 || 0.016, 0.05);
+    if (!S.active) { rafId = 0; return; }
+    var raw = lastT ? (ts - lastT) / 1000 : 0.016;
     lastT = ts;
+    if (!isFinite(raw) || raw < 0) raw = 0;   // 时间回退 / NaN 保护
+    var dt = Math.min(raw, 0.05);             // 卡顿保护：单帧最多按 50ms 计
+    S.dt = dt;
+    S.simT += dt;                             // 累计模拟时间（调试口用来算"每模拟秒位移"）
     perfTick(dt);
     if (!S.paused) update(dt, ts);
     draw(ts);
-    requestAnimationFrame(loop);
+    rafId = requestAnimationFrame(loop);
+  }
+  function startLoop() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    lastT = 0;
+    rafId = requestAnimationFrame(loop);
+  }
+  function stopLoop() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    S.active = false;
   }
 
   function update(dt, ts) {
     if (S.ending) { updateEnding(dt, ts); return; }
 
-    var dx = 0, dy = 0;
-    if (S.keys['w'] || S.keys['arrowup']) dy -= 1;
-    if (S.keys['s'] || S.keys['arrowdown']) dy += 1;
-    if (S.keys['a'] || S.keys['arrowleft']) dx -= 1;
-    if (S.keys['d'] || S.keys['arrowright']) dx += 1;
-    dx += S.joy.dx; dy += S.joy.dy;
-    var len = Math.sqrt(dx * dx + dy * dy);
-    var moving = len > 0.12;
+    /* 输入合成：键盘给满速，摇杆给 0~1 的模拟量；两者取较大者，不叠加。
+     * 旧的写法把任意输入都归一化成 1.0，轻推摇杆也等于全速跑。 */
+    var kx = 0, ky = 0;
+    if (S.keys['w'] || S.keys['arrowup']) ky -= 1;
+    if (S.keys['s'] || S.keys['arrowdown']) ky += 1;
+    if (S.keys['a'] || S.keys['arrowleft']) kx -= 1;
+    if (S.keys['d'] || S.keys['arrowright']) kx += 1;
+    var klen = Math.sqrt(kx * kx + ky * ky);
+
+    var ux = 0, uy = 0, umag = 0;
+    if (S.joy.mag > 0.001) {
+      var jlen = Math.sqrt(S.joy.dx * S.joy.dx + S.joy.dy * S.joy.dy) || 1;
+      ux = S.joy.dx / jlen; uy = S.joy.dy / jlen; umag = S.joy.mag;
+    }
+    if (klen > 0) { ux = kx / klen; uy = ky / klen; umag = 1; }
+
+    var moving = umag > 0.001;
     if (moving) {
-      dx /= len; dy /= len;
-      var nx = S.self.x + dx * SPEED * dt;
-      var ny = S.self.y + dy * SPEED * dt;
+      var nx = S.self.x + ux * SPEED * umag * dt;
+      var ny = S.self.y + uy * SPEED * umag * dt;
       if (!hits(nx, S.self.y)) S.self.x = nx;
       if (!hits(S.self.x, ny)) S.self.y = ny;
       var inter = curInt();
@@ -573,9 +692,10 @@ window.Game = (function () {
       var ih = inter ? inter.h : World.height;
       S.self.x = Math.max(30, Math.min(iw - 30, S.self.x));
       S.self.y = Math.max(inter ? 150 : 70, Math.min(ih - 24, S.self.y));
-      if (Math.abs(dx) > Math.abs(dy)) S.self.dir = dx < 0 ? 2 : 3;
-      else S.self.dir = dy < 0 ? 1 : 0;
-      S.self.animT += dt;
+      if (Math.abs(ux) > Math.abs(uy)) S.self.dir = ux < 0 ? 2 : 3;
+      else S.self.dir = uy < 0 ? 1 : 0;
+      // 步频跟着速度走：慢走时脚步也慢
+      S.self.animT += dt * (0.45 + 0.55 * umag);
       S.self.frame = Math.floor(S.self.animT / 0.14) % 4;
     } else {
       S.self.moving = false;
@@ -881,7 +1001,7 @@ window.Game = (function () {
   function openPhoto() {
     S.photo = true;
     S.paused = true;
-    closeAllPanelsSilent();
+    hidePanelsForPhoto();
     var cv = $('#photo-canvas');
     cv.width = 1125; cv.height = 1500;
     renderPhoto(cv.getContext('2d'), 1125, 1500);
@@ -917,10 +1037,13 @@ window.Game = (function () {
       toast('请长按图片 → 「存储到照片」');
     }
   }
-  function closeAllPanelsSilent() {
-    ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#end-overlay', '#book-panel', '#plot-panel', '#craft-panel', '#mem-photo'].forEach(function (s) {
+  /* 拍照时要把结局遮罩一起收起来（与普通关面板不同） */
+  function hidePanelsForPhoto() {
+    ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#end-overlay', '#book-panel',
+      '#plot-panel', '#craft-panel', '#mem-photo', '#res-panel', '#quest-panel', '#settings-panel'].forEach(function (s) {
       var el = $(s); if (el) el.classList.add('hidden');
     });
+    syncPanelChrome();
   }
 
   function renderPhoto(ctx, W, H) {
@@ -1181,9 +1304,45 @@ window.Game = (function () {
   /* ---------- 面板 / 对话 ---------- */
   function pause() { S.paused = true; }
   function unpause() { S.paused = false; }
+
+  /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
+  var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
+    '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel'];
+
   function closeAllPanels() {
-    ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo', '#book-panel', '#plot-panel', '#craft-panel'].forEach(function (s) { $(s).classList.add('hidden'); });
+    PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
     unpause();
+    syncPanelChrome();
+  }
+  function closeAllPanelsSilent() {
+    PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
+    syncPanelChrome();
+  }
+
+  /* 面板打开时：加遮罩、隐藏摇杆与交互按钮（避免遮挡和误触）。
+   * 用 MutationObserver 监听 class 变化，任何面板以任何方式开关都会自动同步，
+   * 不需要在每个 open 函数里手动调用——这样以后加面板也不会漏。 */
+  function syncPanelChrome() {
+    var any = false;
+    PANEL_IDS.forEach(function (s) {
+      var el = $(s);
+      if (el && !el.classList.contains('hidden')) any = true;
+    });
+    var game = $('#screen-game');
+    if (game) game.classList.toggle('panel-open', any);
+    var scrim = $('#panel-scrim');
+    if (scrim) scrim.classList.toggle('hidden', !any);
+  }
+  function watchPanels() {
+    if (S.panelWatch) { syncPanelChrome(); return; }
+    S.panelWatch = true;
+    if (typeof MutationObserver === 'undefined') { syncPanelChrome(); return; }
+    var mo = new MutationObserver(function () { syncPanelChrome(); });
+    PANEL_IDS.forEach(function (s) {
+      var el = $(s);
+      if (el) mo.observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
+    syncPanelChrome();
   }
   var dlgLines = null, dlgIdx = 0, dlgName = '';
   function openDialog(name, lines) {
@@ -1237,6 +1396,63 @@ window.Game = (function () {
     var m = $('#menu-panel');
     if (m.classList.contains('hidden')) { m.classList.remove('hidden'); pause(); }
     else { m.classList.add('hidden'); unpause(); }
+  }
+
+  /* ---------- 资源面板 ---------- */
+  function openResPanel() {
+    var r = worldRes();
+    var g = (curWorld() && curWorld().garden) || {};
+    var planted = 0, ready = 0;
+    for (var i = 1; i <= 6; i++) { if (g['p' + i]) planted++; }
+    plotStates().forEach(function (s) { if (s.ready) ready++; });
+    var body = $('#res-body');
+    if (!body) return;
+    body.innerHTML =
+      '<div class="res-line"><b>🪵 木材</b><span>' + (r.wood || 0) + ' 根 · 温室种树收获</span></div>' +
+      '<div class="res-line"><b>🌸 鲜花</b><span>' + (r.flowers || 0) + ' 朵 · 温室种花收获</span></div>' +
+      '<div class="res-line"><b>🌱 种子</b><span>' + (r.seeds || 0) + ' 颗 · 每天进温室领补给</span></div>' +
+      '<div class="res-line"><b>🎁 手工礼物</b><span>' + (r.materials || 0) + ' 件 · 工坊制作</span></div>' +
+      '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') + '</span></div>' +
+      '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' / 16 段已找回</span></div>' +
+      '<div class="res-line"><b>🎄 圣诞树</b><span>' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + '</span></div>';
+    $('#res-panel').classList.remove('hidden');
+    pause();
+  }
+
+  /* ---------- 任务面板 ---------- */
+  function openQuestPanel() {
+    var st = S.quest.step;
+    var rows = '';
+    QUESTS.slice(0, 6).forEach(function (q, i) {
+      var done = st > i, cur = (st === i);
+      var text = q
+        .replace('（0/3）', '（' + (i === 2 ? talkedExtra() : Math.min(3, foundCount())) + '/3）')
+        .replace('（0/4）', '（' + visitedCount() + '/4）');
+      rows += '<div class="quest-line' + (done ? ' done' : '') + '">' +
+        '<span class="quest-mark">' + (done ? '✔' : (cur ? '▶' : '·')) + '</span>' +
+        '<span>' + esc(text) + '</span></div>';
+    });
+    rows += '<div class="quest-line"><span class="quest-mark">🎄</span><span>圣诞树：' +
+      ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
+      ' · 圣诞夜 2026-12-25（还有 ' + Math.max(0, daysToChristmas()) + ' 天）</span></div>';
+    var body = $('#quest-body');
+    if (!body) return;
+    body.innerHTML = rows;
+    $('#quest-panel').classList.remove('hidden');
+    pause();
+  }
+
+  /* ---------- 设置面板 ---------- */
+  function openSettings() {
+    var sw = $('#set-music');
+    if (sw) {
+      var on = Snd.isOn();
+      sw.textContent = on ? '开' : '关';
+      sw.classList.toggle('is-on', on);
+      sw.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    $('#settings-panel').classList.remove('hidden');
+    pause();
   }
 
   /* ---------- 回忆册 ---------- */
@@ -1396,7 +1612,7 @@ window.Game = (function () {
           else if (n.id === 'snowman') Sprites.drawSnowman(ctx, n.x, n.y, ts);
           else if (n.id === 'elf') Sprites.drawElf(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
           else Sprites.drawBarista(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
-          nameTag(ctx, n.x, n.y - 66, n.name, false, '#ffe08a');
+          nameTag(ctx, n.x, n.y - (n.id === 'santa' ? 84 : 66), n.name, false, '#ffe08a');
         } });
       });
 
@@ -1404,7 +1620,7 @@ window.Game = (function () {
         var e = S.ending;
         drawables.push({ y: e.santaY, fn: function () {
           Sprites.drawSanta(ctx, e.santaX, e.santaY, ts);
-          nameTag(ctx, e.santaX, e.santaY - 66, '圣诞老人', false, '#ffe08a');
+          nameTag(ctx, e.santaX, e.santaY - 84, '圣诞老人', false, '#ffe08a');
         } });
       }
 
@@ -1448,6 +1664,33 @@ window.Game = (function () {
       var qc = $('#quest-chip');
       if (qc) qc.textContent = qt;
     }
+
+    /* dev 专用：实测帧率与移动速度。
+       iPhone 实测时打开 ?dev=1，分别记录「Safari 里」和「主屏幕 PWA 里」的数字，
+       两者都应该稳定在 150 px/s（推到底）——若 PWA 明显更高，就是时间步长出了问题。 */
+    if (S.dev) drawDevMeter(ctx, ts);
+  }
+
+  function drawDevMeter(ctx, ts) {
+    var tr = S.track;
+    if (!tr) { tr = S.track = { x: S.self.x, y: S.self.y, t: ts, v: 0, fps: 60, fa: 0, f: 0 }; }
+    tr.fa += (S.dt || 0.016); tr.f++;
+    if (ts - tr.t >= 250) {
+      var dist = Math.sqrt(Math.pow(S.self.x - tr.x, 2) + Math.pow(S.self.y - tr.y, 2));
+      tr.v = dist / ((ts - tr.t) / 1000);
+      tr.fps = tr.f / (tr.fa || 1);
+      tr.x = S.self.x; tr.y = S.self.y; tr.t = ts; tr.fa = 0; tr.f = 0;
+    }
+    var txt = 'fps ' + Math.round(tr.fps) + ' · ' + Math.round(tr.v) + ' px/s · dpr ' + (S.dpr || 1);
+    ctx.save();
+    ctx.font = 'bold 12px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center';
+    var w = ctx.measureText(txt).width + 18;
+    ctx.fillStyle = 'rgba(0,0,0,.6)';
+    ctx.fillRect(S.view.w / 2 - w / 2, S.view.h - 26, w, 20);
+    ctx.fillStyle = '#9dffa8';
+    ctx.fillText(txt, S.view.w / 2, S.view.h - 12);
+    ctx.restore();
   }
 
   function drawInteractBubble(ctx) {
@@ -1526,5 +1769,29 @@ window.Game = (function () {
     return (d && d.slots && d.slots[slot] && d.slots[slot].outfit) || def;
   }
 
-  return { enter: enter, onData: onData, active: active };
+  /* 调试口（仅 ?dev=1 生效）：给自动化探针读取真实位置/输入/时间步长，
+     以及把角色放回指定坐标，避免测速时撞到建筑导致误判。
+     不参与游戏逻辑，正式环境全部是空操作。 */
+  function devPlace(x, y) {
+    if (!S.dev) return false;
+    S.self.x = x; S.self.y = y;
+    return true;
+  }
+  function devWave(ms) {
+    if (!S.dev) return false;
+    S.self.waveUntil = performance.now() + (ms || 3000);
+    return true;
+  }
+  function devState() {
+    if (!S.dev) return null;
+    return {
+      x: S.self.x, y: S.self.y, dir: S.self.dir, frame: S.self.frame,
+      dt: S.dt, t: S.simT, paused: !!S.paused, inter: S.interId || 0,
+      joy: { dx: S.joy.dx, dy: S.joy.dy, mag: S.joy.mag, active: S.joy.active },
+      view: { w: S.view.w, h: S.view.h }, dpr: S.dpr,
+      cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot
+    };
+  }
+
+  return { enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave };
 })();

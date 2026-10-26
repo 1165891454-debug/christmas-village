@@ -188,13 +188,13 @@ window.World = (function () {
 
     // 大块冷暖色斑（绘本底层）
     for (var i = 0; i < 40; i++) {
-      g.fillStyle = i % 3 === 0 ? 'rgba(214,226,244,.5)' : (i % 3 === 1 ? 'rgba(235,242,250,.55)' : 'rgba(196,212,238,.35)');
-      g.beginPath(); g.ellipse(rnd() * width, rnd() * height, 120 + rnd() * 180, 60 + rnd() * 100, rnd() * 3, 0, 7); g.fill();
+      g.fillStyle = i % 3 === 0 ? 'rgba(214,226,244,.24)' : (i % 3 === 1 ? 'rgba(238,244,251,.26)' : 'rgba(198,214,238,.18)');
+      g.beginPath(); g.ellipse(rnd() * width, rnd() * height, 80 + rnd() * 120, 40 + rnd() * 62, rnd() * 3, 0, 7); g.fill();
     }
     // 细雪斑
     for (var i2 = 0; i2 < 150; i2++) {
       var bx = rnd() * width, by = rnd() * height, br = 20 + rnd() * 60;
-      g.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,.32)' : 'rgba(186,203,232,.15)';
+      g.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,.20)' : 'rgba(186,203,232,.10)';
       g.beginPath(); g.ellipse(bx, by, br, br * (0.35 + rnd() * 0.3), rnd() * 3, 0, 7); g.fill();
     }
     // 雪地小亮点
@@ -204,23 +204,59 @@ window.World = (function () {
       g.fillRect(rnd() * width, rnd() * height, 2 + rnd() * 2, 1 + rnd() * 1.5);
     }
 
-    // ---- 广场石板 ----
-    g.fillStyle = '#c6d2e8'; g.fillRect(560, 420, 380, 380);
-    g.strokeStyle = 'rgba(120,138,172,.45)'; g.lineWidth = 2;
-    for (var tx = 560; tx <= 940; tx += 40) { g.beginPath(); g.moveTo(tx, 420); g.lineTo(tx, 800); g.stroke(); }
-    for (var ty = 420; ty <= 800; ty += 40) { g.beginPath(); g.moveTo(560, ty); g.lineTo(940, ty); g.stroke(); }
-    for (var qx = 0; qx < 10; qx++) for (var qy = 0; qy < 10; qy++) {
-      if ((qx + qy) % 2 === 0) { g.fillStyle = 'rgba(255,255,255,.10)'; g.fillRect(560 + qx * 38, 420 + qy * 38, 38, 38); }
+    // ---- 广场：错缝石板 + 石缝积雪（不用方格子）----
+    var PX0 = 560, PY0 = 420, PX1 = 940, PY1 = 800;
+    var pg = g.createLinearGradient(PX0, PY0, PX1, PY1);
+    pg.addColorStop(0, '#cdd6e6');
+    pg.addColorStop(0.5, '#c2ccdf');
+    pg.addColorStop(1, '#b6c2d8');
+    g.fillStyle = pg; g.fillRect(PX0, PY0, PX1 - PX0, PY1 - PY0);
+    _seed = 1234;
+    var stoneCols = ['#cdd6e6', '#c5cfe1', '#d3dbe9', '#bfcadf', '#c9d2e3'];
+    var rowH = 30, rowY = PY0, rowIdx = 0;
+    while (rowY < PY1) {
+      var x = PX0 - (rowIdx % 2 ? 22 : 0);
+      while (x < PX1) {
+        var wStone = 40 + Math.floor(rnd() * 12);
+        var x0 = Math.max(PX0, x), x1 = Math.min(PX1, x + wStone - 3);
+        if (x1 - x0 > 6) {
+          g.beginPath();
+          var rr2 = 5;
+          if (g.roundRect) g.roundRect(x0 + 1, rowY + 1, x1 - x0 - 1, rowH - 3, rr2);
+          else g.rect(x0 + 1, rowY + 1, x1 - x0 - 1, rowH - 3);
+          g.fillStyle = stoneCols[Math.floor(rnd() * stoneCols.length)];
+          g.fill();
+          // 顶面高光 + 底部暗边
+          g.fillStyle = 'rgba(255,255,255,.30)';
+          g.fillRect(x0 + 3, rowY + 2, x1 - x0 - 6, 2);
+          g.fillStyle = 'rgba(120,138,172,.18)';
+          g.fillRect(x0 + 3, rowY + rowH - 5, x1 - x0 - 6, 2);
+        }
+        x += wStone;
+      }
+      rowY += rowH; rowIdx++;
     }
+    // 石缝里积的雪
+    _seed = 777;
+    for (var sf = 0; sf < 46; sf++) {
+      var sfx = PX0 + rnd() * (PX1 - PX0), sfy = PY0 + rnd() * (PY1 - PY0);
+      g.fillStyle = 'rgba(248,252,255,' + (0.30 + rnd() * 0.42) + ')';
+      g.beginPath();
+      g.ellipse(sfx, sfy, 5 + rnd() * 16, 2 + rnd() * 4, (rnd() - 0.5) * 0.4, 0, 7);
+      g.fill();
+    }
+    // 广场外沿的一圈大石
+    g.strokeStyle = 'rgba(150,166,196,.45)'; g.lineWidth = 3;
+    g.strokeRect(PX0 - 1.5, PY0 - 1.5, PX1 - PX0 + 3, PY1 - PY0 + 3);
     // 树下暖光圈 + 树影
     var cg = g.createRadialGradient(tree.x, tree.y, 20, tree.x, tree.y, 175);
     cg.addColorStop(0, 'rgba(255,224,150,.26)'); cg.addColorStop(1, 'rgba(255,224,150,0)');
     g.fillStyle = cg; g.fillRect(tree.x - 175, tree.y - 175, 350, 350);
     g.fillStyle = 'rgba(80,100,140,.18)';
     g.beginPath(); g.ellipse(tree.x + 40, tree.y + 14, 130, 30, 0, 0, 7); g.fill();
-    for (var s = 0; s < 30; s++) {
-      g.fillStyle = 'rgba(240,246,252,' + (0.25 + rnd() * 0.3) + ')';
-      g.beginPath(); g.ellipse(570 + rnd() * 360, 430 + rnd() * 360, 14 + rnd() * 30, 8 + rnd() * 14, rnd() * 3, 0, 7); g.fill();
+    for (var s = 0; s < 34; s++) {
+      g.fillStyle = 'rgba(244,249,255,' + (0.18 + rnd() * 0.26) + ')';
+      g.beginPath(); g.ellipse(570 + rnd() * 360, 430 + rnd() * 360, 7 + rnd() * 13, 4 + rnd() * 6, rnd() * 3, 0, 7); g.fill();
     }
 
     // ---- 道路 ----
@@ -662,107 +698,499 @@ window.World = (function () {
 
   // ============================================================
   // 中央圣诞树（4 阶段，视觉核心）
+  // 造型：五层冷杉，每层是一簇下垂的枝扇（外缘锯齿 + 枝尖积雪），
+  //       层间错位、越往上越亮，树心透出暖光。
+  // 阶段：0 小树苗 → 1 挂彩球 → 2 亮彩灯 → 3 全树点亮（金星/礼物/光柱）
   // ============================================================
-  function drawBigTree(ctx, tree, stage, t) {
-    var x = tree.x, y = tree.y;
-    shadow(ctx, x, y + 8, 105, 24);
+  var TREE_TIERS = [
+    { apex: -108, bot: 2, half: 104, tips: 9 },
+    { apex: -172, bot: -72, half: 86, tips: 8 },
+    { apex: -228, bot: -138, half: 68, tips: 7 },
+    { apex: -276, bot: -196, half: 50, tips: 6 },
+    { apex: -318, bot: -246, half: 33, tips: 5 }
+  ];
 
-    box(ctx, x - 13, y - 12, 26, 36, '#7a4a2b', { r: 3 });
-    ctx.fillStyle = 'rgba(60,35,18,.4)';
-    ctx.fillRect(x - 13, y + 2, 26, 3); ctx.fillRect(x - 13, y + 12, 26, 3);
-    ctx.fillStyle = '#f2f7fd';
-    ctx.beginPath(); ctx.ellipse(x, y + 20, 34, 9, 0, 0, 7); ctx.fill();
+  /* 层的外轮廓：两侧上是弧线，底缘是一排下垂的枝尖 */
+  function firTierPath(ctx, cx, apexY, botY, halfW, tips) {
+    var span = botY - apexY;
+    var notchY = botY - Math.max(5, halfW * 0.12);
+    var rX = cx + halfW * 0.94, lX = cx - halfW * 0.94;
+    ctx.beginPath();
+    ctx.moveTo(cx, apexY);
+    ctx.bezierCurveTo(cx + halfW * 0.50, apexY + span * 0.13,
+                      cx + halfW * 0.90, apexY + span * 0.40, rX, notchY);
+    for (var j = 0; j < tips; j++) {
+      var x0 = rX + (lX - rX) * (j / tips);
+      var x1 = rX + (lX - rX) * ((j + 1) / tips);
+      var xm = (x0 + x1) / 2 + (j % 2 ? 1.6 : -1.6);
+      var tipY = botY + (halfW > 60 ? 5 : 2);
+      ctx.quadraticCurveTo(x0 + (xm - x0) * 0.62, tipY - 3, xm, tipY);
+      ctx.quadraticCurveTo(xm + (x1 - xm) * 0.38, tipY - 3, x1, notchY);
+    }
+    ctx.bezierCurveTo(cx - halfW * 0.90, apexY + span * 0.40,
+                      cx - halfW * 0.50, apexY + span * 0.13, cx, apexY);
+    ctx.closePath();
+  }
 
-    var layers = [
-      { w: 162, y: y - 30, c: '#2b7047', snow: 5 },
-      { w: 126, y: y - 94, c: '#35845a', snow: 4 },
-      { w: 90, y: y - 152, c: '#2b7047', snow: 3 },
-      { w: 54, y: y - 202, c: '#35845a', snow: 2 }
-    ];
-    layers.forEach(function (L) {
-      for (var k = -1; k <= 1; k++) {
-        ctx.fillStyle = L.c;
+  /* 只走底缘那条锯齿（用来压雪） */
+  function firEdgePath(ctx, cx, botY, halfW, tips) {
+    var notchY = botY - Math.max(5, halfW * 0.12);
+    var rX = cx + halfW * 0.94, lX = cx - halfW * 0.94;
+    ctx.beginPath();
+    ctx.moveTo(rX, notchY);
+    for (var j = 0; j < tips; j++) {
+      var x0 = rX + (lX - rX) * (j / tips);
+      var x1 = rX + (lX - rX) * ((j + 1) / tips);
+      var xm = (x0 + x1) / 2 + (j % 2 ? 1.6 : -1.6);
+      var tipY = botY + (halfW > 60 ? 5 : 2);
+      ctx.quadraticCurveTo(x0 + (xm - x0) * 0.62, tipY - 3, xm, tipY);
+      ctx.quadraticCurveTo(xm + (x1 - xm) * 0.38, tipY - 3, x1, notchY);
+    }
+  }
+
+  /* u: -1(左) ~ 1(右) 在这一层表面取点；越靠外越靠近下垂的枝尖 */
+  function tierPt(cx, apexY, botY, halfW, u) {
+    var notchY = botY - Math.max(5, halfW * 0.12);
+    var px = cx + halfW * 0.86 * u;
+    var py = notchY + (botY - notchY) * (0.30 + 0.70 * u * u);
+    return { x: px, y: py };
+  }
+
+  function firTier(ctx, cx, apexY, botY, halfW, tips, top, bottom, snowA, lit) {
+    // 底部暗影（把层与层分开）
+    ctx.save();
+    ctx.translate(0, 6);
+    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    ctx.fillStyle = 'rgba(12,44,30,.42)';
+    ctx.fill();
+    ctx.restore();
+
+    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    var g = ctx.createLinearGradient(cx - halfW * 0.55, apexY, cx + halfW * 0.6, botY);
+    g.addColorStop(0, top);
+    g.addColorStop(0.55, bottom);
+    g.addColorStop(1, 'rgba(16,54,36,1)');
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // 枝纹：几道顺着层的浅弧
+    ctx.save();
+    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(120,190,150,.16)';
+    ctx.lineWidth = 1.2;
+    for (var b = 1; b <= 3; b++) {
+      var by = apexY + (botY - apexY) * (b / 3.4);
+      ctx.beginPath();
+      ctx.moveTo(cx - halfW * 0.92, by + 6);
+      ctx.quadraticCurveTo(cx, by - 4, cx + halfW * 0.92, by + 6);
+      ctx.stroke();
+    }
+    if (lit) {
+      var lg2 = ctx.createRadialGradient(cx, apexY + (botY - apexY) * 0.55, 2, cx, apexY + (botY - apexY) * 0.55, halfW * 0.95);
+      lg2.addColorStop(0, 'rgba(255,214,130,.20)');
+      lg2.addColorStop(1, 'rgba(255,214,130,0)');
+      ctx.fillStyle = lg2;
+      ctx.fillRect(cx - halfW, apexY - 4, halfW * 2, botY - apexY + 8);
+    }
+    ctx.restore();
+
+    // 左侧月光边：给圆锥一点体积
+    ctx.save();
+    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(cx - halfW * 0.95, botY);
+    ctx.quadraticCurveTo(cx - halfW * 0.55, apexY + (botY - apexY) * 0.25, cx - halfW * 0.02, apexY - 2);
+    ctx.lineTo(cx - halfW * 0.30, apexY - 2);
+    ctx.quadraticCurveTo(cx - halfW * 0.86, apexY + (botY - apexY) * 0.32, cx - halfW * 1.1, botY);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(180,232,200,.13)';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(16,58,40,.45)';
+    ctx.lineWidth = 1.2;
+    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    ctx.stroke();
+
+    // 积雪：沿外露枝尖压一道白，越靠外越厚
+    if (snowA > 0) {
+      firEdgePath(ctx, cx, botY, halfW, tips);
+      ctx.strokeStyle = 'rgba(250,253,255,' + Math.min(1, snowA * 0.55 + 0.42) + ')';
+      ctx.lineWidth = Math.max(2.6, halfW * 0.048);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      // 枝尖的雪团只在靠外的一半，避免整排白点
+      var rX = cx + halfW * 0.86, lX = cx - halfW * 0.86;
+      for (var j3 = 0; j3 < tips; j3++) {
+        var uu = (j3 + 0.5) / tips;
+        if (Math.abs(uu - 0.5) < 0.20) continue;
+        var px3 = rX + (lX - rX) * uu;
         ctx.beginPath();
-        ctx.moveTo(x + k * L.w * 0.26, L.y - 62);
-        ctx.lineTo(x + k * L.w * 0.44 - L.w * 0.18, L.y);
-        ctx.lineTo(x + k * L.w * 0.44 + L.w * 0.18, L.y);
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = 'rgba(20,50,32,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.ellipse(px3, botY - Math.max(1.6, halfW * 0.03), Math.max(3.0, halfW * 0.075), Math.max(2.0, halfW * 0.048), 0, 0, 7);
+        ctx.fillStyle = 'rgba(252,254,255,' + Math.min(1, snowA * 0.5 + 0.48) + ')';
+        ctx.fill();
       }
-      for (var sn = 0; sn < L.snow; sn++) {
-        var sx = x - L.w * 0.4 + (L.w * 0.8) * (sn / Math.max(1, L.snow - 1 || 1));
-        ctx.fillStyle = 'rgba(245,250,255,.9)';
-        ctx.beginPath(); ctx.ellipse(sx, L.y + 2, 11 + (sn % 2) * 5, 5.5, 0, 0, 7); ctx.fill();
-      }
-    });
-
-    if (stage >= 1) {
-      ctx.strokeStyle = 'rgba(240,200,110,.8)'; ctx.lineWidth = 3;
-      for (var gI = 0; gI < 3; gI++) {
-        var gy = y - 40 - gI * 54, gw = 124 - gI * 28;
+      var rX = cx + halfW * 0.86, lX = cx - halfW * 0.86;
+      for (var j2 = 0; j2 < tips; j2++) {
+        var px = rX + (lX - rX) * ((j2 + 0.5) / tips);
         ctx.beginPath();
-        for (var px = -gw / 2; px <= gw / 2; px += 8) {
-          var py = gy + Math.sin(px * 0.25 + gI * 2) * 6;
-          if (px === -gw / 2) ctx.moveTo(x + px, py); else ctx.lineTo(x + px, py);
-        }
+        ctx.ellipse(px, botY - Math.max(2, halfW * 0.035), Math.max(3.4, halfW * 0.085), Math.max(2.2, halfW * 0.055), 0, 0, 7);
+        ctx.fillStyle = 'rgba(252,254,255,' + Math.min(1, snowA + 0.1) + ')';
+        ctx.fill();
+      }
+    }
+  }
+
+  /* 彩球：金盖 + 提环 + 高光 + 落影 */
+  function ornament(ctx, x, y, r, col) {
+    ctx.beginPath();
+    ctx.ellipse(x + r * 0.18, y + r * 0.9, r * 0.85, r * 0.42, 0, 0, 7);
+    ctx.fillStyle = 'rgba(10,40,26,.35)';
+    ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7);
+    var g = ctx.createRadialGradient(x - r * 0.34, y - r * 0.4, r * 0.15, x, y, r * 1.15);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.28, col);
+    g.addColorStop(1, 'rgba(40,20,10,.55)');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(58,32,16,.55)';
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.42, y - r * 0.95);
+    ctx.lineTo(x + r * 0.42, y - r * 0.95);
+    ctx.strokeStyle = '#e8c05a';
+    ctx.lineWidth = Math.max(1.2, r * 0.34);
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y - r * 1.12, r * 0.24, 0, 7);
+    ctx.strokeStyle = '#f2d478';
+    ctx.lineWidth = Math.max(0.9, r * 0.2);
+    ctx.stroke();
+  }
+
+  /* 灯串：沿层的表面垂一道弧，等距挂灯泡 */
+  function garland(ctx, cx, apexY, botY, halfW, t, phase, bright) {
+    var a = tierPt(cx, apexY, botY, halfW, -0.78);
+    var b = tierPt(cx, apexY, botY, halfW, 0.78);
+    var dip = Math.min(14, (botY - apexY) * 0.30);
+    var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + dip };
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(mid.x, mid.y + 6, b.x, b.y);
+    ctx.strokeStyle = 'rgba(240,204,120,.55)';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    var N = 5;
+    for (var i = 0; i <= N; i++) {
+      var u = i / N;
+      var iu = 1 - u;
+      var px = iu * iu * a.x + 2 * iu * u * mid.x + u * u * b.x;
+      var py = iu * iu * a.y + 2 * iu * u * (mid.y + 6) + u * u * b.y;
+      var on = Math.sin(t / 240 + i * 0.9 + phase) > -0.35;
+      var col = ['#ffe49a', '#9ad8ff', '#ff9f9a', '#c2ff9e', '#ffd0f2'][(i + Math.round(phase)) % 5];
+      if (on) drawGlow(ctx, px, py + 2, 'rgba(255,232,150,' + (bright * 0.85) + ')', 11, 0.9);
+      ctx.beginPath();
+      ctx.ellipse(px, py + 2.5, 2.6, 3.2, 0, 0, 7);
+      ctx.fillStyle = on ? col : 'rgba(146,158,180,.55)';
+      ctx.fill();
+      if (on) {
+        ctx.beginPath();
+        ctx.arc(px - 0.7, py + 1.6, 1.0, 0, 7);
+        ctx.fillStyle = 'rgba(255,255,255,.9)';
+        ctx.fill();
+      }
+    }
+  }
+
+  /* 顶星：五角 + 长芒 + 呼吸光 */
+  function treeStar(ctx, x, y, R, t, mode) {
+    var pulse = 0.86 + 0.14 * Math.sin(t / 380);
+    if (mode >= 1) {
+      // 长芒
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (var i = 0; i < 4; i++) {
+        var ang = i * Math.PI / 4 + Math.PI / 8;
+        var len = R * (2.5 + (i % 2 ? 1.1 : 0)) * pulse;
+        var gg = ctx.createLinearGradient(x, y, x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+        gg.addColorStop(0, 'rgba(255,228,150,.5)');
+        gg.addColorStop(1, 'rgba(255,228,150,0)');
+        ctx.strokeStyle = gg;
+        ctx.lineWidth = 3.4;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+        ctx.lineTo(x - Math.cos(ang) * len, y - Math.sin(ang) * len);
         ctx.stroke();
       }
+      ctx.restore();
+      drawGlow(ctx, x, y, 'rgba(255,220,130,.55)', R * 5.4 * pulse, 0.9);
     }
-
-    if (stage >= 1) {
-      var balls = [
-        [x - 44, y - 48, '#e0563f'], [x + 36, y - 60, '#f0a83c'], [x - 60, y - 16, '#f0a83c'],
-        [x + 2, y - 8, '#e0563f'], [x + 56, y - 20, '#4f86d6'], [x - 28, y - 106, '#f0a83c'],
-        [x + 26, y - 112, '#e0563f'], [x - 16, y - 158, '#4f86d6'], [x + 12, y - 172, '#c86bb1'],
-        [x - 40, y - 78, '#c86bb1']
-      ];
-      balls.forEach(function (b, i) {
-        if (i % 3 === (Math.floor(t / 1600) % 3)) drawGlow(ctx, b[0], b[1], 'rgba(255,230,160,.45)', 10, 0.8);
-        ball(ctx, b[0], b[1], 6, b[2], { hi: true, oc: 'rgba(60,30,10,.6)', ol: 1 });
-        ctx.strokeStyle = '#f0c040'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(b[0] - 3, b[1] - 7); ctx.lineTo(b[0] + 3, b[1] - 7); ctx.stroke();
-      });
+    var pts = [], k = 5;
+    for (var j = 0; j < k * 2; j++) {
+      var rr = (j % 2 === 0) ? R : R * 0.40;
+      var aa = -Math.PI / 2 + j * Math.PI / k;
+      pts.push([x + Math.cos(aa) * rr, y + Math.sin(aa) * rr]);
     }
-
-    if (stage >= 2) {
-      var lights = [
-        [x - 30, y - 62], [x + 18, y - 70], [x - 52, y - 26], [x + 44, y - 32], [x - 8, y - 20],
-        [x + 10, y - 118], [x - 20, y - 128], [x + 4, y - 168], [x - 38, y - 96], [x + 36, y - 88],
-        [x - 12, y - 88], [x + 24, y - 140]
-      ];
-      lights.forEach(function (L, i) {
-        var on = Math.sin(t / 260 + i * 1.3) > -0.2;
-        var c = ['#ffe08a', '#8ad2ff', '#ff9d9d', '#b6ff9d'][i % 4];
-        if (on) drawGlow(ctx, L[0], L[1], 'rgba(255,236,150,.8)', 14, 0.9);
-        ctx.fillStyle = on ? c : 'rgba(150,160,180,.5)';
-        ctx.beginPath(); ctx.arc(L[0], L[1], 4, 0, 7); ctx.fill();
-      });
-    }
-
-    if (stage >= 3) {
-      var pulse = 0.85 + 0.15 * Math.sin(t / 400);
-      drawGlow(ctx, x, y - 262, 'rgba(255,215,122,.5)', 140 * pulse, 1);
-      drawGlow(ctx, x, y + 10, 'rgba(255,214,130,.35)', 180, 0.9);
-      ctx.fillStyle = '#ffd75e';
+    ctx.beginPath();
+    pts.forEach(function (p2, i2) { if (i2 === 0) ctx.moveTo(p2[0], p2[1]); else ctx.lineTo(p2[0], p2[1]); });
+    ctx.closePath();
+    var sg = ctx.createLinearGradient(x, y - R, x, y + R);
+    if (mode >= 1) { sg.addColorStop(0, '#fff6cf'); sg.addColorStop(0.45, '#ffd75e'); sg.addColorStop(1, '#e6a534'); }
+    else { sg.addColorStop(0, '#fbf7ea'); sg.addColorStop(1, '#cfc6a8'); }
+    ctx.fillStyle = sg;
+    ctx.fill();
+    ctx.strokeStyle = mode >= 1 ? '#d99a2e' : '#8a6b3c';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    if (mode >= 1) {
       ctx.beginPath();
-      var sy = y - 262, pts = [[0, -24], [6.5, -8], [24, -8], [10, 3], [15, 20], [0, 9], [-15, 20], [-10, 3], [-24, -8], [-6.5, -8]];
-      pts.forEach(function (p, i) { if (i === 0) ctx.moveTo(x + p[0], sy + p[1]); else ctx.lineTo(x + p[0], sy + p[1]); });
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = '#f0a83c'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.arc(x - R * 0.18, y - R * 0.22, R * 0.20, 0, 7);
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.fill();
+    }
+  }
 
-      var gifts = [
-        [x - 96, y + 2, '#e0563f'], [x - 68, y + 12, '#4f86d6'],
-        [x + 60, y + 8, '#58b368'], [x + 92, y + 0, '#f0a83c'], [x + 6, y + 18, '#c86bb1']
+  function giftBox(ctx, gx, gy, w, h, col, ribbon) {
+    shadow(ctx, gx + w / 2, gy + h + 3, w * 0.6, 4);
+    box(ctx, gx, gy, w, h, col, { r: 2, shade: true });
+    ctx.fillStyle = ribbon;
+    ctx.fillRect(gx + w / 2 - 2.5, gy, 5, h);
+    ctx.fillRect(gx, gy + h * 0.42, w, 5);
+    ctx.strokeStyle = 'rgba(60,30,10,.4)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(gx + w / 2 - 2.5, gy, 5, h);
+    // 蝴蝶结
+    ctx.beginPath();
+    ctx.ellipse(gx + w / 2 - 4.5, gy - 3, 4.6, 3.2, -0.5, 0, 7);
+    ctx.ellipse(gx + w / 2 + 4.5, gy - 3, 4.6, 3.2, 0.5, 0, 7);
+    ctx.fillStyle = ribbon;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,30,10,.35)';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(gx + w / 2, gy - 3, 2.2, 2.2, 0, 0, 7);
+    ctx.fillStyle = ribbon;
+    ctx.fill();
+  }
+
+  function drawBigTree(ctx, tree, stage, t) {
+    var x = tree.x, y = tree.y;
+    var lit = stage >= 2, full = stage >= 3;
+
+    // ---- 地面光影 ----
+    if (lit) {
+      var pool = ctx.createRadialGradient(x, y + 8, 10, x, y + 8, 190);
+      pool.addColorStop(0, 'rgba(255,214,132,' + (full ? 0.34 : 0.22) + ')');
+      pool.addColorStop(0.55, 'rgba(255,196,110,' + (full ? 0.13 : 0.07) + ')');
+      pool.addColorStop(1, 'rgba(255,196,110,0)');
+      ctx.fillStyle = pool;
+      ctx.save();
+      ctx.translate(x, y + 8);
+      ctx.scale(1, 0.42);
+      ctx.beginPath(); ctx.arc(0, 0, 190, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+
+    if (stage === 0) {
+      drawSapling(ctx, x, y, t);
+      return;
+    }
+
+    // ---- 树后的暖晕（点亮后才有）----
+    if (lit) {
+      var halo = ctx.createRadialGradient(x, y - 190, 20, x, y - 190, 250);
+      halo.addColorStop(0, 'rgba(255,206,120,' + (full ? 0.26 : 0.14) + ')');
+      halo.addColorStop(0.6, 'rgba(255,190,110,' + (full ? 0.10 : 0.05) + ')');
+      halo.addColorStop(1, 'rgba(255,190,110,0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(x, y - 190, 250, 0, 7); ctx.fill();
+    }
+
+    // ---- 基座：雪堆 + 石圈 + 树干 ----
+    ctx.beginPath();
+    ctx.ellipse(x, y + 6, 92, 24, 0, 0, 7);
+    ctx.fillStyle = 'rgba(120,150,190,.22)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, 84, 20, 0, 0, 7);
+    var sgm = ctx.createLinearGradient(x - 84, y - 16, x + 84, y + 20);
+    sgm.addColorStop(0, '#fdfeff');
+    sgm.addColorStop(1, '#dfe9f6');
+    ctx.fillStyle = sgm;
+    ctx.fill();
+
+    // 树干
+    var tg = ctx.createLinearGradient(x - 9, 0, x + 9, 0);
+    tg.addColorStop(0, '#8a5a38'); tg.addColorStop(0.4, '#6d4426'); tg.addColorStop(1, '#4d2f1a');
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y + 6);
+    ctx.quadraticCurveTo(x - 7.5, y - 34, x - 6, y - 66);
+    ctx.lineTo(x + 6, y - 66);
+    ctx.quadraticCurveTo(x + 7.5, y - 34, x + 10, y + 6);
+    ctx.closePath();
+    ctx.fillStyle = tg;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(48,28,14,.6)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(40,24,12,.28)';
+    ctx.lineWidth = 1;
+    for (var bk = 0; bk < 3; bk++) {
+      ctx.beginPath();
+      ctx.moveTo(x - 6 + bk * 4, y - 10 - bk * 14);
+      ctx.quadraticCurveTo(x - 4 + bk * 4, y - 30 - bk * 14, x - 5 + bk * 4, y - 52 - bk * 10);
+      ctx.stroke();
+    }
+
+    // ---- 五层枝扇 ----
+    var tops = ['#3f9060', '#437f57', '#3a8358', '#457f57', '#3f8d5f'];
+    for (var i = 0; i < TREE_TIERS.length; i++) {
+      var L = TREE_TIERS[i];
+      firTier(ctx, x, y + L.apex, y + L.bot, L.half, L.tips,
+        tops[i], i % 2 ? '#2a6b46' : '#2f744c', 0.62 + i * 0.09, lit);
+    }
+
+    // ---- 彩球（stage>=1） ----
+    if (stage >= 1) {
+      var cols = ['#dc4f3c', '#f0a83c', '#4f86d6', '#c86bb1', '#f2e2a8', '#58b368'];
+      var plan = [
+        [0, [-0.62, -0.16, 0.30, 0.68]],
+        [1, [-0.70, -0.22, 0.26, 0.72]],
+        [2, [-0.62, 0.10, 0.66]],
+        [3, [-0.58, 0.34]],
+        [4, [-0.30, 0.34]]
       ];
-      gifts.forEach(function (gf) {
-        shadow(ctx, gf[0] + 14, gf[1] + 23, 16, 4);
-        box(ctx, gf[0], gf[1], 28, 22, gf[2], { r: 2 });
-        ctx.fillStyle = '#f4ead8'; ctx.fillRect(gf[0] + 12, gf[1], 4, 22); ctx.fillRect(gf[0], gf[1] + 9, 28, 4);
-        ctx.fillStyle = '#f4ead8';
-        ctx.beginPath(); ctx.arc(gf[0] + 14, gf[1] - 2, 4.4, 0, 7); ctx.arc(gf[0] + 9.5, gf[1] - 4.5, 3.6, 0, 7); ctx.arc(gf[0] + 18.5, gf[1] - 4.5, 3.6, 0, 7); ctx.fill();
-        ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.stroke();
+      var cIdx = 0;
+      plan.forEach(function (row) {
+        var Lr = TREE_TIERS[row[0]];
+        row[1].forEach(function (u) {
+          var pt = tierPt(x, y + Lr.apex, y + Lr.bot, Lr.half, u);
+          var r = 5.4 - row[0] * 0.5 + (Math.abs(u) > 0.55 ? 0.6 : 0);
+          var flick = full ? (0.6 + 0.4 * Math.sin(t / 520 + cIdx * 1.7)) : 1;
+          if (stage >= 2) drawGlow(ctx, pt.x, pt.y, 'rgba(255,232,168,' + (0.34 * flick + 0.1) + ')', 13, 0.8);
+          ornament(ctx, pt.x, pt.y, r, cols[cIdx % cols.length]);
+          cIdx++;
+        });
       });
     }
+
+    // ---- 灯串（stage>=2） ----
+    if (lit) {
+      for (var gi = 0; gi < TREE_TIERS.length - 1; gi++) {
+        var Lg = TREE_TIERS[gi];
+        garland(ctx, x, y + Lg.apex, y + Lg.bot, Lg.half, t, gi * 1.7, full ? 1 : 0.72);
+      }
+    }
+
+    // ---- 顶星 ----
+    if (stage >= 2) {
+      treeStar(ctx, x, y - 336, full ? 18 : 13, t, full ? 1 : 0);
+    } else {
+      // 未点亮的阶段：只插一根尖枝
+      ctx.beginPath();
+      ctx.moveTo(x - 3, y - 316);
+      ctx.lineTo(x, y - 336);
+      ctx.lineTo(x + 3, y - 316);
+      ctx.closePath();
+      ctx.fillStyle = '#2f744c';
+      ctx.fill();
+    }
+
+    // ---- 礼物（stage 3） ----
+    if (full) {
+      var gifts = [
+        [x - 116, y + 4, 34, 26, '#d94c3a', '#f4ead8'],
+        [x - 74, y + 16, 26, 20, '#4f86d6', '#eef4ff'],
+        [x + 62, y + 12, 30, 23, '#58b368', '#f4ead8'],
+        [x + 98, y + 2, 24, 19, '#f0a83c', '#7a3f2a'],
+        [x + 12, y + 20, 22, 17, '#c86bb1', '#fff0f8']
+      ];
+      gifts.forEach(function (gf) { giftBox(ctx, gf[0], gf[1], gf[2], gf[3], gf[4], gf[5]); });
+    }
+
+    // ---- 光柱 + 星屑（stage 3） ----
+    if (full) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var beam = ctx.createLinearGradient(x, y - 320, x, y + 10);
+      beam.addColorStop(0, 'rgba(255,226,150,.20)');
+      beam.addColorStop(1, 'rgba(255,226,150,0)');
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(x - 14, y - 326);
+      ctx.lineTo(x + 14, y - 326);
+      ctx.lineTo(x + 120, y + 12);
+      ctx.lineTo(x - 120, y + 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      for (var sp = 0; sp < 14; sp++) {
+        var a2 = (sp * 2.399) % (Math.PI * 2);
+        var rr2 = 40 + ((sp * 37) % 120);
+        var sx2 = x + Math.cos(a2) * rr2 * 0.85;
+        var sy2 = y - 160 + Math.sin(a2) * rr2 * 1.25;
+        var tw = 0.35 + 0.65 * Math.abs(Math.sin(t / 620 + sp * 1.1));
+        ctx.beginPath();
+        ctx.arc(sx2, sy2, 1.1 + tw * 1.5, 0, 7);
+        ctx.fillStyle = 'rgba(255,246,205,' + (tw * 0.9) + ')';
+        ctx.fill();
+      }
+    }
+  }
+
+  /* 阶段 0：还没装饰的小树苗 */
+  function drawSapling(ctx, x, y, t) {
+    ctx.beginPath();
+    ctx.ellipse(x, y + 4, 46, 13, 0, 0, 7);
+    ctx.fillStyle = 'rgba(120,150,190,.20)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x, y + 1, 40, 11, 0, 0, 7);
+    ctx.fillStyle = '#eef5fd';
+    ctx.fill();
+
+    // 细枝
+    ctx.strokeStyle = '#6d4426';
+    ctx.lineWidth = 3.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y + 4);
+    ctx.quadraticCurveTo(x - 2, y - 30, x + 1, y - 66);
+    ctx.stroke();
+
+    // 三小簇枝叶
+    var tiers = [
+      { ay: -72, by: -16, hw: 38, tips: 6 },
+      { ay: -104, by: -64, hw: 29, tips: 5 },
+      { ay: -132, by: -96, hw: 20, tips: 4 }
+    ];
+    tiers.forEach(function (T, i) {
+      firTier(ctx, x + (i === 1 ? 1 : 0), y + T.ay, y + T.by, T.hw, T.tips,
+        '#5aa377', '#3d8158', 0.42, false);
+    });
+
+    // 未挂任何装饰，只在树根放一小团雪人和待用的木箱
+    box(ctx, x - 46, y - 14, 26, 18, '#a9793f', { r: 2, shade: true });
+    ctx.fillStyle = '#f2f7fd';
+    ctx.fillRect(x - 46, y - 16, 26, 4);
+    ctx.strokeStyle = 'rgba(60,38,22,.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 40, y - 10); ctx.lineTo(x - 26, y - 10);
+    ctx.moveTo(x - 40, y - 5); ctx.lineTo(x - 26, y - 5);
+    ctx.stroke();
+
+    // 一点暖光，表示"在等你们来点亮"
+    var p = 0.5 + 0.5 * Math.sin(t / 900);
+    drawGlow(ctx, x + 2, y - 70, 'rgba(255,232,170,.28)', 40 * (0.85 + 0.15 * p), 0.5);
   }
 
   // ============================================================
