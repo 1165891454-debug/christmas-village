@@ -230,7 +230,7 @@ window.Game = (function () {
     '💬 去和圣诞老人聊聊吧',
     '💬 认识小镇的居民们（0/3）',
     '🧭 探索小镇：木屋 · 咖啡 · 温室 · 工坊（0/4）',
-    '✨ 寻找闪光的旅行回忆（0/3）',
+    '🧳 把散落在小镇的回忆收进册子（0/3）',
     '🪵 收集材料，把圣诞树装饰到全亮',
     '🎄 圣诞夜即将开始…'
   ];
@@ -261,7 +261,7 @@ window.Game = (function () {
     } else if (st === 2 && talkedExtra() >= 3) {
       S.quest.step = 3; toast('📋 新任务：探索小镇的四个角落'); syncQuest();
     } else if (st === 3 && visitedCount() >= 4) {
-      S.quest.step = 4; toast('📋 新任务：寻找闪光的旅行回忆 ✨'); syncQuest();
+      S.quest.step = 4; toast('📋 新任务：把散落的回忆收进册子'); syncQuest();
     } else if (st === 4 && foundCount() >= 3) {
       S.quest.step = 5; toast('🪵 收集材料装饰圣诞树：温室种植 → 工坊制作 → 回到树下'); syncQuest();
     } else if (st === 5 && treeStage() >= 3) {
@@ -454,8 +454,20 @@ window.Game = (function () {
     window.addEventListener('pagehide', dropInput);
     document.addEventListener('visibilitychange', function () { if (document.hidden) dropInput(); });
 
+    /* 面板里必须允许原生滚动：以前这里无条件 preventDefault，
+       导致菜单/家当/回忆册的内容区永远拖不动（手指下拖只会被吞掉）。 */
+    function inScrollableUI(node) {
+      while (node && node !== document.body) {
+        if (node.classList && (node.classList.contains('panel') ||
+          node.classList.contains('panel-body') || node.classList.contains('book-list'))) return true;
+        node = node.parentNode;
+      }
+      return false;
+    }
     document.addEventListener('touchmove', function (e) {
-      if (S.active) e.preventDefault();
+      if (!S.active) return;
+      if (inScrollableUI(e.target)) return;   // 交给浏览器滚面板内容
+      e.preventDefault();
     }, { passive: false });
     document.addEventListener('gesturestart', function (e) { if (S.active) e.preventDefault(); });
     document.addEventListener('dblclick', function (e) { if (S.active) e.preventDefault(); });
@@ -546,30 +558,6 @@ window.Game = (function () {
     var qPhoto = $('#btn-photo');
     if (qPhoto) qPhoto.addEventListener('click', function () { closeAllPanels(); openPhoto(); });
 
-    /* 面板内容超长时，显示「⌄」提示条 + 金色滚动条，解决「看不出能下滑」。
-       注意：回忆册的滚动发生在内部 .book-list 上，不是 .panel-body，
-       所以要把所有「自己会滚的容器」都算进去。 */
-    function scrollables(panel) {
-      var list = panel.querySelectorAll('.panel-body, .book-list, .craft-list');
-      return Array.prototype.filter.call(list, function (el) {
-        return el.scrollHeight - el.clientHeight > 6;
-      });
-    }
-    function refreshScrollHint(panel) {
-      if (!panel || panel.classList.contains('hidden')) { if (panel) panel.classList.remove('can-scroll'); return; }
-      var more = scrollables(panel).some(function (el) {
-        return (el.scrollHeight - el.clientHeight - el.scrollTop) > 6;
-      });
-      panel.classList.toggle('can-scroll', more);
-    }
-    document.querySelectorAll('.panel').forEach(function (p) {
-      Array.prototype.forEach.call(p.querySelectorAll('.panel-body, .book-list, .craft-list'), function (b) {
-        b.addEventListener('scroll', function () { refreshScrollHint(p); }, { passive: true });
-      });
-      new MutationObserver(function () { setTimeout(function () { refreshScrollHint(p); }, 40); })
-        .observe(p, { attributes: true, attributeFilter: ['class'], childList: true, subtree: true });
-    });
-
     /* 统一的关闭入口：任何带 data-close 的按钮都走同一条路，
        以后加面板只要写上按钮就一定能关。 */
     document.addEventListener('click', function (e) {
@@ -637,7 +625,10 @@ window.Game = (function () {
     $('#photo-save').addEventListener('click', function () { savePhoto(); });
     document.querySelectorAll('#outfit-list .outfit-btn').forEach(function (b) {
       b.addEventListener('click', function () {
-        S.backend.setOutfit(b.dataset.outfit).then(function () {
+        var key = b.dataset.outfit;
+        // 先本地生效：不用等网络回包，关掉面板就能看到新衣服（云端回来后会再对齐一次）
+        if (S.data && S.data.slots && S.data.slots[S.mySlot]) S.data.slots[S.mySlot].outfit = key;
+        S.backend.setOutfit(key).then(function () {
           toast('换上了「' + b.textContent.trim() + '」✨');
           closeAllPanels();
         }).catch(function (e) { toast('换装失败：' + e.message); });
@@ -971,7 +962,7 @@ window.Game = (function () {
   var END_LINES = [
     '平安夜。小镇的每一盏灯，都亮了起来。',
     '这棵圣诞树，是你们两个人一起、一天一天养出来的。',
-    '从乌海的沙丘，到赛里木湖的湖水——十六段回忆，一路收集到了这里。',
+    '从乌海的沙丘，到赛里木湖的湖水——这一路捡回来的回忆，都收在册子里了。',
     '现在，站到树下去吧。这是属于你们的夜晚。'
   ];
   function startEnding() {
@@ -1158,7 +1149,7 @@ window.Game = (function () {
     ctx.fillText("Omo's Christmas Village", W / 2, H - 168);
     ctx.fillStyle = '#ffe08a';
     ctx.font = '34px "PingFang SC", Georgia, serif';
-    ctx.fillText('✦ Charles ♥ Julie · 回忆 ' + memN + '/16 · ' + dayStr() + ' ✦', W / 2, H - 112);
+    ctx.fillText('✦ Charles ♥ Julie · 回忆 ' + memN + ' 段 · ' + dayStr() + ' ✦', W / 2, H - 112);
   }
   function roundRectPath(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -1202,7 +1193,8 @@ window.Game = (function () {
     consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
     World.eggs.forEach(function (e) {
       var found = S.quest.found[e.id];
-      consider('egg', e.x, e.y, 46, found ? '💭 重温这段回忆' : '✨ 拾起闪光的回忆', e);
+      // 不在地图上做任务式标记：走近了才出现一句很轻的「看看这里」
+      consider('egg', e.x, e.y, 46, found ? '💭 再看看这里' : '看看这里…', e);
     });
     if (S.remote.seen && S.remote.inter === 0) {
       var o = S.data && S.data.slots && S.data.slots[S.otherSlot];
@@ -1272,8 +1264,7 @@ window.Game = (function () {
       return w;
     }).then(function () {
       refreshHUD();
-      var total = World.eggs.length;
-      toast('💭 收集了旅行的回忆（' + foundCount() + '/' + total + '）· 回忆化作一颗种子 🌱');
+      toast('💭 收进回忆册了 · 这段回忆化作一颗种子 🌱');
     });
     showMemoryCard(m);
   }
@@ -1443,7 +1434,7 @@ window.Game = (function () {
       '<div class="res-line"><b>🌱 种子</b><span>' + (r.seeds || 0) + ' 颗 · 每天进温室领补给</span></div>' +
       '<div class="res-line"><b>🎁 手工礼物</b><span>' + (r.materials || 0) + ' 件 · 工坊制作</span></div>' +
       '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') + '</span></div>' +
-      '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' / 16 段已找回</span></div>' +
+      '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' 段已收进册子</span></div>' +
       '<div class="res-line"><b>🎄 圣诞树</b><span>' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + '</span></div>';
     $('#res-panel').classList.remove('hidden');
     pause();
@@ -1486,43 +1477,43 @@ window.Game = (function () {
   }
 
   /* ---------- 回忆册 ---------- */
+  /* v3.7：只列已找到的回忆。
+     - 以前把 16 条全列出来、还写「待发现 · i/16」，等于把总数和进度都摊开了；
+     - 现在没有总数的概念：找到一段，册子里才多一页；没找到时只有一句提示。 */
   function openBook() {
     var list = $('#book-list');
     if (!list) return;
     list.innerHTML = '';
     var found = S.quest.found || {};
-    World.eggs.forEach(function (m, i) {
-      var unlocked = !!found[m.id];
+    var foundList = World.eggs.filter(function (m) { return !!found[m.id]; });
+    if (!foundList.length) {
+      var empty = document.createElement('div');
+      empty.className = 'book-empty';
+      empty.innerHTML = '<b>册子还是空的</b><p>照片和明信片会散落在小镇各处——' +
+        '长椅上、窗台边、树下、桌上的小物件里。走近了，才看得见。</p>';
+      list.appendChild(empty);
+    }
+    foundList.forEach(function (m) {
       var div = document.createElement('div');
-      div.className = 'book-item' + (unlocked ? '' : ' locked');
+      div.className = 'book-item';
       var cv = document.createElement('canvas');
       cv.width = 320; cv.height = 200;
       var g = cv.getContext('2d');
-      if (unlocked && window.MemoryArt && MemoryArt[m.id]) {
+      if (window.MemoryArt && MemoryArt[m.id]) {
         try { MemoryArt[m.id](g, 320, 200); } catch (e) {
           g.fillStyle = '#2a3350'; g.fillRect(0, 0, 320, 200);
         }
-      } else {
-        g.fillStyle = '#243050'; g.fillRect(0, 0, 320, 200);
-        g.fillStyle = 'rgba(255,255,255,.35)';
-        g.font = 'bold 64px sans-serif'; g.textAlign = 'center';
-        g.fillText('?', 160, 122);
-        g.font = '14px sans-serif';
-        g.fillText('待发现', 160, 170);
       }
+      cv.addEventListener('click', function () { showMemoryCard(m); });
       div.appendChild(cv);
       var info = document.createElement('div');
       info.className = 'book-info';
-      if (unlocked) {
-        info.innerHTML = '<b>' + esc(m.title) + '</b><span>' + esc(m.location) + (m.date ? ' · ' + esc(m.date) : '') + '</span><p>' + esc(m.message) + '</p>';
-      } else {
-        info.innerHTML = '<b>？？？</b><span>待发现的回忆 · ' + (i + 1) + '/16</span><p>去小镇的角落里，找一闪一闪的小挂饰。</p>';
-      }
+      info.innerHTML = '<b>' + esc(m.title) + '</b><span>' + esc(m.location) + (m.date ? ' · ' + esc(m.date) : '') + '</span><p>' + esc(m.message) + '</p>';
       div.appendChild(info);
       list.appendChild(div);
     });
     var cnt = $('#book-count');
-    if (cnt) cnt.textContent = '已解锁 ' + Object.keys(found).length + ' / 16 段回忆';
+    if (cnt) cnt.textContent = foundList.length ? ('已收录 ' + foundList.length + ' 段') : '';
     $('#book-panel').classList.remove('hidden');
     pause();
   }
@@ -1613,7 +1604,7 @@ window.Game = (function () {
       World.drawProps(ctx, ts);
       World.drawFence(ctx);
       World.drawBorderTrees(ctx, ts);
-      World.drawEggs(ctx, ts);
+      World.drawEggs(ctx, ts, S.self);
 
       World.buildings.forEach(function (b) { drawables.push({ y: b.y + b.h, fn: function () { World.drawBuilding(ctx, b, ts); } }); });
       drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
@@ -1819,7 +1810,8 @@ window.Game = (function () {
       dt: S.dt, t: S.simT, paused: !!S.paused, inter: S.interId || 0,
       joy: { dx: S.joy.dx, dy: S.joy.dy, mag: S.joy.mag, active: S.joy.active },
       view: { w: S.view.w, h: S.view.h }, dpr: S.dpr,
-      cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot
+      cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot,
+      outfit: getOutfit(S.mySlot, 'winter'), otherOutfit: getOutfit(S.otherSlot, 'winter')
     };
   }
 

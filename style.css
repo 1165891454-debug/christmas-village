@@ -357,9 +357,10 @@ body.playing #screen-game { border-radius: 0; }
 }
 
 /* 旅行回忆册 */
-.book-panel { padding: 12px; }
+.book-panel { padding: 0; }
 .book-list {
-  max-height: 48vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  /* 不再自己做滚动容器：内部再套一个滚动区，iOS 上手指会「卡住」在里层，
+     表现为拖不动。统一交给 .panel-body 滚。 */
   display: flex; flex-direction: column; gap: 10px;
   margin: 4px 0 8px; padding-right: 4px;
 }
@@ -374,6 +375,14 @@ body.playing #screen-game { border-radius: 0; }
   border-radius: 12px; padding: 8px;
 }
 .book-item.locked { opacity: .62; }
+.book-empty {
+  padding: 18px 14px 20px; border-radius: 12px;
+  background: rgba(255,240,215,.05);
+  border: 1px dashed rgba(240,192,64,.32);
+  text-align: left;
+}
+.book-empty b { display: block; margin-bottom: 6px; color: #ffe08a; font-size: 14px; }
+.book-empty p { margin: 0; font-size: 13px; line-height: 1.75; color: var(--muted); }
 .book-item canvas {
   width: 148px; height: 92.5px; flex: 0 0 148px;
   border-radius: 8px; border: 1.5px solid rgba(240,192,64,.55);
@@ -400,8 +409,6 @@ body.playing #screen-game { border-radius: 0; }
   #joy-base { width: 100px; height: 100px; left: 14px; bottom: calc(18px + var(--safe-b)); }
   .quest-chip { font-size: 11.5px; max-width: 46vw; }
   .res-chip { font-size: 11px; }
-  .book-list { max-height: 44vh; }
-  .panel { padding: 10px 12px; }
 }
 
 /* ============================================================
@@ -526,10 +533,13 @@ body.playing #screen-game { border-radius: 0; }
   backdrop-filter: blur(1.5px); -webkit-backdrop-filter: blur(1.5px);
 }
 .panel {
-  position: absolute; left: 50%; top: 50%; bottom: auto;
+  /* 用 fixed 相对「可视视口」居中：iPhone Safari 里 body 的 100% 是布局视口，
+     工具栏可见时比可视区高，absolute 居中的面板底部会被浏览器栏压住。 */
+  position: fixed; left: 50%; top: 50%; bottom: auto;
   transform: translate(-50%, -50%);
   width: min(560px, calc(100% - 20px));
-  max-height: min(84%, 620px);
+  max-height: min(calc(100vh - 24px), 640px);
+  max-height: min(calc(100dvh - 24px), 640px);
   display: flex; flex-direction: column;
   overflow: hidden;
   padding: 0;
@@ -558,6 +568,9 @@ body.playing #screen-game { border-radius: 0; }
   overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 12px 16px 6px;
   overscroll-behavior: contain;
+  /* 关键：让浏览器把这里的上下滑动交给面板内容，而不是被游戏的
+     「整页禁止滚动」拦掉（game.js 里对 touchmove 做了 preventDefault）。 */
+  touch-action: pan-y;
 }
 /* 滚动条做成可见的金色细条（桌面），iOS 上配合下方箭头提示 */
 .panel-body::-webkit-scrollbar { width: 8px; }
@@ -566,22 +579,8 @@ body.playing #screen-game { border-radius: 0; }
   background: rgba(240,192,64,.45); border-radius: 4px;
 }
 .panel-body { scrollbar-width: thin; scrollbar-color: rgba(240,192,64,.45) transparent; }
-/* 内容还没到底时，面板右下角浮一个向下的小箭头（iOS 不显示滚动条，靠它告诉你能滑） */
-.panel.can-scroll::after {
-  content: '⌄';
-  position: absolute; right: 14px; bottom: 58px;
-  width: 22px; height: 22px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: rgba(240,192,64,.88); color: #3a2818;
-  font-size: 13px; font-weight: 900; line-height: 1;
-  box-shadow: 0 2px 8px rgba(0,0,0,.45);
-  pointer-events: none; z-index: 3;
-  animation: scroll-hint-bob 1.5s ease-in-out infinite;
-}
-@keyframes scroll-hint-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(4px); }
-}
+/* v3.7：不再用「右下角箭头」当滚动提示——面板内容区现在是真滚动，
+   箭头会让它看起来还像没修好。 */
 .panel-actions {
   flex: 0 0 auto;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
@@ -639,7 +638,7 @@ body.playing #screen-game { border-radius: 0; }
 
 /* v3.1 — 面板可用性微调（横屏矮屏下不再裁切内容） */
 #panel-scrim { position: fixed; }          /* 连顶栏一起压暗，焦点更集中 */
-.panel { max-height: 92%; width: min(600px, calc(100% - 20px)); }
+.panel { max-height: min(calc(100% - 20px), 640px); width: min(600px, calc(100% - 20px)); }
 .panel-head { padding: 10px 10px 8px 15px; }
 .panel-body { padding: 10px 15px 4px; }
 .panel-actions { padding: 8px 15px calc(8px + env(safe-area-inset-bottom, 0px)); }

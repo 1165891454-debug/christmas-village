@@ -1312,65 +1312,148 @@ window.World = (function () {
   }
 
   // ============================================================
-  // 回忆彩蛋（charm 小物件 + 闪光）
+  // 回忆彩蛋（融入场景的小物件，无发光标记）
   // ============================================================
-  function drawCharm(ctx, x, y, m, t) {
-    var bob = Math.sin(t / 700 + x) * 2;
-    var c = m.color;
-    ctx.save();
-    ctx.translate(x, y + bob);
-    if (m.object === 'shell') {
-      ctx.fillStyle = c;
-      ctx.beginPath(); ctx.arc(0, 0, 7, Math.PI, 0); ctx.fill();
-      ctx.strokeStyle = 'rgba(120,80,60,.7)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-5, -6); ctx.moveTo(0, 0); ctx.lineTo(0, -7); ctx.moveTo(0, 0); ctx.lineTo(5, -6); ctx.stroke();
-    } else if (m.object === 'pearl') {
-      drawGlow(ctx, 0, 0, 'rgba(255,240,220,.5)', 10, 0.7);
-      ball(ctx, 0, 0, 5, c, { hi: true });
-    } else if (m.object === 'drop') {
-      drawGlow(ctx, 0, 0, 'rgba(140,190,255,.5)', 10, 0.7);
-      ctx.fillStyle = c;
-      ctx.beginPath(); ctx.moveTo(0, -7);
-      ctx.quadraticCurveTo(5.5, 0, 0, 5); ctx.quadraticCurveTo(-5.5, 0, 0, -7);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,.8)';
-      ctx.beginPath(); ctx.arc(-1.5, -1, 1.4, 0, 7); ctx.fill();
-    } else {
-      // 通用小挂坠：杆 + 木牌 + 物件符号
-      ctx.strokeStyle = OUT; ctx.lineWidth = 1.5;
-      ctx.fillStyle = '#6b452c'; ctx.fillRect(-1.5, -4, 3, 12); ctx.strokeRect(-1.5, -4, 3, 12);
-      ctx.fillStyle = c;
+  /* ---------------- 散落在小镇里的回忆（隐藏式探索） ----------------
+     v3.7：以前每个回忆点是「发光 + 星光 + 上下浮动」的挂坠，等于在地图上插了
+     一排路标。现在改成「融入场景的小物件」——一张被风吹落的明信片 / 折起的
+     便签 / 旧车票，贴地放、颜色压暗、没有光晕、没有浮动，也没有任何方向提示。
+     只有走到很近（约 60px）时，物件上方才浮出一行极轻的「看看这里…」。
+     数量不提前告诉玩家：回忆册只列已找到的。 */
+
+  var TRACE_PAPER = ['#efe4cd', '#e6dbc2', '#f0e7d4', '#e8ddc6'];
+
+  /* 卡片上的小图案：只用 3~5 笔，远看只是纸上的墨点，近看才认得出 */
+  function traceInk(ctx, e) {
+    var o = e.object;
+    ctx.fillStyle = 'rgba(70,56,44,.7)';
+    ctx.strokeStyle = 'rgba(70,56,44,.7)';
+    ctx.lineWidth = 1.1;
+    ctx.lineCap = 'round';
+    if (o === 'jeep') {
+      ctx.fillRect(-3.6, -2.8, 7.2, 2.4);
+      ctx.beginPath(); ctx.arc(-2.1, 0.2, 1.1, 0, 7); ctx.arc(2.1, 0.2, 1.1, 0, 7); ctx.fill();
+    } else if (o === 'lantern') {
       ctx.beginPath();
-      ctx.moveTo(-1.5, -14); ctx.lineTo(11, -14); ctx.lineTo(11, -3); ctx.lineTo(-1.5, -3);
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,.55)';
-      ctx.fillRect(1, -12, 7, 2);
-      ctx.fillStyle = 'rgba(60,40,25,.75)';
-      var o = m.object;
-      if (o === 'sun' || o === 'steam') { ctx.beginPath(); ctx.arc(4.5, -8.5, 2.5, 0, 7); ctx.fill(); }
-      else if (o === 'panda') { ctx.beginPath(); ctx.arc(3.5, -8.5, 2, 0, 7); ctx.arc(7, -8.5, 2, 0, 7); ctx.fill(); }
-      else if (o === 'tower' || o === 'castle') { ctx.fillRect(3, -12, 2, 8); ctx.fillRect(6.5, -12, 2, 8); }
-      else if (o === 'bridge') { ctx.beginPath(); ctx.arc(4.75, -4, 3.5, Math.PI, 0); ctx.fill(); }
-      else if (o === 'hotpot') { ctx.fillRect(2, -9, 6, 4); }
-      else if (o === 'flag') { ctx.beginPath(); ctx.moveTo(3, -12); ctx.lineTo(8, -9); ctx.lineTo(3, -6); ctx.closePath(); ctx.fill(); }
-      else { ctx.fillRect(3.5, -10.5, 3.5, 3.5); }
+      ctx.moveTo(0, -3.4); ctx.lineTo(2.5, -0.6); ctx.lineTo(0, 2.4); ctx.lineTo(-2.5, -0.6);
+      ctx.closePath(); ctx.fill();
+    } else if (o === 'bottle') {
+      ctx.fillRect(-1.3, -2.6, 2.6, 5.4);
+      ctx.fillRect(-0.5, -3.9, 1.0, 1.4);
+    } else if (o === 'badge' || o === 'sunset') {
+      ctx.beginPath(); ctx.arc(0, -0.2, 2.6, Math.PI, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-3.4, 0.6); ctx.lineTo(3.4, 0.6); ctx.stroke();
+    } else if (o === 'whale') {
+      ctx.beginPath(); ctx.arc(-0.6, 0, 2.6, Math.PI * 0.15, Math.PI * 1.1); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(1.8, -1.6); ctx.lineTo(3.4, -2.4); ctx.lineTo(3.0, -0.6); ctx.closePath(); ctx.fill();
+    } else if (o === 'castle') {
+      ctx.fillRect(-3.2, -2.4, 1.8, 4.6); ctx.fillRect(1.4, -2.4, 1.8, 4.6); ctx.fillRect(-1.0, -1.0, 2.0, 3.2);
+    } else if (o === 'suitcase') {
+      ctx.fillRect(-3.4, -1.6, 6.8, 3.8);
+      ctx.beginPath(); ctx.moveTo(-1.2, -1.8); ctx.lineTo(-1.2, -3.0); ctx.lineTo(1.2, -3.0); ctx.lineTo(1.2, -1.8); ctx.stroke();
+    } else if (o === 'skewer' || o === 'shrimp') {
+      ctx.beginPath(); ctx.moveTo(-3.4, 1.8); ctx.lineTo(3.4, -1.8); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-1.4, -0.2, 0.9, 0, 7); ctx.arc(0.8, 0.1, 0.9, 0, 7); ctx.arc(2.4, -0.8, 0.9, 0, 7); ctx.fill();
+    } else if (o === 'stairs') {
+      ctx.beginPath();
+      ctx.moveTo(-3.4, 2.4); ctx.lineTo(-1.0, 2.4); ctx.lineTo(-1.0, 0.2);
+      ctx.lineTo(1.4, 0.2); ctx.lineTo(1.4, -2.0); ctx.lineTo(3.4, -2.0);
+      ctx.stroke();
+    } else if (o === 'panda') {
+      ctx.beginPath(); ctx.arc(-1.4, -1.6, 1.3, 0, 7); ctx.arc(1.4, -1.6, 1.3, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0.8, 1.9, 0, 7); ctx.fill();
+    } else if (o === 'buddha') {
+      ctx.beginPath(); ctx.arc(0, -0.4, 2.4, Math.PI, 0); ctx.fill();
+      ctx.fillRect(-2.6, -0.2, 5.2, 2.6);
+    } else if (o === 'pavilion') {
+      ctx.beginPath(); ctx.moveTo(-3.6, -1.0); ctx.lineTo(0, -3.4); ctx.lineTo(3.6, -1.0); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-2.4, -0.6); ctx.lineTo(-2.4, 2.6); ctx.moveTo(2.4, -0.6); ctx.lineTo(2.4, 2.6); ctx.stroke();
+    } else if (o === 'toothbrush') {
+      ctx.beginPath(); ctx.moveTo(-3.0, 2.2); ctx.lineTo(2.2, -1.4); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(2.2, -1.4); ctx.lineTo(3.2, -2.2); ctx.stroke();
+    } else if (o === 'steam') {
+      ctx.beginPath();
+      ctx.moveTo(-2.2, 2.0); ctx.quadraticCurveTo(-3.2, -0.4, -1.6, -2.2);
+      ctx.moveTo(0.6, 2.2); ctx.quadraticCurveTo(-0.4, -0.6, 1.2, -2.6);
+      ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(0, 0, 1.5, 0, 7); ctx.fill();
+    }
+  }
+
+  /* 一张贴地的小纸片（三种形态轮换，看起来像散落物而不是路标） */
+  function drawTrace(ctx, e, i) {
+    var rot = ((i * 37) % 7 - 3) * 0.05;
+    ctx.save();
+    ctx.translate(e.x, e.y + 6.6);
+    ctx.rotate(rot);
+
+    // 地面投影（很浅，只是让它「压在地上」）
+    ctx.fillStyle = 'rgba(56,76,100,.16)';
+    ctx.beginPath(); ctx.ellipse(0.4, 1.8, 9.0, 2.8, 0, 0, Math.PI * 2); ctx.fill();
+
+    var kind = i % 3;
+    if (kind === 0) {
+      // 明信片
+      ctx.beginPath();
+      ctx.moveTo(-8.0, -5.6); ctx.lineTo(8.0, -5.6); ctx.lineTo(8.8, 5.0); ctx.lineTo(-8.8, 5.0);
+      ctx.closePath();
+      ctx.fillStyle = TRACE_PAPER[i % 4]; ctx.fill();
+      ctx.strokeStyle = 'rgba(74,52,36,.42)'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.save(); ctx.clip();
+      ctx.globalAlpha = 0.42; ctx.fillStyle = e.color;
+      ctx.fillRect(-9, -5.8, 18, 6.2);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      ctx.save();
+      ctx.translate(0, -1.4);
+      traceInk(ctx, e);
+      ctx.restore();
+    } else if (kind === 1) {
+      // 对折的便签（露出里面一角）
+      ctx.beginPath();
+      ctx.moveTo(-7.6, -4.6); ctx.lineTo(6.2, -5.4); ctx.lineTo(7.8, 4.4); ctx.lineTo(-6.0, 5.2);
+      ctx.closePath();
+      ctx.fillStyle = TRACE_PAPER[(i + 1) % 4]; ctx.fill();
+      ctx.strokeStyle = 'rgba(74,52,36,.40)'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-2.0, -5.2); ctx.lineTo(3.4, -2.4); ctx.lineTo(1.2, 4.8);
+      ctx.strokeStyle = 'rgba(74,52,36,.22)'; ctx.lineWidth = 1.0; ctx.stroke();
+      ctx.save(); ctx.translate(3.4, 0.2); ctx.globalAlpha = .8; traceInk(ctx, e); ctx.restore();
+    } else {
+      // 旧车票（细长、带撕口）
+      ctx.beginPath();
+      ctx.moveTo(-9.4, -3.4); ctx.lineTo(9.4, -3.4); ctx.lineTo(9.4, 3.4); ctx.lineTo(-9.4, 3.4);
+      ctx.closePath();
+      ctx.fillStyle = TRACE_PAPER[(i + 2) % 4]; ctx.fill();
+      ctx.strokeStyle = 'rgba(74,52,36,.40)'; ctx.lineWidth = 1.1; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(5.0, -3.4); ctx.lineTo(5.0, 3.4);
+      ctx.setLineDash && ctx.setLineDash([1.6, 1.6]);
+      ctx.strokeStyle = 'rgba(74,52,36,.34)'; ctx.lineWidth = 1.0; ctx.stroke();
+      ctx.setLineDash && ctx.setLineDash([]);
+      ctx.save(); ctx.translate(-1.6, 0); ctx.globalAlpha = .85; traceInk(ctx, e); ctx.restore();
     }
     ctx.restore();
   }
 
-  function drawEggs(ctx, t) {
+  function drawEggs(ctx, t, self) {
     eggs.forEach(function (e, i) {
-      var tw = 0.5 + 0.5 * Math.sin(t / 500 + i * 2.1);
-      shadow(ctx, e.x, e.y + 8, 10, 3.5);
-      drawCharm(ctx, e.x, e.y, e, t);
-      if (tw > 0.55) {
-        ctx.strokeStyle = 'rgba(255,255,240,' + (tw - 0.3) + ')'; ctx.lineWidth = 1.5;
-        var sy2 = e.y - 18 + Math.sin(t / 700 + i) * 2;
-        ctx.beginPath();
-        ctx.moveTo(e.x - 9, sy2); ctx.lineTo(e.x - 3, sy2);
-        ctx.moveTo(e.x - 6, sy2 - 3); ctx.lineTo(e.x - 6, sy2 + 3);
-        ctx.stroke();
-      }
+      drawTrace(ctx, e, i);
+    });
+    // 走近才有的极轻提示：没有箭头、没有方向、没有图标
+    if (!self) return;
+    eggs.forEach(function (e) {
+      var dx = self.x - e.x, dy = self.y - e.y;
+      if (dx * dx + dy * dy > 60 * 60) return;
+      ctx.save();
+      ctx.font = '600 9.5px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(18,24,38,.6)';
+      ctx.shadowBlur = 3;
+      ctx.fillStyle = 'rgba(255,250,238,.62)';
+      ctx.fillText('看看这里…', e.x, e.y - 8);
+      ctx.restore();
     });
   }
 

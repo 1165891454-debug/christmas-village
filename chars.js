@@ -45,6 +45,68 @@ window.Chars = (function () {
     }
   };
 
+  /* ---------------- 服装（换装） ----------------
+     v3.7：outfit 以前只在菜单里改文字，绘制层完全没用它（PAL 是写死的），
+     所以「换了装但人没变」。现在按 outfit 覆盖调色板里与衣服有关的键，
+     骨架 / 五官 / 步态全部复用同一套，只是颜色与配饰不同；
+     home 关掉帽子、把靴子画成拖鞋，santa 换成圣诞帽 + 黑腰带金扣。 */
+  var OUTFIT_PAL = {
+    santa: {
+      m: {
+        coat: '#c0392b', coatMid: '#a52f22', coatDark: '#87251a', coatHi: '#e2604f',
+        trim: '#f7f2e8', trimDark: '#ded2bf',
+        pants: '#8b271c', pantsDark: '#6d1d14',
+        boot: '#2c221c', bootDark: '#1d1612',
+        scarf: '#f7f2e8', scarfDark: '#d8c9b2',
+        glove: '#f7f2e8', accent: '#f0c040',
+        belt: '#33231a', buckle: '#f2c14b'
+      },
+      f: {
+        coat: '#c0392b', coatMid: '#a52f22', coatDark: '#87251a', coatHi: '#e2604f',
+        trim: '#fbf6ea', trimDark: '#e2d6c2',
+        pants: '#8b271c', pantsDark: '#6d1d14',
+        boot: '#2c221c', bootDark: '#1d1612',
+        scarf: '#fbf6ea', scarfDark: '#dbcdb6',
+        beanie: '#c0392b', beanieMid: '#a52f22', beanieDark: '#87251a',
+        glove: '#fbf6ea', accent: '#f2c14b',
+        belt: '#33231a', buckle: '#f2c14b'
+      }
+    },
+    home: {
+      m: {
+        coat: '#8aa3c6', coatMid: '#7590b4', coatDark: '#5f7a9e', coatHi: '#a6bedc',
+        trim: '#f4eee2', trimDark: '#dcd0be',
+        pants: '#8aa3c6', pantsDark: '#7189ab',
+        boot: '#d9bfa4', bootDark: '#b99b7c',
+        scarf: '#f4eee2', scarfDark: '#dbcfbd',
+        glove: '#f0d9c2', accent: '#f0a83c'
+      },
+      f: {
+        coat: '#b3a6d8', coatMid: '#9c8fc5', coatDark: '#8577ae', coatHi: '#cbbfe8',
+        trim: '#fbf3e7', trimDark: '#e5d8c6',
+        pants: '#b3a6d8', pantsDark: '#9a8cc0',
+        boot: '#e9d2c3', bootDark: '#c9ae9d',
+        scarf: '#fbf3e7', scarfDark: '#e0d2c0',
+        glove: '#f0d9c2', accent: '#f0a83c'
+      }
+    }
+  };
+  var PAL_CACHE = {};
+  function palFor(g, outfit) {
+    var name = (outfit === 'santa' || outfit === 'home') ? outfit : 'winter';
+    var key = g + ':' + name;
+    if (PAL_CACHE[key]) return PAL_CACHE[key];
+    var out = {}, k;
+    for (k in PAL[g]) out[k] = PAL[g][k];
+    var ov = OUTFIT_PAL[name] && OUTFIT_PAL[name][g];
+    if (ov) for (k in ov) out[k] = ov[k];
+    out.outfit = name;
+    out.noHat = (name === 'home');          // 居家：不戴帽子，头发露出来
+    out.slippers = (name === 'home');       // 居家：靴子换成拖鞋配色
+    PAL_CACHE[key] = out;
+    return out;
+  }
+
   /* ---------------- 基础画笔 ---------------- */
   function lg(ctx, x0, y0, x1, y1, stops) {
     var g = ctx.createLinearGradient(x0, y0, x1, y1);
@@ -780,8 +842,8 @@ window.Chars = (function () {
     paint(ctx, P.trim, 1.2);
   }
 
-  function girl(ctx, dir, f, wavePhase) {
-    var P = PAL.f;
+  function girl(ctx, dir, f, wavePhase, palIn) {
+    var P = palIn || PAL.f;
     var G = gait(f, dir);
     var side = G.side, back = dir === 1;
     var narrow = side ? 0.76 : 1;     // 侧视：躯干明显收窄，读起来是「侧着身」
@@ -867,8 +929,8 @@ window.Chars = (function () {
     ctx.lineTo(11.9, 61.0);
     ctx.quadraticCurveTo(0, 59.6, -11.9, 61.0);
     ctx.closePath();
-    paint(ctx, P.coatDark, 1.6);
-    if (!back) { ell(ctx, 0, 59.4, 2.2, 1.8); paint(ctx, '#f5d98f', 1.1); }
+    paint(ctx, P.belt || P.coatDark, 1.6);
+    if (!back) { ell(ctx, 0, 59.4, 2.2, 1.8); paint(ctx, P.buckle || '#f5d98f', 1.1); }
 
     if (back) {
       // 背面：后中缝
@@ -985,7 +1047,7 @@ window.Chars = (function () {
     if (dir !== 1) girlFace(ctx, dir, P);
 
     if (dir !== 1) girlFrontHair(ctx, dir, P);
-    beanie(ctx, dir, P);
+    if (!P.noHat) beanie(ctx, dir, P);   // 居家睡衣：不戴帽子，长发直接露出来
 
     ctx.restore();
   }
@@ -1084,8 +1146,8 @@ window.Chars = (function () {
     ctx.fillStyle = 'rgba(255,210,190,.5)'; ctx.fill();
   }
 
-  function boy(ctx, dir, f, wavePhase) {
-    var P = PAL.m;
+  function boy(ctx, dir, f, wavePhase, palIn) {
+    var P = palIn || PAL.m;
     var G = gait(f, dir);
     var side = G.side, back = dir === 1;
     var narrow = side ? 0.78 : 1;
@@ -1122,6 +1184,19 @@ window.Chars = (function () {
     ctx.strokeStyle = '#fffaf0';
     ctx.lineWidth = 2.1;
     ctx.stroke();
+
+    // 圣诞装：黑腰带 + 金扣（只在 santa 服装出现）
+    if (P.belt) {
+      ctx.beginPath();
+      ctx.moveTo(-12.9, 55.6);
+      ctx.quadraticCurveTo(0, 54.0, 12.9, 55.6);
+      ctx.lineTo(13.0, 61.0);
+      ctx.quadraticCurveTo(0, 59.4, -13.0, 61.0);
+      ctx.closePath();
+      paint(ctx, P.belt, 1.6);
+      rr(ctx, -2.6, 55.4, 5.2, 5.6, 1.4);
+      paint(ctx, P.buckle || '#f2c14b', 1.3);
+    }
 
     if (!back) {
       // 拉链（背面不画）
@@ -1289,7 +1364,34 @@ window.Chars = (function () {
     }
 
     boyHair(ctx, dir, P);
+    if (P.outfit === 'santa') xmasHat(ctx, dir, P);   // 圣诞装：戴上圣诞帽
 
+    ctx.restore();
+  }
+
+  /* 圣诞帽（只给 santa 服装用）：白绒折边 + 红帽体 + 绒球 */
+  function xmasHat(ctx, dir, P) {
+    var tilt = dir === 2 ? -1 : (dir === 3 ? 1 : 0);
+    ctx.save();
+    ctx.translate(tilt * 1.4, 0);
+    ctx.beginPath();
+    ctx.moveTo(-13.4, 16.4);
+    ctx.bezierCurveTo(-13.0, 8.4, -6.4, 2.2, 1.2, 1.4);
+    ctx.bezierCurveTo(5.4, 1.0, 8.6, 2.6, 9.0, 5.4);
+    ctx.bezierCurveTo(9.4, 8.6, 12.0, 12.2, 13.6, 16.4);
+    ctx.closePath();
+    paint(ctx, lg(ctx, -8, 2, 8, 17,
+      [0, '#d95a4a', 0.5, '#c0392b', 1, '#a52f22']), 1.8);
+    ctx.beginPath();
+    ctx.moveTo(-14.2, 15.0);
+    ctx.bezierCurveTo(-14.2, 11.6, -8.0, 10.2, 0, 10.2);
+    ctx.bezierCurveTo(8.0, 10.2, 14.2, 11.6, 14.2, 15.0);
+    ctx.lineTo(13.8, 19.2);
+    ctx.bezierCurveTo(8.0, 17.0, -8.0, 17.0, -13.8, 19.2);
+    ctx.closePath();
+    paint(ctx, lg(ctx, 0, 10, 0, 19.2, [0, '#fffdf6', 0.55, '#f2ead9', 1, '#e2d6c2']), 1.7);
+    ell(ctx, 1.8, -0.6, 4.4, 4.0);
+    paint(ctx, lg(ctx, -2, -4, 2, 4, [0, '#fffdf6', 1, '#ecdfc9']), 1.6);
     ctx.restore();
   }
 
@@ -1831,7 +1933,7 @@ window.Chars = (function () {
   /* ---------------- 烘焙与绘制 ---------------- */
   var DIRS = { 0: 0, 1: 1, 2: 3, 3: 3 };  // 左向 = 右向镜像
 
-  function bake(g, dir, frame, wavePhase) {
+  function bake(g, dir, frame, wavePhase, outfit) {
     var s = SCALE[g];
     var w = Math.round(BOX.w * s * SS);
     var h = Math.round(BOX.h * s * SS);
@@ -1848,15 +1950,16 @@ window.Chars = (function () {
 
     // 挥手不再是「在画好的身体上再叠一只手」——那一侧的手臂由 girl/boy 直接
     // 画成举起姿势，所以任何时刻都只有两只手。
-    if (g === 'f') girl(ctx, drawDir, frame, wavePhase);
-    else boy(ctx, drawDir, frame, wavePhase);
+    var P = palFor(g, outfit);
+    if (g === 'f') girl(ctx, drawDir, frame, wavePhase, P);
+    else boy(ctx, drawDir, frame, wavePhase, P);
     return cv;
   }
 
-  function getFrame(g, dir, frame, wavePhase) {
-    var key = g + '|' + dir + '|' + frame + '|' + (wavePhase || 0);
+  function getFrame(g, dir, frame, wavePhase, outfit) {
+    var key = g + '|' + (outfit || 'winter') + '|' + dir + '|' + frame + '|' + (wavePhase || 0);
     if (cache[key]) return cache[key];
-    var cv = bake(g, dir, frame, wavePhase || 0);
+    var cv = bake(g, dir, frame, wavePhase || 0, outfit);
     cache[key] = cv;
     return cv;
   }
@@ -1869,7 +1972,7 @@ window.Chars = (function () {
     if (wave) wp = (typeof t === 'number' && Math.sin(t / 130) > 0) ? 1 : 2;
 
     var s = SCALE[g];
-    var img = getFrame(g, d, fr, wp);
+    var img = getFrame(g, d, fr, wp, (o && o.outfit) || 'winter');
     var w = BOX.w * s;
     var h = BOX.h * s;
     var left = cx + BOX.x * s;
@@ -1898,24 +2001,27 @@ window.Chars = (function () {
   }
 
   // 供预览页直接拿一张静态图（不做投影、不镜像）
-  function frameCanvas(g, dir, frame, wavePhase) {
-    return getFrame(g === 'm' ? 'm' : 'f', dir, frame, wavePhase || 0);
+  function frameCanvas(g, dir, frame, wavePhase, outfit) {
+    return getFrame(g === 'm' ? 'm' : 'f', dir, frame, wavePhase || 0, outfit);
   }
 
   /* 后台预热：把 4 方向 × 4 帧（含挥手）逐帧烘焙好，
-     避免玩家第一次朝某个方向走时出现一次小卡顿。 */
+     避免玩家第一次朝某个方向走时出现一次小卡顿。
+     v3.7：三套服装都预热，冬季排在最前（默认服装优先）。 */
   function warmup() {
     var jobs = [];
-    ['m', 'f'].forEach(function (g) {
-      for (var d = 0; d < 4; d++) for (var f = 0; f < 4; f++) jobs.push([g, d, f, 0]);
-      for (var d2 = 0; d2 < 4; d2++) jobs.push([g, d2, 0, 1]);
+    ['winter', 'santa', 'home'].forEach(function (of) {
+      ['m', 'f'].forEach(function (g) {
+        for (var d = 0; d < 4; d++) for (var f = 0; f < 4; f++) jobs.push([g, d, f, 0, of]);
+        for (var d2 = 0; d2 < 4; d2++) jobs.push([g, d2, 0, 1, of]);
+      });
     });
     var i = 0;
     function step() {
       var t0 = Date.now();
       while (i < jobs.length && Date.now() - t0 < 7) {
         var j = jobs[i++];
-        try { getFrame(j[0], j[1], j[2], j[3]); } catch (e) { }
+        try { getFrame(j[0], j[1], j[2], j[3], j[4]); } catch (e) { }
       }
       if (i < jobs.length) setTimeout(step, 70);
     }
