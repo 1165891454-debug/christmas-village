@@ -196,6 +196,12 @@
       <!-- 交互按钮 -->
       <button id="btn-interact" class="hidden">互动</button>
 
+      <!-- 右下角快捷按钮：换装 / 合影 -->
+      <div id="hud-quick">
+        <button id="btn-outfit" class="quick-btn" type="button" aria-label="换装">👗</button>
+        <button id="btn-photo" class="quick-btn" type="button" aria-label="合影">📸</button>
+      </div>
+
       <!-- 虚拟摇杆 -->
       <div id="joy-base"><div id="joy-knob"></div></div>
 
@@ -366,6 +372,7 @@
           <button class="panel-x" data-close="menu-panel" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body">
+          <button id="menu-outfit" class="menu-item">👗 换装</button>
           <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
           <button id="menu-book" class="menu-item">📖 旅行回忆册</button>
           <button id="menu-res" class="menu-item">🎒 我们的家当</button>

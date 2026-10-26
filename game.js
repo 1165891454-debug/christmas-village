@@ -34,7 +34,7 @@ window.Game = (function () {
     dev: (typeof location !== 'undefined') && /[?&#]dev=1/.test(location.search + location.hash)
   };
 
-  var SPEED = 150;
+  var SPEED = 166;
   var NAME = { a: 'Charles', b: 'Julie' };
   var CHAROPT = {
     a: { gender: 'm', glasses: true, hairStyle: 'short' },
@@ -539,6 +539,36 @@ window.Game = (function () {
     $('#menu-res').addEventListener('click', function () { closeAllPanels(); openResPanel(); });
     $('#menu-quest').addEventListener('click', function () { closeAllPanels(); openQuestPanel(); });
     $('#menu-settings').addEventListener('click', function () { closeAllPanels(); openSettings(); });
+
+    /* 右下角快捷按钮：换装 / 合影（和菜单里走同一条逻辑） */
+    var qOutfit = $('#btn-outfit');
+    if (qOutfit) qOutfit.addEventListener('click', function () { closeAllPanels(); openOutfit(); });
+    var qPhoto = $('#btn-photo');
+    if (qPhoto) qPhoto.addEventListener('click', function () { closeAllPanels(); openPhoto(); });
+
+    /* 面板内容超长时，显示「⌄」提示条 + 金色滚动条，解决「看不出能下滑」。
+       注意：回忆册的滚动发生在内部 .book-list 上，不是 .panel-body，
+       所以要把所有「自己会滚的容器」都算进去。 */
+    function scrollables(panel) {
+      var list = panel.querySelectorAll('.panel-body, .book-list, .craft-list');
+      return Array.prototype.filter.call(list, function (el) {
+        return el.scrollHeight - el.clientHeight > 6;
+      });
+    }
+    function refreshScrollHint(panel) {
+      if (!panel || panel.classList.contains('hidden')) { if (panel) panel.classList.remove('can-scroll'); return; }
+      var more = scrollables(panel).some(function (el) {
+        return (el.scrollHeight - el.clientHeight - el.scrollTop) > 6;
+      });
+      panel.classList.toggle('can-scroll', more);
+    }
+    document.querySelectorAll('.panel').forEach(function (p) {
+      Array.prototype.forEach.call(p.querySelectorAll('.panel-body, .book-list, .craft-list'), function (b) {
+        b.addEventListener('scroll', function () { refreshScrollHint(p); }, { passive: true });
+      });
+      new MutationObserver(function () { setTimeout(function () { refreshScrollHint(p); }, 40); })
+        .observe(p, { attributes: true, attributeFilter: ['class'], childList: true, subtree: true });
+    });
 
     /* 统一的关闭入口：任何带 data-close 的按钮都走同一条路，
        以后加面板只要写上按钮就一定能关。 */

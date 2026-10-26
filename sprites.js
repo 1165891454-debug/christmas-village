@@ -146,6 +146,7 @@ window.Sprites = (function () {
   }
 
   function drawBarista(ctx, cx, cy, t, frame) {
+    if (window.Chars && window.Chars.drawBarista) { window.Chars.drawBarista(ctx, cx, cy, t, frame); return; }
     var x0 = cx - 8 * U, y0 = cy - 28 * U;
     var step = (frame === 1) ? 1 : (frame === 3 ? -1 : 0);
     r(ctx, x0 + 5 * U, y0 + 22 * U + step * U, 2.5 * U, 6 * U, '#4a3b32');

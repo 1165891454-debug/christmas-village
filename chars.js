@@ -1639,6 +1639,195 @@ window.Chars = (function () {
     ctx.restore();
   }
 
+  /* ---------------- 咖啡店老板娘（v3.6 矢量重绘，替代原来的 20×28 色块） ---------------- */
+  var baristaCache = {};
+  var BAR = {
+    skin: '#fbcfad', skinMid: '#f0bd99', skinShade: '#d99c78', skinHi: '#ffe6cf',
+    hair: '#5b3c28', hairMid: '#714b32', hairHi: '#8d6140', hairDark: '#3d2718',
+    knit: '#b85731', knitMid: '#a04725', knitDark: '#843618', knitHi: '#cf7048',
+    apron: '#f8edd6', apronMid: '#e9d8ba', apronDark: '#cdb593',
+    skirt: '#4b382d', skirtDark: '#33241c',
+    boot: '#5c3e26', bootDark: '#3d2818',
+    mug: '#f5eee2', cocoa: '#5f3a1e'
+  };
+
+  function baristaBody(ctx) {
+    /* ---- 裙子 ---- */
+    ctx.beginPath();
+    ctx.moveTo(-10.4, 61);
+    ctx.lineTo(10.4, 61);
+    ctx.bezierCurveTo(15.2, 76, 16.6, 88, 16.2, 95.4);
+    ctx.lineTo(-16.2, 95.4);
+    ctx.bezierCurveTo(-16.6, 88, -15.2, 76, -10.4, 61);
+    ctx.closePath();
+    paint(ctx, lg(ctx, 0, 61, 0, 95.4, [0, BAR.skirt, 1, BAR.skirtDark]), 1.9);
+
+    /* ---- 靴子 ---- */
+    [-6.4, 6.4].forEach(function (x) {
+      rr(ctx, x - 4.5, 88.6, 9.0, 10.6, 3.4);
+      paint(ctx, lg(ctx, x - 4, 88, x + 4, 99, [0, BAR.boot, 1, BAR.bootDark]), 1.7);
+      // 靴口
+      rr(ctx, x - 4.8, 88.2, 9.6, 2.6, 1.3);
+      paint(ctx, 'rgba(255,247,232,.35)', 1.2);
+    });
+
+    /* ---- 针织衫 ---- */
+    rr(ctx, -12.8, 43.4, 25.6, 24.6, 8.4);
+    paint(ctx, lg(ctx, -12, 43, 12, 68, [0, BAR.knitHi, 0.4, BAR.knit, 1, BAR.knitDark]), 1.9);
+    // 毛衣罗纹
+    ctx.strokeStyle = 'rgba(120,45,20,.35)'; ctx.lineWidth = 0.9;
+    for (var i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 3.2, 46.5);
+      ctx.lineTo(i * 3.2, 58);
+      ctx.stroke();
+    }
+
+    /* ---- 围裙 ---- */
+    ctx.beginPath();
+    ctx.moveTo(-7.4, 47.2);
+    ctx.lineTo(7.4, 47.2);
+    ctx.lineTo(9.6, 82.4);
+    ctx.quadraticCurveTo(0, 85.6, -9.6, 82.4);
+    ctx.closePath();
+    paint(ctx, lg(ctx, -9, 47, 9, 84, [0, '#fffaf0', 0.5, BAR.apron, 1, BAR.apronDark]), 1.6);
+    // 口袋
+    rr(ctx, -4.8, 68.0, 9.6, 8.6, 2.4);
+    paint(ctx, 'rgba(233,216,186,.6)', 1.2);
+    // 肩带
+    ctx.beginPath();
+    ctx.moveTo(-5.2, 47.4); ctx.lineTo(-7.6, 43.0);
+    ctx.moveTo(5.2, 47.4); ctx.lineTo(7.6, 43.0);
+    ctx.strokeStyle = BAR.apronMid; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.stroke();
+    // 腰后系带
+    rr(ctx, -10.6, 62.4, 21.2, 2.6, 1.3);
+    paint(ctx, 'rgba(205,181,147,.85)', 1.1);
+
+    /* ---- 手臂：左手自然下垂，右手端着马克杯 ---- */
+    limb(ctx, -11.6, 47.6, -14.4, 55.0, -13.0, 64.6, 6.0, BAR.knitMid, 1.7);
+    ell(ctx, -13.2, 67.2, 3.0, 3.2);
+    paint(ctx, lg(ctx, -14, 65, -12, 70, [0, BAR.skinHi, 1, BAR.skinShade]), 1.5);
+
+    limb(ctx, 11.6, 47.6, 15.4, 53.0, 12.6, 58.6, 6.0, BAR.knit, 1.7);
+    ell(ctx, 12.0, 61.4, 3.0, 3.2);
+    paint(ctx, lg(ctx, 11, 59, 13, 64, [0, BAR.skinHi, 1, BAR.skinShade]), 1.5);
+
+    /* 马克杯 + 热气 */
+    rr(ctx, 12.4, 55.4, 8.2, 7.4, 2.0);
+    paint(ctx, lg(ctx, 12.4, 55.4, 20.6, 62.8, [0, '#fffdf8', 1, BAR.mug]), 1.5);
+    rr(ctx, 12.9, 56.0, 7.2, 2.0, 1.0);
+    paint(ctx, BAR.cocoa, 0);
+    ctx.beginPath();
+    ctx.arc(20.9, 59.0, 2.2, -Math.PI * 0.45, Math.PI * 0.45);
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(15.0, 53.6); ctx.quadraticCurveTo(16.4, 51.6, 15.2, 49.8);
+    ctx.moveTo(18.2, 53.6); ctx.quadraticCurveTo(19.6, 51.6, 18.4, 49.8);
+    ctx.strokeStyle = 'rgba(255,235,205,.45)'; ctx.lineWidth = 1.0; ctx.stroke();
+
+    /* ---- 脖子 ---- */
+    rr(ctx, -3.7, 37.6, 7.4, 7.8, 3.0);
+    paint(ctx, BAR.skinShade, 1.5);
+
+    /* ---- 后发（先画，压在头后） ---- */
+    ctx.beginPath();
+    ctx.moveTo(-11.4, 26.0);
+    ctx.bezierCurveTo(-13.6, 34.0, -13.0, 42.0, -10.2, 45.6);
+    ctx.lineTo(10.2, 45.6);
+    ctx.bezierCurveTo(13.0, 42.0, 13.6, 34.0, 11.4, 26.0);
+    ctx.closePath();
+    paint(ctx, lg(ctx, 0, 24, 0, 46, [0, BAR.hairMid, 1, BAR.hairDark]), 1.8);
+
+    /* ---- 头 ---- */
+    ell(ctx, 0, 28.2, 11.4, 12.2);
+    paint(ctx, lg(ctx, -7, 17, 7, 40, [0, BAR.skinHi, 0.45, BAR.skin, 1, BAR.skinMid]), 1.9);
+
+    /* ---- 五官 ---- */
+    // 眼
+    [-4.5, 4.5].forEach(function (x) {
+      ell(ctx, x, 27.6, 1.55, 1.95);
+      paint(ctx, '#4a3423', 0);
+      ell(ctx, x - 0.4, 26.9, 0.5, 0.55);
+      paint(ctx, 'rgba(255,255,255,.85)', 0);
+    });
+    // 眉
+    ctx.strokeStyle = 'rgba(90,58,38,.85)'; ctx.lineWidth = 1.15; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-6.3, 23.9); ctx.quadraticCurveTo(-4.5, 23.0, -2.8, 23.9);
+    ctx.moveTo(2.8, 23.9); ctx.quadraticCurveTo(4.5, 23.0, 6.3, 23.9);
+    ctx.stroke();
+    // 鼻
+    ctx.beginPath();
+    ctx.moveTo(0.3, 29.4); ctx.quadraticCurveTo(-0.4, 31.0, 1.0, 31.2);
+    ctx.strokeStyle = 'rgba(196,140,110,.8)'; ctx.lineWidth = 0.9; ctx.stroke();
+    // 笑嘴
+    ctx.beginPath();
+    ctx.moveTo(-3.2, 33.2); ctx.quadraticCurveTo(0, 36.0, 3.2, 33.2);
+    ctx.strokeStyle = '#a8493f'; ctx.lineWidth = 1.4; ctx.stroke();
+    // 腮红
+    [-7.4, 7.4].forEach(function (x) {
+      ell(ctx, x, 31.6, 2.6, 1.7);
+      ctx.fillStyle = rg(ctx, x, 31.6, 0.2, 3.0, [0, 'rgba(232,132,120,.42)', 1, 'rgba(232,132,120,0)']);
+      ctx.fill();
+    });
+
+    /* ---- 刘海 + 头顶发髻 ---- */
+    ctx.beginPath();
+    ctx.moveTo(-11.2, 24.6);
+    ctx.bezierCurveTo(-10.4, 14.8, -5.6, 10.4, 0, 10.4);
+    ctx.bezierCurveTo(5.6, 10.4, 10.4, 14.8, 11.2, 24.6);
+    ctx.bezierCurveTo(9.6, 19.6, 5.4, 17.2, 0, 17.6);
+    ctx.bezierCurveTo(-5.4, 17.2, -9.6, 19.6, -11.2, 24.6);
+    ctx.closePath();
+    paint(ctx, lg(ctx, -8, 10, 8, 25, [0, BAR.hairHi, 0.55, BAR.hair, 1, BAR.hairDark]), 1.7);
+    // 发髻
+    ell(ctx, 0.4, 8.4, 5.4, 4.6);
+    paint(ctx, lg(ctx, -4, 4, 4, 12, [0, BAR.hairHi, 1, BAR.hairMid]), 1.6);
+    ell(ctx, -1.0, 7.2, 3.0, 2.0, -0.4);
+    paint(ctx, 'rgba(160,110,74,.55)', 0);
+    // 两侧碎发（垂到脸颊）
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath();
+      ctx.moveTo(s * 10.8, 20.0);
+      ctx.bezierCurveTo(s * 12.8, 27.0, s * 12.4, 34.6, s * 11.2, 40.0);
+      ctx.bezierCurveTo(s * 10.0, 40.6, s * 9.2, 39.6, s * 9.4, 38.2);
+      ctx.bezierCurveTo(s * 10.2, 32.0, s * 10.0, 25.6, s * 9.2, 21.0);
+      ctx.closePath();
+      paint(ctx, lg(ctx, s * 12, 20, s * 10, 40, [0, BAR.hair, 0.6, BAR.hairMid, 1, BAR.hairDark]), 1.5);
+    });
+  }
+
+  function baristaFrame(bob) {
+    var k = bob ? 1 : 0;
+    if (baristaCache[k]) return baristaCache[k];
+    var s = 0.72 * SS;
+    var cv = document.createElement('canvas');
+    cv.width = Math.round(BOX.w * s);
+    cv.height = Math.round(BOX.h * s);
+    var c2 = cv.getContext('2d');
+    c2.scale(s, s);
+    c2.translate(-BOX.x, -BOX.y + (bob ? 0.7 : 0));
+    c2.lineJoin = 'round';
+    c2.lineCap = 'round';
+    baristaBody(c2);
+    baristaCache[k] = cv;
+    return cv;
+  }
+
+  function drawBarista(ctx, cx, cy, t, frame) {
+    var wob = (typeof t === 'number' && Math.sin(t / 640) > 0) ? 1 : 0;
+    var img = baristaFrame(wob);
+    var s = 0.72;
+    ctx.save();
+    ctx.fillStyle = 'rgba(64,84,120,.22)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 1.4, 15.0, 4.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, cx + BOX.x * s, cy - (100 - BOX.y) * s, BOX.w * s, BOX.h * s);
+    ctx.restore();
+  }
+
   /* ---------------- 烘焙与绘制 ---------------- */
   var DIRS = { 0: 0, 1: 1, 2: 3, 3: 3 };  // 左向 = 右向镜像
 
@@ -1741,6 +1930,7 @@ window.Chars = (function () {
     draw: draw,
     drawSanta: drawSanta,
     drawElf: drawElf,
+    drawBarista: drawBarista,
     warmup: warmup,
     frameCanvas: frameCanvas,
     scale: SCALE,
