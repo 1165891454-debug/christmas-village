@@ -50,6 +50,10 @@ window.Sprites = (function () {
     y0 -= breathe * U * 0.5;
     var skirt = !isM && o.outfit !== 'home';
 
+    // 脚下投影
+    ctx.fillStyle = 'rgba(70,90,130,.25)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + 1.5 * U, 11 * U, 3.2 * U, 0, 0, 7); ctx.fill();
+
     // ---- 腿与鞋 ----
     var legY = y0 + (H - 7) * U;
     var legLen = 6 * U;
@@ -57,6 +61,9 @@ window.Sprites = (function () {
     r(ctx, x0 + 8.5 * U, legY - step * U, 2.5 * U, legLen, outfit.legs);
     r(ctx, x0 + 4.8 * U, legY + legLen + step * U, 3 * U, 2 * U, outfit.boots);
     r(ctx, x0 + 8.3 * U, legY + legLen - step * U, 3 * U, 2 * U, outfit.boots);
+    // 鞋面高光
+    r(ctx, x0 + 4.8 * U, legY + legLen + step * U, 3 * U, 0.7 * U, 'rgba(255,255,255,.35)');
+    r(ctx, x0 + 8.3 * U, legY + legLen - step * U, 3 * U, 0.7 * U, 'rgba(255,255,255,.35)');
 
     // ---- 长发背面（Julie，背面时及腰长发覆盖）----
     if (o.hairStyle === 'long' && dir === 1) {
@@ -104,16 +111,17 @@ window.Sprites = (function () {
     // ---- 手臂 ----
     var armY = bodyY + 0.6 * U;
     var armX_L = bodyX - 1.7 * U, armX_R = bodyX + bodyW * U + 0.1 * U;
+    var glove = outfit.trim || skin;
     r(ctx, armX_L, armY + (frame === 1 ? U : 0), 1.6 * U, 6.6 * U, outfit.top);
-    r(ctx, armX_L, armY + 6.2 * U + (frame === 1 ? U : 0), 1.6 * U, 1.2 * U, skin); // 手
+    r(ctx, armX_L, armY + 6.2 * U + (frame === 1 ? U : 0), 1.6 * U, 1.4 * U, glove); // 手套
     if (wave) {
       // 挥手：举高 + 摆动
       var wob = (typeof t === 'number' && Math.sin(t / 120) > 0) ? 1 : 0;
       r(ctx, armX_R, y0 + (4 - wob) * U, 1.6 * U, 8 * U, outfit.top);
-      r(ctx, armX_R + wob * 1.4 * U, y0 + (2.4 - wob) * U, 1.6 * U, 1.8 * U, skin);
+      r(ctx, armX_R + wob * 1.4 * U, y0 + (2.4 - wob) * U, 1.6 * U, 1.8 * U, glove);
     } else {
       r(ctx, armX_R, armY + (frame === 3 ? U : 0), 1.6 * U, 6.6 * U, outfit.top);
-      r(ctx, armX_R, armY + 6.2 * U + (frame === 3 ? U : 0), 1.6 * U, 1.2 * U, skin);
+      r(ctx, armX_R, armY + 6.2 * U + (frame === 3 ? U : 0), 1.6 * U, 1.4 * U, glove);
     }
 
     // ---- 头 ----

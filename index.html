@@ -71,6 +71,9 @@
         <button id="btn-menu" class="hud-btn">☰</button>
       </div>
 
+      <!-- 主线任务角标 -->
+      <div id="quest-chip" class="quest-chip"></div>
+
       <!-- 交互按钮 -->
       <button id="btn-interact" class="hidden">互动</button>
 
@@ -110,14 +113,43 @@
         <div class="panel-actions"><button id="outfit-close" class="btn ghost small">关闭</button></div>
       </div>
 
+      <!-- 回忆照片面板（有照片时） -->
+      <div id="mem-photo" class="panel hidden">
+        <div id="mem-photo-title" class="panel-name"></div>
+        <img id="mem-photo-img" class="mem-img" alt="回忆照片" />
+        <div id="mem-photo-text"></div>
+        <div class="panel-actions"><button id="mem-close" class="btn ghost small">合上回忆</button></div>
+      </div>
+
       <!-- 菜单 -->
       <div id="menu-panel" class="panel hidden">
         <div class="panel-name">☰ 菜单</div>
         <button id="menu-outfit" class="menu-item">👗 换装</button>
         <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
+        <button id="menu-photo" class="menu-item">📸 圣诞合影</button>
         <button id="menu-invite" class="menu-item">📨 邀请对方</button>
         <button id="menu-leave" class="menu-item danger">🚪 返回大厅</button>
         <div class="panel-actions"><button id="menu-close" class="btn ghost small">关闭</button></div>
+      </div>
+
+      <!-- 结局文字 -->
+      <div id="end-overlay" class="hidden">
+        <div id="end-text"></div>
+        <div id="end-hint">轻触继续 ▸</div>
+      </div>
+
+      <!-- 拍照模式 -->
+      <div id="photo-modal" class="hidden">
+        <div id="photo-card">
+          <div id="photo-title">📸 Omo's Christmas Night</div>
+          <canvas id="photo-canvas"></canvas>
+          <img id="photo-img" alt="我们的圣诞合影" />
+          <div id="photo-note"></div>
+          <div class="panel-actions">
+            <button id="photo-save" class="btn primary">⬇️ 保存图片</button>
+            <button id="photo-close" class="btn ghost small">回到小镇</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -137,9 +169,17 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="firebase-config.js"></script>
+  <script src="memories.js"></script>
   <script src="sprites.js"></script>
   <script src="world.js"></script>
   <script src="game.js"></script>
   <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () { });
+      });
+    }
+  </script>
 </body>
 </html>
