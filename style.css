@@ -672,3 +672,53 @@ body:not(.playing) #topbar { display: none; }   /* 大厅不需要再重复一�
   .lobby-card { padding: 12px; }
 }
 body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏版式，不需要提示条 */
+
+/* ============================================================
+ * v4.0 — 小镇车站：目的地选择面板
+ *   六张缩略图卡片，两列（窄屏）/ 三列（宽屏）；整块跟着 .panel-body 滚，
+ *   不在卡片里再造滚动容器，避免 iPhone 上「手指卡住拖不动」。
+ * ============================================================ */
+.station-panel { padding: 0; }
+.station-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+@media (min-width: 520px) {
+  .station-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.station-card {
+  display: flex; flex-direction: column;
+  padding: 0; overflow: hidden;
+  background: rgba(255,240,215,.07);
+  border: 1px solid rgba(240,192,64,.32);
+  border-radius: 12px;
+  color: inherit; font: inherit; text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.station-card:active { transform: scale(.975); background: rgba(240,192,64,.16); border-color: #f0c040; }
+.station-thumb {
+  display: block; width: 100%; height: auto; aspect-ratio: 3 / 2;
+  border-bottom: 1px solid rgba(240,192,64,.28);
+  background: #1d2740;
+}
+.station-card-body { padding: 7px 9px 9px; min-width: 0; }
+.station-card-body b {
+  display: block; font-size: 13.5px; color: #ffe08a; letter-spacing: .2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.station-card-body .station-sub {
+  display: block; font-size: 10.5px; color: #c9b696; margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.station-card-body p {
+  margin: 5px 0 6px; font-size: 11px; line-height: 1.5; color: #e8dcc8;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.station-card-body .station-state { font-style: normal; font-size: 10px; color: #9fbf8f; }
+.station-card.locked { opacity: .55; }
+.station-card.locked .station-state { color: #d0a86a; }
+.station-panel .small-note { margin: 0 0 4px; }

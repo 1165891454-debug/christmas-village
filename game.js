@@ -25,6 +25,7 @@ window.Game = (function () {
     lastSent: 0, lastSentDir: -1, flakes: [], data: null, otherSlot: null, mySlot: 'a',
     npcIdx: {}, paused: false, curInteract: null,
     parts: [], interId: null, outdoorPos: null,
+    mapId: null, mapReturn: null,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -269,7 +270,7 @@ window.Game = (function () {
     }
   }
   function checkVisitZones() {
-    if (S.interId || S.quest.step > 3) return;
+    if (S.interId || S.mapId || S.quest.step > 3) return;
     var marked = false;
     function near(x, y, r) { return Math.sqrt(Math.pow(S.self.x - x, 2) + Math.pow(S.self.y - y, 2)) < r; }
     if (!S.quest.visited.cabin && near(285, 410, 110)) { S.quest.visited.cabin = 1; marked = true; }
@@ -310,7 +311,13 @@ window.Game = (function () {
     resize();
 
     var saved = S.data && S.data.slots && S.data.slots[S.mySlot] && S.data.slots[S.mySlot].pos;
-    if (saved && typeof saved.x === 'number') {
+    /* 上次停在某张旅行地图里：刷新后直接回到那张地图（旧存档 indoor 是 0 或室内 id，走原来的路） */
+    var savedHere = saved && saved.indoor;
+    var restoreMap = (typeof savedHere === 'string' && window.TravelMaps && TravelMaps.has(savedHere)) ? savedHere : null;
+    if (restoreMap) {
+      var rd = TravelMaps.get(restoreMap);
+      S.self.x = rd.spawn.x; S.self.y = rd.spawn.y;
+    } else if (saved && typeof saved.x === 'number') {
       S.self.x = saved.x; S.self.y = saved.y;
     } else {
       S.self.x = S.mySlot === 'a' ? 640 : 860;
@@ -320,6 +327,7 @@ window.Game = (function () {
     S.remote.y = 720; S.remote.tx = S.remote.x; S.remote.ty = S.remote.y;
 
     S.parts = []; S.interId = null; S.outdoorPos = null;
+    S.mapId = restoreMap; S.mapReturn = null; S.posRestored = false;
     S.prevPresence = null; S.prevStage = -1; S.heartT = 0;
     S.quest = { step: 0, talked: {}, visited: {}, found: {} };
     S.q = { lvl: 2, acc: 0, n: 0 };
@@ -398,6 +406,18 @@ window.Game = (function () {
   function onData(d) {
     S.data = d;
     if (!S.active || !d) return;
+    /* 首次拿到存档时对一次位：如果上次是停在某张旅行地图里，
+       刷新/重进后直接回到那张地图，而不是被扔回小镇广场。 */
+    if (!S.posRestored) {
+      S.posRestored = true;
+      var sp0 = d.slots && d.slots[S.mySlot] && d.slots[S.mySlot].pos;
+      if (sp0 && typeof sp0.indoor === 'string' && window.TravelMaps && TravelMaps.has(sp0.indoor)) {
+        var rd0 = TravelMaps.get(sp0.indoor);
+        S.mapId = sp0.indoor; S.interId = null;
+        S.self.x = rd0.spawn.x; S.self.y = rd0.spawn.y;
+        TravelMaps.bg(sp0.indoor);
+      }
+    }
     var w = d.world;
     if (w && !S.worldFallback) {
       S.world = w;
@@ -610,6 +630,8 @@ window.Game = (function () {
     $('#outfit-close').addEventListener('click', function () { closeAllPanels(); });
     $('#mem-close').addEventListener('click', function () { closeAllPanels(); });
     $('#book-close').addEventListener('click', function () { closeAllPanels(); });
+    var stc = $('#station-close');
+    if (stc) stc.addEventListener('click', function () { closeAllPanels(); });
     $('#plot-close').addEventListener('click', function () { closeAllPanels(); });
     $('#craft-close').addEventListener('click', function () { closeAllPanels(); });
     var bpf = $('#btn-plant-flower'), bpt = $('#btn-plant-tree'), bhv = $('#btn-harvest');
@@ -639,10 +661,31 @@ window.Game = (function () {
 
   /* ---------- 碰撞 ---------- */
   function curInt() { return S.interId ? World.getInterior(S.interId) : null; }
+  /* 当前所在的旅行地图（不在任何地图里就是 null）。
+     六张地图的数据全部来自 maps.js，game.js 只负责「怎么走、怎么交互」。 */
+  function curMap() {
+    return (S.mapId && window.TravelMaps) ? TravelMaps.get(S.mapId) : null;
+  }
+  /* 当前位置的共享标识：室内 id / 地图 id / 0（小镇）。
+     存档里仍然写在 pos.indoor 这个字段上——旧存档是 0 或室内 id，照样能读。 */
+  function hereKey() { return S.interId || S.mapId || 0; }
+
+  /* 旅行地图的取景比例。地图是 1500×1200 的大画幅，1:1 摆在竖屏手机上
+     只能看到中间一条横带（最上面 350px 永远露不出来）；缩到 0.8 之后
+     整张地图的高度一次看全——天、山、湖/江、地面同时在场，
+     人才像是「站在那个地方」，而不是「站在一张背景图前面」。 */
+  var MAP_ZOOM = 0.8;
+  function zoomNow() {
+    var mp = curMap();
+    if (!mp) return 1;
+    return mp.zoom || MAP_ZOOM;
+  }
+
   function hits(x, y) {
     var bx = x - 12, by = y - 12, bw = 24, bh = 14;
     var inter = curInt();
-    var list = inter ? inter.obstacles : World.obstacles;
+    var mp = inter ? null : curMap();
+    var list = inter ? inter.obstacles : (mp ? (mp.obstacles || []) : World.obstacles);
     for (var i = 0; i < list.length; i++) {
       var o = list[i];
       if (bx < o.x + o.w && bx + bw > o.x && by < o.y + o.h && by + bh > o.y) return true;
@@ -709,10 +752,16 @@ window.Game = (function () {
       if (!hits(nx, S.self.y)) S.self.x = nx;
       if (!hits(S.self.x, ny)) S.self.y = ny;
       var inter = curInt();
-      var iw = inter ? inter.w : World.width;
-      var ih = inter ? inter.h : World.height;
+      var mp = inter ? null : curMap();
+      var iw = inter ? inter.w : (mp ? mp.w : World.width);
+      var ih = inter ? inter.h : (mp ? mp.h : World.height);
       S.self.x = Math.max(30, Math.min(iw - 30, S.self.x));
-      S.self.y = Math.max(inter ? 150 : 70, Math.min(ih - 24, S.self.y));
+      if (mp) {
+        // 旅行地图只有一条「能站人的地面带」：上界是远景的地脚，下界是画面底边
+        S.self.y = Math.max(mp.walk.y0, Math.min(mp.walk.y1, S.self.y));
+      } else {
+        S.self.y = Math.max(inter ? 150 : 70, Math.min(ih - 24, S.self.y));
+      }
       if (Math.abs(ux) > Math.abs(uy)) S.self.dir = ux < 0 ? 2 : 3;
       else S.self.dir = uy < 0 ? 1 : 0;
       // 步频跟着速度走：慢走时脚步也慢
@@ -729,24 +778,24 @@ window.Game = (function () {
       var dirChanged = S.self.dir !== S.lastSentDir;
       if ((moving || dirChanged) && now - S.lastSent > 150) {
         S.lastSent = now; S.lastSentDir = S.self.dir;
-        S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, moving, S.interId || 0)
+        S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, moving, hereKey())
           .catch(function () { });
       }
     }
 
-    if (S.remote.inter === (S.interId || 0)) {
+    if (S.remote.inter === hereKey()) {
       S.remote.x += (S.remote.tx - S.remote.x) * Math.min(1, dt * 8);
       S.remote.y += (S.remote.ty - S.remote.y) * Math.min(1, dt * 8);
     }
 
     // 双人互动（爱心 / 树下星光）
-    if (S.remote.seen && S.remote.inter === (S.interId || 0)) {
+    if (S.remote.seen && S.remote.inter === hereKey()) {
       var pd = Math.sqrt(Math.pow(S.self.x - S.remote.x, 2) + Math.pow(S.self.y - S.remote.y, 2));
       if (pd < 140 && ts - S.heartT > 1400) {
         S.heartT = ts;
         burst((S.self.x + S.remote.x) / 2, (S.self.y + S.remote.y) / 2 - 46, 'heart', 1);
       }
-      if (!S.interId) {
+      if (!S.interId && !S.mapId) {
         var nearTree = Math.sqrt(Math.pow(S.self.x - World.tree.x, 2) + Math.pow(S.self.y - World.tree.y, 2)) < 170 &&
                        Math.sqrt(Math.pow(S.remote.x - World.tree.x, 2) + Math.pow(S.remote.y - World.tree.y, 2)) < 170;
         if (nearTree && treeStage() >= 3 && ts - S.heartT > 1000) {
@@ -768,7 +817,7 @@ window.Game = (function () {
     updateQuest();
 
     // ---- 结局触发（三重门：日期 + 任务 + 树全亮；已在共享数据里标记看过则不再触发） ----
-    if (!S.ended && !S.ending && !S.interId) {
+    if (!S.ended && !S.ending && !S.interId && !S.mapId) {
       var w = curWorld();
       if (!(w && w.ended) && treeStage() >= 3 && S.quest.step >= 6 && endingUnlocked()) {
         startEnding();
@@ -784,12 +833,17 @@ window.Game = (function () {
     S.curInteract = findInteract();
 
     var inter2 = curInt();
-    var iw2 = inter2 ? inter2.w : World.width;
-    var ih2 = inter2 ? inter2.h : World.height;
-    var targetCx = S.self.x - S.view.w / 2;
-    var targetCy = S.self.y - S.view.h / 2;
-    S.cam.x = iw2 <= S.view.w ? (iw2 - S.view.w) / 2 : Math.max(0, Math.min(iw2 - S.view.w, targetCx));
-    S.cam.y = ih2 <= S.view.h ? (ih2 - S.view.h) / 2 : Math.max(0, Math.min(ih2 - S.view.h, targetCy));
+    var mp2 = inter2 ? null : curMap();
+    var iw2 = inter2 ? inter2.w : (mp2 ? mp2.w : World.width);
+    var ih2 = inter2 ? inter2.h : (mp2 ? mp2.h : World.height);
+    /* 旅行地图用略微缩小的视口（见 zoomNow）：相机按「世界单位」的可见尺寸算，
+       这样整张地图的高度能一次看全，不再只看到一条横带。 */
+    var zi2 = zoomNow();
+    var vwW = S.view.w / zi2, vhW = S.view.h / zi2;
+    var targetCx = S.self.x - vwW / 2;
+    var targetCy = S.self.y - vhW / 2;
+    S.cam.x = iw2 <= vwW ? (iw2 - vwW) / 2 : Math.max(0, Math.min(iw2 - vwW, targetCx));
+    S.cam.y = ih2 <= vhW ? (ih2 - vhW) / 2 : Math.max(0, Math.min(ih2 - vhW, targetCy));
   }
 
   /* ---------- 养成动作 ---------- */
@@ -1184,9 +1238,26 @@ window.Game = (function () {
       consider('exit', inter.exit.x, inter.exit.y, 70, '🚪 回到小镇', inter.exit);
       return best;
     }
+    var mp = curMap();
+    if (mp) {
+      /* 地图里只有三件事可做：捡起那里留下的一件小东西、站到观景点、回小镇。 */
+      var mm = mapMemory(mp.id);
+      if (mm) {
+        var got = S.quest.found[mm.id];
+        consider('mapEgg', mp.eggPos.x, mp.eggPos.y, 64, got ? '💭 再看看这里' : '看看这里…', mp.eggPos);
+      }
+      if (mp.view) consider('mapView', mp.view.x, mp.view.y, mp.view.r, mp.view.label, mp.view);
+      consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, '🚉 回小镇', mp.exitPos);
+      if (S.remote.seen && S.remote.inter === hereKey()) {
+        var op = S.data && S.data.slots && S.data.slots[S.otherSlot];
+        if (op) consider('partner', S.remote.x, S.remote.y, 90, '👋 和 ' + NAME[S.otherSlot] + ' 打个招呼', op);
+      }
+      return best;
+    }
     World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, '💬 和 ' + n.name + ' 交谈', n); });
     World.doors.forEach(function (dr) {
       var b = World.buildings.filter(function (x) { return x.id === dr.id; })[0];
+      if (b && b.kind === 'station') { consider('station', dr.x, dr.y, 104, '🚉 去车站看看', dr); return; }
       var enterable = b && b.kind !== 'shop' && b.kind !== 'stall';
       consider('door', dr.x, dr.y, 78, enterable ? ('🚪 进入 ' + dr.name) : ('👀 ' + dr.name), dr);
     });
@@ -1216,11 +1287,26 @@ window.Game = (function () {
         S.quest.talked[it.ref.id] = 1;
         updateQuest(); syncQuest();
       }
+    } else if (it.type === 'station') {
+      openStationPanel();
+    } else if (it.type === 'mapExit') {
+      leaveMap();
+    } else if (it.type === 'mapView') {
+      var mpv = curMap();
+      if (mpv) {
+        S.self.waveUntil = performance.now() + 1200;
+        openDialog(mpv.name, mpv.view.lines);
+      }
+    } else if (it.type === 'mapEgg') {
+      var mpE = curMap();
+      var mmE = mpE && mapMemory(mpE.id);
+      if (mmE) collectEgg(mmE);
     } else if (it.type === 'door') {
       var b = World.buildings.filter(function (x) { return x.id === it.ref.id; })[0];
       if (!b) return;
       if (b.kind === 'shop') openOutfit();
       else if (b.kind === 'stall') openDialog(b.name, [b.hint]);
+      else if (b.kind === 'station') openStationPanel();
       else enterIndoor(b.id);
     } else if (it.type === 'tree') {
       openTreePanel();
@@ -1293,10 +1379,137 @@ window.Game = (function () {
     pause();
   }
 
+  /* ---------- 旅行地图（六张，走小镇车站进出） ---------- */
+  /* 每张地图只藏一段回忆，回忆本体仍然登记在 memories.js 里，
+     用 map 字段和地图 id 对应——这样回忆册、共享存档、已找到集合都不用改结构。 */
+  function mapMemory(mapId) {
+    var all = (window.Memories || []);
+    for (var i = 0; i < all.length; i++) if (all[i].map === mapId) return all[i];
+    return null;
+  }
+
+  /* 本阶段：六个目的地全部免费开放（用户要求「目前可以随意进出六张地图」）。
+     以后要做「农作物换随机票」时，把这里换成读 world.travel[id] 即可，
+     面板里的锁定态与线索文案已经写好了。 */
+  var TRAVEL_FREE = true;
+  function travelUnlocked(id) {
+    if (TRAVEL_FREE) return true;
+    var w = curWorld();
+    return !!(w && w.travel && w.travel[id]);
+  }
+  function travelVisited(id) {
+    var w = curWorld();
+    return !!(w && w.travel && w.travel[id]);
+  }
+
+  function openStationPanel() {
+    var list = $('#station-list');
+    if (!list || !window.TravelMaps) return;
+    list.innerHTML = '';
+    TravelMaps.list().forEach(function (d) {
+      var unlocked = travelUnlocked(d.id);
+      var visited = travelVisited(d.id);
+      var mm = mapMemory(d.id);
+      var got = !!(mm && S.quest.found[mm.id]);
+
+      var card = document.createElement('button');
+      card.className = 'station-card' + (unlocked ? '' : ' locked');
+      card.type = 'button';
+      card.setAttribute('data-map', d.id);
+
+      var cv = document.createElement('canvas');
+      cv.className = 'station-thumb';
+      cv.width = 300; cv.height = 200;
+      card.appendChild(cv);
+      try { TravelMaps.thumb(d.id, cv); } catch (e) { }
+
+      var body = document.createElement('div');
+      body.className = 'station-card-body';
+      body.innerHTML =
+        '<b>' + esc(d.name) + '</b>' +
+        '<span class="station-sub">' + esc(d.sub) + '</span>' +
+        '<p>' + esc(unlocked ? d.card : '这条线还没有票。先在镇子上忙一阵子吧。') + '</p>' +
+        '<em class="station-state">' +
+        (!unlocked ? '🔒 还没票' : (visited ? '✓ 去过了' : '🚉 随时可以走')) +
+        (got ? ' · 💭 找到了那里的东西' : '') +
+        '</em>';
+      card.appendChild(body);
+
+      if (unlocked) {
+        card.addEventListener('click', function () { enterMap(d.id); });
+      } else {
+        card.addEventListener('click', function () {
+          toast('🚉 这趟车还没有票 —— 攒点农作物，之后能换到随机的一张。', 3200);
+        });
+      }
+      list.appendChild(card);
+    });
+    var note = $('#station-note');
+    if (note) {
+      note.textContent = TRAVEL_FREE
+        ? '今天六个方向都发车。选一个地方，和 Julie 一起过去走走——那里都留下过一件小东西。'
+        : '有票的方向才能上车。到了以后，别忘了找找那里留下的一件小东西。';
+    }
+    $('#station-panel').classList.remove('hidden');
+    pause();
+  }
+
+  function enterMap(id) {
+    var d = window.TravelMaps && TravelMaps.get(id);
+    if (!d) return;
+    if (!travelUnlocked(id)) { toast('🚉 这条线还没有票。'); return; }
+    closeAllPanels();          // 顺手解除暂停，否则上车后走不动
+    // 记住小镇上的位置，回来时站回原处
+    S.mapReturn = { x: S.self.x, y: S.self.y, dir: S.self.dir };
+    S.interId = null;
+    S.outdoorPos = null;
+    S.mapId = id;
+    S.self.x = d.spawn.x;
+    S.self.y = d.spawn.y;
+    S.self.dir = (typeof d.spawn.dir === 'number') ? d.spawn.dir : 1;
+    S.self.animT = 0; S.self.frame = 0; S.self.moving = false;
+    S.remote.seen = (S.remote.inter === id);
+    S.parts = [];
+    Snd.sfx('door');
+    toast(d.arrive || ('🚉 到了 ' + d.name), 3000);
+    /* 第一次来：写进共享存档（world.travel），两台设备都能看到「去过了」。
+       顺带把地图背景提前烘出来，避免第一帧空白。 */
+    if (!travelVisited(id)) {
+      mutate(function (w) {
+        w.travel = w.travel || {};
+        if (!w.travel[id]) w.travel[id] = Date.now();
+        return w;
+      }).then(function () { refreshHUD(); }, function () { });
+    }
+    if (window.TravelMaps) TravelMaps.bg(id);
+    /* 上车是一次性事件，不是每 150ms 的位移同步——demo 模式也照写，
+       这样刷新页面 / 关掉重开都能回到同一张地图。 */
+    try {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, id).catch(function () { });
+    } catch (e) { }
+  }
+
+  function leaveMap() {
+    var d = curMap();
+    S.mapId = null;
+    var back = S.mapReturn || { x: 1033, y: 468, dir: 0 };
+    S.self.x = back.x; S.self.y = back.y; S.self.dir = back.dir || 0;
+    S.self.moving = false; S.self.frame = 0; S.self.animT = 0;
+    S.mapReturn = null;
+    S.remote.seen = !!(S.data && S.data.slots && S.data.slots[S.otherSlot]) && S.remote.inter === 0;
+    S.parts = [];
+    Snd.sfx('door');
+    toast(d ? ('⛄ 从' + d.name + '回到了小镇') : '⛄ 回到了雪夜的小镇');
+    try {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
+    } catch (e) { }
+  }
+
   /* ---------- 室内 / 室外 ---------- */
   function enterIndoor(id) {
     var inter = World.getInterior(id);
     if (!inter) return;
+    S.mapId = null;            // 从地图直接进室内是不可能的，防御一下
     S.interId = id;
     S.outdoorPos = { x: S.self.x, y: S.self.y };
     S.self.x = inter.spawn.x;
@@ -1328,7 +1541,8 @@ window.Game = (function () {
 
   /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
   var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
-    '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel'];
+    '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
+    '#station-panel'];
 
   function closeAllPanels() {
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
@@ -1485,12 +1699,15 @@ window.Game = (function () {
     if (!list) return;
     list.innerHTML = '';
     var found = S.quest.found || {};
-    var foundList = World.eggs.filter(function (m) { return !!found[m.id]; });
+    /* v4：回忆册里的条目来自全部 16 段回忆——小镇地上的 10 段，
+       加上六张旅行地图里各藏的一段（它们不在 World.eggs 里）。 */
+    var all = World.allMemories || World.eggs;
+    var foundList = all.filter(function (m) { return !!found[m.id]; });
     if (!foundList.length) {
       var empty = document.createElement('div');
       empty.className = 'book-empty';
       empty.innerHTML = '<b>册子还是空的</b><p>照片和明信片会散落在小镇各处——' +
-        '长椅上、窗台边、树下、桌上的小物件里。走近了，才看得见。</p>';
+        '长椅上、窗台边、树下、桌上的小物件里。走远了，车站还能带你们去别的地方找。</p>';
       list.appendChild(empty);
     }
     foundList.forEach(function (m) {
@@ -1567,12 +1784,14 @@ window.Game = (function () {
     var ctx = S.ctx;
     ctx.clearRect(0, 0, S.view.w, S.view.h);
     ctx.save();
+    var zNow = zoomNow();
+    if (zNow !== 1) ctx.scale(zNow, zNow);
     ctx.translate(-Math.round(S.cam.x), -Math.round(S.cam.y));
 
     var myOutfit = getOutfit(S.mySlot, 'winter');
     var theirOutfit = getOutfit(S.otherSlot, 'winter');
     var inter = curInt();
-    var showRemote = S.remote.seen && S.remote.inter === (S.interId || 0);
+    var showRemote = S.remote.seen && S.remote.inter === hereKey();
     var drawables = [];
 
     if (inter) {
@@ -1595,6 +1814,69 @@ window.Game = (function () {
       drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
       ctx.fillStyle = 'rgba(255,150,60,.045)';
       ctx.fillRect(S.cam.x, S.cam.y, S.view.w, S.view.h);
+    } else if (curMap()) {
+      /* ---------- 旅行地图 ----------
+       * 背景是一张离屏 canvas（maps.js 里整张画好、按 id 缓存），这里只裁剪可见区域画一次；
+       * 人物、记忆物件、动态效果（水波 / 喷泉 / 灯光呼吸）都叠在上面。 */
+      var md = curMap();
+      var bgi = window.TravelMaps ? TravelMaps.bg(md.id) : null;
+      ctx.fillStyle = '#0e1622';
+      ctx.fillRect(0, 0, md.w, md.h);
+      if (bgi) {
+        /* 可见区域要用「世界单位」算：屏幕像素 ÷ 取景比例，
+           否则缩放到 0.8 时只会画出屏幕宽度的 0.8 倍，右边和下边留黑。 */
+        var zz = zoomNow();
+        var vx = Math.max(0, Math.floor(S.cam.x)), vy = Math.max(0, Math.floor(S.cam.y));
+        var vw = Math.min(md.w - vx, Math.ceil(S.view.w / zz) + 2);
+        var vh = Math.min(md.h - vy, Math.ceil(S.view.h / zz) + 2);
+        if (vw > 0 && vh > 0) ctx.drawImage(bgi, vx, vy, vw, vh, vx, vy, vw, vh);
+      }
+      if (typeof md.anim === 'function') { ctx.save(); md.anim(ctx, ts); ctx.restore(); }
+
+      /* 那段回忆的「小纸片」就压在那块地上——不发光、不浮动，走近了才有一行小字 */
+      var memObj = mapMemory(md.id);
+      if (memObj) {
+        var got = !!S.quest.found[memObj.id];
+        if (!got) {
+          var ord = ['sayram', 'tibet', 'doha', 'wuhan', 'wuhai', 'kl'].indexOf(md.id);
+          World.drawTrace(ctx, { x: md.eggPos.x, y: md.eggPos.y, color: memObj.color }, ord < 0 ? 0 : ord);
+          var ddx = S.self.x - md.eggPos.x, ddy = S.self.y - md.eggPos.y;
+          if (ddx * ddx + ddy * ddy < 60 * 60) {
+            ctx.save();
+            ctx.font = '600 9.5px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'rgba(10,14,24,.65)';
+            ctx.shadowBlur = 3;
+            ctx.fillStyle = 'rgba(255,250,238,.66)';
+            ctx.fillText('看看这里…', md.eggPos.x, md.eggPos.y - 8);
+            ctx.restore();
+          }
+        }
+      }
+
+      if (showRemote) {
+        drawables.push({ y: S.remote.y, fn: function () {
+          var waving = ts < S.remote.waveUntil;
+          Sprites.drawCharacter(ctx, S.remote.x, S.remote.y, S.remote.dir, S.remote.moving ? Math.floor(ts / 140) % 4 : 0,
+            Object.assign({}, CHAROPT[S.otherSlot], { outfit: theirOutfit }), waving, ts);
+          nameTag(ctx, S.remote.x, S.remote.y - 78, NAME[S.otherSlot], false);
+        } });
+      }
+      drawables.push({ y: S.self.y, fn: function () {
+        var waving2 = ts < S.self.waveUntil;
+        Sprites.drawCharacter(ctx, S.self.x, S.self.y, S.self.dir, S.self.frame,
+          Object.assign({}, CHAROPT[S.mySlot], { outfit: myOutfit }), waving2, ts);
+        nameTag(ctx, S.self.x, S.self.y - 78, NAME[S.mySlot] + '（你）', true);
+      } });
+      drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
+
+      /* 画面最上面压一层很淡的空气感，让远景和人物贴合，
+         同时也不至于挡住地面——只是 0 到 ~40% 不透明度的竖向渐变。 */
+      var haze = ctx.createLinearGradient(0, 0, 0, md.h * 0.62);
+      haze.addColorStop(0, 'rgba(255,255,255,.06)');
+      haze.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = haze;
+      ctx.fillRect(0, 0, md.w, md.h * 0.62);
     } else {
       World.drawGround(ctx, { x: S.cam.x, y: S.cam.y, w: S.view.w, h: S.view.h });
       World.drawIceRink(ctx);
@@ -1668,7 +1950,7 @@ window.Game = (function () {
 
     var vg = ctx.createRadialGradient(S.view.w / 2, S.view.h / 2, Math.min(S.view.w, S.view.h) * 0.42, S.view.w / 2, S.view.h / 2, Math.max(S.view.w, S.view.h) * 0.75);
     vg.addColorStop(0, 'rgba(10,20,40,0)');
-    vg.addColorStop(1, inter ? 'rgba(40,20,10,.35)' : 'rgba(10,20,40,.42)');
+    vg.addColorStop(1, inter ? 'rgba(40,20,10,.35)' : (curMap() ? 'rgba(10,16,30,.26)' : 'rgba(10,20,40,.42)'));
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, S.view.w, S.view.h);
 
@@ -1714,14 +1996,20 @@ window.Game = (function () {
     ctx.restore();
   }
 
+  /* 交互提示气泡。注意：这个函数是在 ctx.restore() 之后调用的，
+     所以必须自己把「世界坐标」换算成「屏幕坐标」——以前直接用世界坐标画，
+     镜头一移动气泡就跑到屏幕外了（等于没有提示）。 */
   function drawInteractBubble(ctx) {
     var it = S.curInteract;
+    var zi = zoomNow();
     var bob = Math.sin(performance.now() / 300) * 2.5;
-    var x = it.x, y = it.y - (it.type === 'npc' ? 96 : 108) + bob;
+    var x = (it.x - S.cam.x) * zi;
+    var y = (it.y - S.cam.y) * zi - (it.type === 'npc' ? 96 : 108) * zi + bob;
+    y = Math.max(56, Math.min(S.view.h - 150, y));
     ctx.font = 'bold 13px "PingFang SC", sans-serif';
     ctx.textAlign = 'center';
     var w = ctx.measureText(it.label).width + 22;
-    var bx = Math.max(S.cam.x + w / 2 + 6, Math.min(S.cam.x + S.view.w - w / 2 - 6, x));
+    var bx = Math.max(w / 2 + 8, Math.min(S.view.w - w / 2 - 8, x));
     ctx.fillStyle = 'rgba(20,32,54,.85)';
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(bx - w / 2, y - 17, w, 26, 13); else ctx.rect(bx - w / 2, y - 17, w, 26);
@@ -1808,6 +2096,7 @@ window.Game = (function () {
     return {
       x: S.self.x, y: S.self.y, dir: S.self.dir, frame: S.self.frame,
       dt: S.dt, t: S.simT, paused: !!S.paused, inter: S.interId || 0,
+      map: S.mapId || null, here: hereKey(), photo: !!S.photo, ending: !!S.ending,
       joy: { dx: S.joy.dx, dy: S.joy.dy, mag: S.joy.mag, active: S.joy.active },
       view: { w: S.view.w, h: S.view.h }, dpr: S.dpr,
       cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot,
@@ -1815,5 +2104,25 @@ window.Game = (function () {
     };
   }
 
-  return { enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave };
+  /* 调试口：直接进/出某张地图（验收脚本用；?dev=1 之外是空操作） */
+  function devEnterMap(id) {
+    if (!S.dev) return false;
+    if (id) { enterMap(id); return true; }
+    leaveMap(); return true;
+  }
+  function devStation() {
+    if (!S.dev) return false;
+    openStationPanel(); return true;
+  }
+  function devInteract() {
+    if (!S.dev) return false;
+    S.curInteract = findInteract();
+    doInteract();
+    return S.curInteract ? S.curInteract.type : null;
+  }
+
+  return {
+    enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave,
+    devEnterMap: devEnterMap, devStation: devStation, devInteract: devInteract
+  };
 })();

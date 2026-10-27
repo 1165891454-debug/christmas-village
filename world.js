@@ -53,7 +53,8 @@ window.World = (function () {
     { id: 'shop', x: 1160, y: 760, w: 250, h: 165, kind: 'shop', wall: '#8678ab', roof: '#655388', name: '圣诞小铺', hint: '' },
     { id: 'stall', x: 560, y: 110, w: 150, h: 95, kind: 'stall', wall: '#a86454', roof: '#c0392b', name: '礼物小摊', hint: '摊主神秘地压低声音：「今年的圣诞礼物，我可是提前给你们俩留了最好的。」' },
     { id: 'greenhouse', x: 150, y: 870, w: 180, h: 125, kind: 'greenhouse', wall: '#bfe3f5', roof: '#8fc3d8', name: '星星温室', hint: '玻璃房里暖烘烘的，一排排花盆正在等你们来种点什么。' },
-    { id: 'workshop', x: 930, y: 110, w: 230, h: 140, kind: 'workshop', wall: '#a08a6a', roof: '#7a6450', name: '礼物工坊', hint: '叮叮当当——木屑的香味里，可以亲手做点小东西。' }
+    { id: 'workshop', x: 930, y: 110, w: 230, h: 140, kind: 'workshop', wall: '#a08a6a', roof: '#7a6450', name: '礼物工坊', hint: '叮叮当当——木屑的香味里，可以亲手做点小东西。' },
+    { id: 'station', x: 940, y: 270, w: 186, h: 152, kind: 'station', wall: '#c8b79c', roof: '#8c6a52', name: '小镇车站', hint: '『去哪儿？六个方向的车，都在今天发。』' }
   ];
 
   var tree = { x: 750, y: 545 };
@@ -109,7 +110,8 @@ window.World = (function () {
   });
 
   // ---------- 回忆彩蛋（数据来自 memories.js） ----------
-  var eggs = (window.Memories || []).slice();
+  // 六个大型旅行地图的回忆不摆在小镇地上（由 maps.js 的 eggPos 定位）
+  var eggs = (window.Memories || []).filter(function (m) { return !m.map; });
 
   // ---------- 小镇道具（让地图「有人生活」） ----------
   var props = [
@@ -556,6 +558,73 @@ window.World = (function () {
         ctx.arc(wsx + 7 + Math.sin(ph2 * 6 + wp2) * 7, b.y - 26 - ph2 * 40, 5 + ph2 * 9, 0, 7);
         ctx.fill();
       }
+    }
+
+    if (b.kind === 'station') {
+      /* 小镇车站：站牌 + 时钟 + 时刻表 + 站台雨棚 + 行李车 */
+      var mid = b.x + b.w / 2;
+      // 时刻表（六行小色块，暗示六个目的地）
+      box(ctx, b.x + 18, wallTop + 16, 62, 62, '#2f3b46', { r: 4 });
+      ctx.fillStyle = 'rgba(255,240,214,.85)';
+      ctx.fillRect(b.x + 22, wallTop + 20, 54, 8);
+      var destCols = ['#6fa8dc', '#e8b53f', '#e0814a', '#7fb3b8', '#d8b06a', '#a8c686'];
+      for (var dr = 0; dr < 6; dr++) {
+        ctx.fillStyle = destCols[dr];
+        ctx.fillRect(b.x + 24, wallTop + 32 + dr * 7, 8, 4);
+        ctx.fillStyle = 'rgba(240,232,214,.5)';
+        ctx.fillRect(b.x + 36, wallTop + 33 + dr * 7, 34 - (dr % 3) * 5, 2.5);
+      }
+      // 时钟
+      var ckx = b.x + b.w - 46, cky = wallTop + 26;
+      ball(ctx, ckx, cky, 17, '#f4ead8', { outline: true });
+      ctx.strokeStyle = '#8a6a4a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ckx, cky, 17, 0, 7); ctx.stroke();
+      ctx.strokeStyle = '#4a3020'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(ckx, cky); ctx.lineTo(ckx, cky - 11); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ckx, cky); ctx.lineTo(ckx + 7, cky + 4); ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      for (var tk = 0; tk < 12; tk += 3) {
+        var ta = tk / 12 * Math.PI * 2;
+        ctx.fillRect(ckx + Math.sin(ta) * 13 - 1, cky - Math.cos(ta) * 13 - 1, 2, 2);
+      }
+      // 站台雨棚（左侧伸出来的一小段）
+      ctx.fillStyle = '#7a5636';
+      ctx.fillRect(b.x - 54, wallTop + 46, 6, 92);
+      ctx.fillStyle = '#8c6a52';
+      ctx.beginPath();
+      ctx.moveTo(b.x - 66, wallTop + 48);
+      ctx.lineTo(b.x + 6, wallTop + 30);
+      ctx.lineTo(b.x + 6, wallTop + 40);
+      ctx.lineTo(b.x - 66, wallTop + 58);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.fillStyle = '#f2f7fd';
+      ctx.beginPath();
+      ctx.moveTo(b.x - 66, wallTop + 48); ctx.lineTo(b.x + 6, wallTop + 30);
+      ctx.lineTo(b.x + 6, wallTop + 34); ctx.lineTo(b.x - 66, wallTop + 52);
+      ctx.closePath(); ctx.fill();
+      // 站台上的一盏吊灯
+      drawGlow(ctx, b.x - 32, wallTop + 62, 'rgba(255,214,140,.55)', 30, 0.9);
+      ctx.fillStyle = '#ffe08a';
+      ctx.beginPath(); ctx.arc(b.x - 32, wallTop + 62, 5, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#6b4a32'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(b.x - 32, wallTop + 42); ctx.lineTo(b.x - 32, wallTop + 57); ctx.stroke();
+      // 门口旁的行李车
+      var lcx = b.x + b.w - 34, lcy = wallTop + wallH - 6;
+      box(ctx, lcx - 16, lcy - 16, 34, 20, '#8a6244', { r: 3 });
+      box(ctx, lcx - 12, lcy - 30, 26, 15, '#a86454', { r: 3 });
+      ctx.strokeStyle = '#6b4a32'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lcx + 18, lcy - 18); ctx.lineTo(lcx + 26, lcy - 30); ctx.stroke();
+      ball(ctx, lcx - 12, lcy + 5, 5, '#4a3020', { hi: false });
+      ball(ctx, lcx + 10, lcy + 5, 5, '#4a3020', { hi: false });
+      // 站牌的火车小图标
+      ctx.fillStyle = '#4a3020';
+      ctx.fillRect(b.x + b.w - 96, wallTop + 54, 26, 13);
+      ctx.fillStyle = '#f4ead8';
+      ctx.fillRect(b.x + b.w - 93, wallTop + 56, 20, 6);
+      ctx.fillStyle = '#4a3020';
+      ctx.beginPath(); ctx.arc(b.x + b.w - 90, wallTop + 68, 2.6, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(b.x + b.w - 76, wallTop + 68, 2.6, 0, 7); ctx.fill();
     }
 
     // 雪顶 + 屋檐冰柱
@@ -2011,7 +2080,8 @@ window.World = (function () {
     width: width, height: height,
     buildings: buildings, obstacles: obstacles, npcs: npcs, doors: doors,
     tree: tree, lamps: lamps, benches: benches, snowPiles: snowPiles, props: props,
-    eggs: eggs, Interior: Interior, interiors: interiors, getInterior: getInterior, slotNames: slotNames,
+    eggs: eggs, allMemories: (window.Memories || []), drawTrace: drawTrace,
+    Interior: Interior, interiors: interiors, getInterior: getInterior, slotNames: slotNames,
     getGroundCanvas: getGroundCanvas,
     drawGround: drawGround, drawSnowPiles: drawSnowPiles, drawFence: drawFence,
     drawBorderTrees: drawBorderTrees, drawBuilding: drawBuilding, drawBigTree: drawBigTree,

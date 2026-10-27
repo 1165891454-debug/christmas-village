@@ -364,6 +364,10 @@
         location.reload(); // 干净地回到大厅（清除所有监听与游戏状态）
       }
     });
+    /* 房间状态有可能在 Game.enter 之前就推过来了（那时 active 还是 false，会被丢掉）。
+       这里补喂一次，游戏层才能拿到存档里的位置——包括「上次停在哪张旅行地图」。
+       以前只靠第一次写操作触发的推送来补，会导致刚进游戏时 S.data 是空的。 */
+    if (lastData) { try { Game.onData(lastData); } catch (e) { } }
   }
 
   function afterJoined(code) {

@@ -269,6 +269,19 @@
         <div class="panel-actions"><button id="mem-close" class="btn ghost small">合上回忆</button></div>
       </div>
 
+      <!-- 小镇车站 · 目的地选择 -->
+      <div id="station-panel" class="panel station-panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🚉 小镇车站 <span id="station-sub" class="panel-sub">六条线，今天都发车</span></div>
+          <button class="panel-x" data-close="station-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <div id="station-list" class="station-list"></div>
+          <p id="station-note" class="muted small-note">选一个方向，和 Julie 一起过去看看。到了以后，找找那里留下的一件小东西。</p>
+        </div>
+        <div class="panel-actions"><button id="station-close" class="btn ghost small">留在小镇</button></div>
+      </div>
+
       <!-- 旅行回忆册 -->
       <div id="book-panel" class="panel book-panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
@@ -427,6 +440,7 @@
   <script src="chars.js"></script>
   <script src="sprites.js"></script>
   <script src="world.js"></script>
+  <script src="maps.js"></script>
   <script src="game.js"></script>
   <script src="app.js"></script>
   <script>
