@@ -2485,30 +2485,76 @@ window.Game = (function () {
     }
   }
 
+  /* 隐藏应急入口：长按顶栏 5 秒 → 口令 1225。
+     v4.3.1 修了两个「按不出来」的原因：
+       1) 原来任何 1px 的 pointermove 都会取消计时，而真机上握着不动也会持续冒
+          ±2~3px 的 move 事件 → 永远等不到 5 秒。现在给 18px 容差。
+       2) 原来在第 5 秒「按住不放」时就开面板，松手后浏览器补的那个 click 会把
+          刚开的遮罩点掉（真机上这个补发延迟能到 1~2 秒，1.5s 保护窗挡不住）。
+          现在改成「满 5 秒就亮灯、松手才开」，并在 touchend 上 preventDefault
+          把那一下 click 直接掐掉——面板开出来就不会再被自己的手指关掉。 */
+  var ADMIN_HOLD_MS = 5000, ADMIN_SLOP = 18;
   function bindAdmin() {
+    var bar = document.querySelector('#topbar');
     var brand = document.querySelector('#topbar .brand');
-    if (brand && !brand.dataset.adminBound) {
-      brand.dataset.adminBound = '1';
-      var timer = null, moved = false;
-      var start = function () {
-        moved = false;
+    if (bar && !bar.dataset.adminBound) {
+      bar.dataset.adminBound = '1';
+      var timer = null, holding = false, armed = false, sx = 0, sy = 0;
+      var mark = function (on) { if (brand) brand.classList.toggle('is-holding', !!on); };
+      var clear = function () {
+        holding = false; armed = false;
+        if (timer) { clearTimeout(timer); timer = null; }
+        mark(false);
+      };
+      var fire = function (e) {
+        if (!armed) return;
+        armed = false; holding = false;
+        mark(false);
+        if (e && e.cancelable) { e.preventDefault(); e.stopPropagation(); }
+        S.adminGuardUntil = Date.now() + 1200;
+        openAdminGate();
+      };
+      var start = function (e) {
+        if (e.target && e.target.closest && e.target.closest('button, a, input, .room-code')) return;
+        sx = e.clientX || 0; sy = e.clientY || 0;
+        holding = true; armed = false;
+        if (timer) clearTimeout(timer);
+        mark(true);
         timer = setTimeout(function () {
           timer = null;
-          if (!moved) {
-            /* 松手后浏览器还会补一个 click（移动端可能延迟 0~300ms），
-               而那时遮罩已经盖住全屏，会把刚打开的面板立刻关掉。
-               开一个 1.5s 保护窗，让这次手势的余波够不着面板。 */
-            S.adminGuardUntil = Date.now() + 1500;
-            openAdminGate();
-          }
-        }, 5000);
+          if (!holding) return;
+          armed = true;   /* 灯亮满 = 松手就开 */
+        }, ADMIN_HOLD_MS);
       };
-      var stop = function () { if (timer) { clearTimeout(timer); timer = null; } };
-      brand.addEventListener('pointerdown', start);
-      brand.addEventListener('pointerup', stop);
-      brand.addEventListener('pointercancel', stop);
-      brand.addEventListener('pointerleave', stop);
-      brand.addEventListener('pointermove', function () { moved = true; });
+      bar.addEventListener('pointerdown', start);
+      /* 手指滑出顶栏再松开时 pointerup 不会回到 bar 上，这里兜一层。
+         已经「灯亮满」的情况不能在这里清掉——真正的开面板留给 touchend/mouseup，
+         因为只有在那两个事件上 preventDefault 才能把补发的 click 掐死。 */
+      window.addEventListener('pointerup', function () { if (!armed) clear(); });
+      window.addEventListener('pointercancel', function () { if (!armed) clear(); });
+      /* 松手这一下：够 5 秒就开面板，并把随之而来的 click 掐掉 */
+      window.addEventListener('touchend', fire, { passive: false, capture: true });
+      window.addEventListener('mouseup', fire, true);
+      /* 只在小幅抖动之外才判定「这是在拖」，滑出标题也不取消 */
+      bar.addEventListener('pointermove', function (e) {
+        if (!holding) return;
+        if (Math.abs(e.clientX - sx) > ADMIN_SLOP || Math.abs(e.clientY - sy) > ADMIN_SLOP) clear();
+      });
+      /* 安卓长按可能弹系统菜单，顺手拦掉，免得手势被打断 */
+      bar.addEventListener('contextmenu', function (e) {
+        if (e.target && e.target.closest && e.target.closest('.brand')) e.preventDefault();
+      });
+    }
+    /* 电脑上给个快捷键：Ctrl/⌘ + Shift + A（手机上没键盘，等于不对玩家暴露） */
+    if (!document.body.dataset.adminKeyBound) {
+      document.body.dataset.adminKeyBound = '1';
+      window.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          S.adminGuardUntil = Date.now() + 400;
+          openAdminGate();
+        }
+      });
     }
     var okBtn = $('#admin-pin-ok');
     if (okBtn && !okBtn.dataset.bound) {
