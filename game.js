@@ -25,7 +25,7 @@ window.Game = (function () {
     lastSent: 0, lastSentDir: -1, flakes: [], data: null, otherSlot: null, mySlot: 'a',
     npcIdx: {}, paused: false, curInteract: null,
     parts: [], interId: null, outdoorPos: null,
-    mapId: null, mapReturn: null, spots: {}, photoOpt: null,
+    adminGuardUntil: 0, mapId: null, mapReturn: null, spots: {}, photoOpt: null,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -135,6 +135,95 @@ window.Game = (function () {
     if (S.worldFallback) return S.localWorld;
     return (S.data && S.data.world) || null;
   }
+  /* ---------- 牧场（v4.2） ----------
+   * 一天一趟：先喂，第二天来收。产物直接写进共享存档 world.res，
+   * 两台手机看到的是同一桶奶、同一卷毛、同一个蛋，不需要额外同步。
+   */
+  var RANCH_GOODS = {
+    milk: { icon: '🥛', name: '牛奶' },
+    wool: { icon: '🧶', name: '羊毛' },
+    egg: { icon: '🥚', name: '鸡蛋' }
+  };
+  function dayShift(n) {
+    var d = new Date(Date.now() + n * 86400000);
+    function p2(x) { return (x < 10 ? '0' : '') + x; }
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+  }
+  function ranchEntry(id) {
+    var w = curWorld() || {};
+    return (w.ranch && w.ranch[id]) || {};
+  }
+  function ranchLabel(a) {
+    var today = dayStr();
+    var st = ranchEntry(a.id);
+    var gd = RANCH_GOODS[a.goods] || { icon: '🎁', name: '产物' };
+    if (st.ready && st.ready <= today) return gd.icon + ' 收 ' + gd.name + '（' + a.name + '）';
+    if (st.fed === today) return '🌙 ' + a.name + ' 今天吃饱了';
+    return '🌾 喂 ' + a.name;
+  }
+  function animalAct(a) {
+    if (!a) return;
+    var today = dayStr();
+    var st = ranchEntry(a.id);
+    var gd = RANCH_GOODS[a.goods] || { icon: '🎁', name: '产物' };
+    /* 昨天喂过 → 今天就能收 */
+    if (st.ready && st.ready <= today) {
+      mutate(function (w) {
+        w.ranch = w.ranch || {};
+        w.ranch[a.id] = {};
+        w.ranch.ever = w.ranch.ever || {};
+        w.ranch.ever[a.goods] = Date.now();
+        w.res = w.res || {};
+        w.res[a.goods] = (w.res[a.goods] || 0) + 1;
+        return w;
+      }).then(function () {
+        Snd.sfx('harvest');
+        burst(a.x, a.y - 26, 'spark', 5);
+        toast(gd.icon + ' 收到了 1 份' + gd.name + '！明天再来喂一次', 3200);
+      });
+      return;
+    }
+    if (st.fed === today) {
+      toast('🌙 ' + a.name + ' 今天已经吃饱了，明天早上来收' + gd.name, 3000);
+      return;
+    }
+    var hay = worldRes().hay || 0;
+    if (hay < 1) {
+      toast('🌾 没有干草了，先去旁边的干草垛拿一份', 3200);
+      return;
+    }
+    mutate(function (w) {
+      w.ranch = w.ranch || {};
+      w.res = w.res || {};
+      w.res.hay = Math.max(0, (w.res.hay || 0) - 1);
+      w.ranch[a.id] = { fed: today, ready: dayShift(1) };
+      return w;
+    }).then(function () {
+      Snd.sfx('plant');
+      burst(a.x, a.y - 20, 'heart', 3);
+      toast('🌾 ' + a.name + ' 吃得很香 · 明天来收' + gd.name, 3000);
+    });
+  }
+  function takeHay() {
+    var today = dayStr();
+    var w = curWorld() || {};
+    if (w.ranch && w.ranch.hayDay === today) {
+      toast('🌾 今天的干草已经拿过了，明天再来', 2800);
+      return;
+    }
+    mutate(function (w2) {
+      w2.ranch = w2.ranch || {};
+      w2.ranch.hayDay = today;
+      w2.ranch.gotHay = w2.ranch.gotHay || Date.now();
+      w2.res = w2.res || {};
+      w2.res.hay = (w2.res.hay || 0) + 3;
+      return w2;
+    }).then(function () {
+      Snd.sfx('ding');
+      toast('🌾 抱了三捆干草（够喂三只）', 2800);
+    });
+  }
+
   function worldRes() {
     var w = curWorld();
     return (w && w.res) || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
@@ -180,12 +269,22 @@ window.Game = (function () {
   function refreshHUD() {
     var r = worldRes();
     var el = $('#res-chip');
-    if (el) el.textContent = '🪵 ' + (r.wood || 0) + ' · 🌸 ' + (r.flowers || 0) + ' · 🌱 ' + (r.seeds || 0) + ' · 🎁 ' + (r.materials || 0);
+    if (el) {
+      el.textContent = '🪵 ' + (r.wood || 0) + ' · 🌸 ' + (r.flowers || 0) + ' · 🌱 ' + (r.seeds || 0) + ' · 🎁 ' + (r.materials || 0) +
+        ((r.hay || r.milk || r.wool || r.egg) ? (' · 🌾 ' + (r.hay || 0)) : '');
+    }
   }
 
   // 把共享 quest 合并进本地镜像（只吸收，不回写）
   function absorbQuest(w) {
-    if (!w || !w.quest) return;
+    if (!w) return;
+    /* 老存档迁移：以前是 6 步直线任务，现在改成 8 章。
+       按旧步数折算，玩到一半的进度不会作废。 */
+    if (w.chapter === undefined || w.chapter === null) {
+      var oldStep = (w.quest && w.quest.step) || 0;
+      w.chapter = oldStep >= 6 ? 7 : (oldStep >= 5 ? 5 : (oldStep >= 4 ? 3 : (oldStep >= 2 ? 1 : 0)));
+    }
+    if (!w.quest) return;
     var q = w.quest;
     ['talked', 'visited', 'found'].forEach(function (k) {
       var rem = q[k] || {};
@@ -232,48 +331,165 @@ window.Game = (function () {
   }
 
   // ---------- 主线任务（v2：共享 + 材料版）----------
-  var QUESTS = [
-    '🎄 走近广场的圣诞树看看吧',
-    '💬 去和圣诞老人聊聊吧',
-    '💬 认识小镇的居民们（0/3）',
-    '🧭 探索小镇：木屋 · 咖啡 · 温室 · 工坊（0/4）',
-    '🧳 把散落在小镇的回忆收进册子（0/3）',
-    '🪵 收集材料，把圣诞树装饰到全亮',
-    '🎄 圣诞夜即将开始…'
-  ];
+  /* ---------- 主线章节（v4.2）----------
+   * 节奏设计：8 章（第 8 章就是圣诞夜），每天最多推进一章。
+   * 所以「一切准备就绪」最少也要 7 天，正好铺到圣诞前，不会两天就玩完。
+   * 每章的要求都只用已有进度字段（回忆/对话/树/车票/牧场），不另开存档结构。
+   */
   function foundCount() { return Object.keys(S.quest.found).length; }
   function talkedExtra() { return ['snowman', 'elf', 'barista'].filter(function (k) { return S.quest.talked[k]; }).length; }
   function visitedCount() { return Object.keys(S.quest.visited).length; }
-  function questText() {
-    var st = S.quest.step;
-    if (st >= 6) return '🎄 圣诞夜即将开始…（2026 年 12 月 25 日）';
-    if (st === 5) {
-      var stage = treeStage();
-      if (stage >= 3) return '🎄 圣诞树已经全亮！等圣诞夜到来（12 月 25 日）';
-      var cost = TREE_COST[stage] || TREE_COST[0];
-      var r = worldRes();
-      return '🪵 装饰到「' + ['已装饰', '挂上彩灯', '全树点亮'][stage] + '」还差：🪵 ' + Math.max(0, (cost.wood || 0) - (r.wood || 0)) + ' 🌸 ' + Math.max(0, (cost.flowers || 0) - (r.flowers || 0)) + ' 🎁 ' + Math.max(0, (cost.materials || 0) - (r.materials || 0));
-    }
-    var t = QUESTS[Math.min(st, QUESTS.length - 1)];
-    return t.replace('（0/3）', '（' + (st === 2 ? talkedExtra() : foundCount()) + '/3）')
-            .replace('（0/4）', '（' + visitedCount() + '/4）');
+  /* 藏在屋子里的回忆找到了几段 */
+  function roomFoundCount() {
+    var n = 0;
+    (window.Memories || []).forEach(function (m) { if (m.room && S.quest.found[m.id]) n++; });
+    return n;
   }
-  function updateQuest() {
-    var st = S.quest.step;
-    if (st === 0) {
-      var d = Math.sqrt(Math.pow(S.self.x - World.tree.x, 2) + Math.pow(S.self.y - World.tree.y, 2));
-      if (d < 150) { S.quest.step = 1; toast('🎅 圣诞老人好像有话想跟你们说'); syncQuest(); }
-    } else if (st === 1 && S.quest.talked.santa) {
-      S.quest.step = 2; toast('📋 新任务：认识小镇的居民们'); syncQuest();
-    } else if (st === 2 && talkedExtra() >= 3) {
-      S.quest.step = 3; toast('📋 新任务：探索小镇的四个角落'); syncQuest();
-    } else if (st === 3 && visitedCount() >= 4) {
-      S.quest.step = 4; toast('📋 新任务：把散落的回忆收进册子'); syncQuest();
-    } else if (st === 4 && foundCount() >= 3) {
-      S.quest.step = 5; toast('🪵 收集材料装饰圣诞树：温室种植 → 工坊制作 → 回到树下'); syncQuest();
-    } else if (st === 5 && treeStage() >= 3) {
-      S.quest.step = 6; syncQuest();
+  function ranchEver() {
+    var w = curWorld() || {};
+    return (w.ranch && w.ranch.ever) || {};
+  }
+  function ranchFedAny() {
+    var w = curWorld() || {};
+    var r = w.ranch || {};
+    return !!((r.cow && r.cow.fed) || (r.sheep && r.sheep.fed) || (r.hen && r.hen.fed));
+  }
+  function ranchGoodsCount() { return Object.keys(ranchEver()).length; }
+  function chapterNo() {
+    var w = curWorld() || {};
+    var n = w.chapter || 0;
+    return n > 8 ? 8 : n;
+  }
+  function chapterDayStr() { var w = curWorld() || {}; return w.chapterDay || ''; }
+  function canAdvanceToday() { return chapterDayStr() !== dayStr(); }
+
+  var CHAPTERS = [
+    { t: '回到小镇', tip: '先和圣诞老人打个招呼',
+      ok: function () { return !!S.quest.talked.santa; },
+      prog: function () { return S.quest.talked.santa ? '✓' : '还没聊过'; } },
+    { t: '认识邻居', tip: '和雪人先生、小精灵、老板娘都说上话，再走进自己的小屋',
+      ok: function () { return talkedExtra() >= 3 && !!S.quest.visited.cabin; },
+      prog: function () { return '邻居 ' + Math.min(3, talkedExtra()) + '/3 · 小屋 ' + (S.quest.visited.cabin ? '✓' : '×'); } },
+    { t: '屋里的旧照片', tip: '有些回忆不在雪地上——去四间屋子里翻翻角落',
+      ok: function () { return roomFoundCount() >= 2; },
+      prog: function () { return '室内回忆 ' + Math.min(2, roomFoundCount()) + '/2'; } },
+    { t: '开一片牧场', tip: '去左侧牧场抱一捆干草，喂一次牛、羊或鸡',
+      ok: function () {
+        var w = curWorld() || {};
+        return !!(w.ranch && w.ranch.gotHay) && ranchFedAny();
+      },
+      prog: function () {
+        var w = curWorld() || {};
+        return '干草 ' + (w.ranch && w.ranch.gotHay ? '✓' : '×') + ' · 喂食 ' + (ranchFedAny() ? '✓' : '×');
+      } },
+    { t: '收下第一份产物', tip: '喂过的动物第二天来收：牛奶 / 羊毛 / 鸡蛋',
+      ok: function () { return ranchGoodsCount() >= 1 && foundCount() >= 5; },
+      prog: function () { return '产物 ' + Math.min(1, ranchGoodsCount()) + '/1 · 回忆 ' + Math.min(5, foundCount()) + '/5'; } },
+    { t: '把树种起来', tip: '温室种树收木材 → 工坊做一件手工 → 树下装饰',
+      ok: function () { return treeStage() >= 1 && (worldRes().materials || 0) >= 1; },
+      prog: function () { return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + ' · 手工 ' + Math.min(1, worldRes().materials || 0) + '/1'; } },
+    { t: '凑齐三张车票', tip: '车票不会一次给全：先把小镇的日子过得再热闹一点',
+      ok: function () { return ticketOwnedCount() >= 3 && foundCount() >= 8; },
+      prog: function () { return '车票 ' + Math.min(3, ticketOwnedCount()) + '/3 · 回忆 ' + Math.min(8, foundCount()) + '/8'; } },
+    { t: '点亮整棵树', tip: '木材鲜花管够、三种牧场产物都收一遍，把树点到全亮',
+      ok: function () { return treeStage() >= 3 && foundCount() >= 11 && ranchGoodsCount() >= 3; },
+      prog: function () { return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + ' · 回忆 ' + Math.min(11, foundCount()) + '/11 · 产物 ' + Math.min(3, ranchGoodsCount()) + '/3'; } }
+  ];
+
+  function chapterText() {
+    var ch = chapterNo();
+    if (ch >= CHAPTERS.length) return '🎄 一切就绪，就等 2026 年 12 月 25 日的晚上了';
+    var c = CHAPTERS[ch];
+    var tail = canAdvanceToday() ? '' : '（明天再推进）';
+    return '📖 第 ' + (ch + 1) + ' 章 · ' + c.t + '　' + c.prog() + tail;
+  }
+  function questText() { return chapterText(); }
+
+  /* 推进一步：写进共享存档，两台设备看到的是同一章、同一天 */
+  function advanceChapter(to) {
+    mutate(function (w) {
+      w.chapter = to;
+      w.chapterDay = dayStr();
+      return w;
+    }).then(function () {
+      refreshHUD();
+      var nxt = CHAPTERS[to];
+      if (nxt) toast('📖 第 ' + (to + 1) + ' 章：' + nxt.t + ' —— ' + nxt.tip, 5200);
+      else toast('🎄 八章都过完了。剩下的日子，就在小镇里慢慢等圣诞夜吧。', 5200);
+      Snd.sfx('ding');
+      if (to >= CHAPTERS.length) {
+        S.quest.step = 6;
+        syncQuest();
+      }
+    });
+    S.lastQuestText = '';
+  }
+
+  /* ---------- NPC 每日心愿（v4.2）----------
+   * 每天换一个人、换一件东西。交上去能换回材料。
+   * 只作为「今天还有件小事可做」的日常，不挡主线、不做前置。
+   */
+  var WISH_POOL = [
+    { npc: 'snowman', want: 'flower', n: 2, give: { seeds: 2 }, line: '给我两朵花吧，我想插在雪人帽子上。' },
+    { npc: 'elf', want: 'wood', n: 2, give: { materials: 1 }, line: '帮我去镇上找两根木头？我想修一下货架。' },
+    { npc: 'barista', want: 'milk', n: 1, give: { flowers: 3 }, line: '牧场要是挤出牛奶，分我一杯？我给你换些鲜花。' },
+    { npc: 'santa', want: 'wool', n: 1, give: { wood: 3 }, line: '袜子上破了个洞，能给我一卷羊毛吗？' },
+    { npc: 'elf', want: 'egg', n: 1, give: { materials: 1 }, line: '厨房想做个布丁，缺一颗鸡蛋。' },
+    { npc: 'barista', want: 'flower', n: 3, give: { seeds: 3 }, line: '柜台上想摆点花，三朵就好。' },
+    { npc: 'snowman', want: 'wood', n: 3, give: { hay: 3 }, line: '给我三根木头，我换你三捆干草——牧场用得着。' }
+  ];
+  var WISH_NAME = { flower: '🌸 鲜花', wood: '🪵 木材', milk: '🥛 牛奶', wool: '🧶 羊毛', egg: '🥚 鸡蛋', hay: '🌾 干草' };
+  function wishToday() {
+    var ch = chapterNo();
+    var pool = WISH_POOL.filter(function (x) { return ch >= 4 || (x.want === 'flower' || x.want === 'wood'); });
+    if (!pool.length || ch < 1) return null;
+    var ds = parseInt(dayStr().replace(/-/g, ''), 10) || 0;
+    return pool[(ds + ch) % pool.length];
+  }
+  /* 和 NPC 说话时顺手带上心愿：够了就收下并回礼，不够就只提一句 */
+  function talkWish(npcId) {
+    var wsh = wishToday();
+    if (!wsh || wsh.npc !== npcId) return null;
+    var w = curWorld() || {};
+    if (w.wish && w.wish.day === dayStr() && w.wish.done) return null;
+    var r = worldRes();
+    var have = r[wsh.want] || 0;
+    if (have < wsh.n) {
+      return '（' + wsh.line + ' 需要 ' + (WISH_NAME[wsh.want] || wsh.want) + ' ×' + wsh.n + '，你现在有 ' + have + '。）';
     }
+    mutate(function (w2) {
+      w2.res = w2.res || {};
+      w2.res[wsh.want] = Math.max(0, (w2.res[wsh.want] || 0) - wsh.n);
+      w2.wish = { day: dayStr(), npc: npcId, done: true };
+      for (var k in wsh.give) if (wsh.give.hasOwnProperty(k)) w2.res[k] = (w2.res[k] || 0) + wsh.give[k];
+      return w2;
+    }).then(function () {
+      refreshHUD();
+      var back = [];
+      for (var k2 in wsh.give) if (wsh.give.hasOwnProperty(k2)) back.push((WISH_NAME[k2] || k2) + ' ×' + wsh.give[k2]);
+      toast('🎁 心愿完成：换到了 ' + back.join(' · '), 3600);
+      Snd.sfx('ding');
+    });
+    return '（收下了你的 ' + (WISH_NAME[wsh.want] || wsh.want) + '）太谢谢了！这个给你 —— 明天再来看我。';
+  }
+
+  function updateQuest() {
+    var ch = chapterNo();
+    if (ch >= CHAPTERS.length) {
+      if (S.quest.step < 6) { S.quest.step = 6; syncQuest(); }
+      return;
+    }
+    var c = CHAPTERS[ch];
+    if (!c || !c.ok()) return;
+    if (!canAdvanceToday()) {
+      /* 条件够了、但今天已经推进过一章：只轻轻提一次，不打扰 */
+      if (!S._waitHint) {
+        S._waitHint = true;
+        toast('📖 这一章已经准备好了 —— 今天先歇歇，明天再来推进下一章', 4200);
+      }
+      return;
+    }
+    advanceChapter(ch + 1);
   }
   function checkVisitZones() {
     if (S.interId || S.mapId || S.quest.step > 3) return;
@@ -591,10 +807,16 @@ window.Game = (function () {
     document.addEventListener('click', function (e) {
       var t = e.target;
       var c = t && t.closest ? t.closest('[data-close]') : null;
-      if (c) { e.preventDefault(); closeAllPanels(); }
+      if (c) {
+        if (S.adminGuardUntil && Date.now() < S.adminGuardUntil) return;
+        e.preventDefault(); closeAllPanels();
+      }
     });
     var scrim = $('#panel-scrim');
-    if (scrim) scrim.addEventListener('click', function () { closeAllPanels(); });
+    if (scrim) scrim.addEventListener('click', function () {
+      if (S.adminGuardUntil && Date.now() < S.adminGuardUntil) return;
+      closeAllPanels();
+    });
     // 面板内部点击不关闭面板；但面板自己的 ✕ / data-close 按钮必须有效
     PANEL_IDS.forEach(function (s) {
       var el = $(s);
@@ -656,6 +878,11 @@ window.Game = (function () {
     });
     $('#end-overlay').addEventListener('click', function () { endNext(); });
     $('#photo-close').addEventListener('click', function () { closePhoto(); });
+    var px2 = $('#photo-x');
+    if (px2) px2.addEventListener('click', function (e) { e.stopPropagation(); closePhoto(); });
+    /* 点空白处也能关：手指在照片外面轻触一下就退出，不用去找按钮 */
+    var pm = $('#photo-modal');
+    if (pm) pm.addEventListener('click', function (e) { if (e.target === pm) closePhoto(); });
     $('#photo-save').addEventListener('click', function () { savePhoto(); });
     document.querySelectorAll('#outfit-list .outfit-btn').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -1450,6 +1677,13 @@ window.Game = (function () {
         }
         consider('roomItem', it.x, it.y, it.r, label, it);
       });
+      /* v4.2 藏进屋里的回忆：桌子底下、架子旁边、木料堆后面……
+         和家具用同一套「最近优先」，走近才看得见那句很轻的提示。 */
+      (World.roomEggs || []).forEach(function (e) {
+        if (e.room !== S.interId) return;
+        var got2 = S.quest.found[e.id];
+        consider('egg', e.x, e.y, 38, got2 ? '💭 再看看这里' : '看看这里…', e);
+      });
       consider('exit', inter.exit.x, inter.exit.y, 70, '🚪 回到小镇', inter.exit);
       return best;
     }
@@ -1481,6 +1715,16 @@ window.Game = (function () {
       return best;
     }
     World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, '💬 和 ' + n.name + ' 交谈', n); });
+    /* 牧场：三只动物 + 干草垛 */
+    if (World.animals) {
+      World.animals.forEach(function (a) { consider('ranch', a.x, a.y - 18, 64, ranchLabel(a), a); });
+      if (World.haystack) {
+        var hayDone = !!(curWorld() && curWorld().ranch && curWorld().ranch.hayDay === dayStr());
+        consider('ranch', World.haystack.x, World.haystack.y + 6, 62,
+          hayDone ? '🌾 干草今天拿过了' : '🌾 抱一捆干草',
+          { isHay: true, x: World.haystack.x, y: World.haystack.y, name: '干草垛' });
+      }
+    }
     World.doors.forEach(function (dr) {
       var b = World.buildings.filter(function (x) { return x.id === dr.id; })[0];
       if (b && b.kind === 'station') { consider('station', dr.x, dr.y, 104, '🚉 去车站看看', dr); return; }
@@ -1491,7 +1735,7 @@ window.Game = (function () {
     World.eggs.forEach(function (e) {
       var found = S.quest.found[e.id];
       // 不在地图上做任务式标记：走近了才出现一句很轻的「看看这里」
-      consider('egg', e.x, e.y, 46, found ? '💭 再看看这里' : '看看这里…', e);
+      consider('egg', e.x, e.y, 34, found ? '💭 再看看这里' : '看看这里…', e);
     });
     if (S.remote.seen && S.remote.inter === 0) {
       var o = S.data && S.data.slots && S.data.slots[S.otherSlot];
@@ -1507,7 +1751,8 @@ window.Game = (function () {
       var stage = treeStage();
       var lines = (stage >= 2 && it.ref.lateLines) ? it.ref.lateLines : it.ref.lines;
       var idx = (S.npcIdx[it.ref.id] || 0);
-      openDialog(it.ref.name, lines[idx % lines.length]);
+      var wishLine = talkWish(it.ref.id);
+      openDialog(it.ref.name, wishLine ? [lines[idx % lines.length], wishLine] : lines[idx % lines.length]);
       S.npcIdx[it.ref.id] = idx + 1;
       if (!S.quest.talked[it.ref.id]) {
         S.quest.talked[it.ref.id] = 1;
@@ -1557,6 +1802,9 @@ window.Game = (function () {
     } else if (it.type === 'tree') {
       openTreePanel();
       updateQuest();
+    } else if (it.type === 'ranch') {
+      if (it.ref && it.ref.isHay) takeHay();
+      else animalAct(it.ref);
     } else if (it.type === 'egg') {
       collectEgg(it.ref);
     } else if (it.type === 'partner') {
@@ -1863,7 +2111,13 @@ window.Game = (function () {
         moved = false;
         timer = setTimeout(function () {
           timer = null;
-          if (!moved) openAdminGate();
+          if (!moved) {
+            /* 松手后浏览器还会补一个 click（移动端可能延迟 0~300ms），
+               而那时遮罩已经盖住全屏，会把刚打开的面板立刻关掉。
+               开一个 1.5s 保护窗，让这次手势的余波够不着面板。 */
+            S.adminGuardUntil = Date.now() + 1500;
+            openAdminGate();
+          }
         }, 5000);
       };
       var stop = function () { if (timer) { clearTimeout(timer); timer = null; } };
@@ -1924,8 +2178,8 @@ window.Game = (function () {
       var body = document.createElement('div');
       body.className = 'station-card-body';
       body.innerHTML =
-        '<b>' + esc(d.name) + '</b>' +
-        '<span class="station-sub">' + esc(d.sub) + '</span>' +
+        '<b>' + esc(owned ? d.name : '？？？') + '</b>' +
+        '<span class="station-sub">' + esc(owned ? d.sub : '目的地未知') + '</span>' +
         '<p>' + esc(owned ? d.card : ticketHint(d.id)) + '</p>' +
         '<em class="station-state">' +
         (!owned ? '🔒 还没有这张票' : (visited ? '✓ 去过了' : '🎫 有票 · 随时可以走')) +
@@ -1976,8 +2230,8 @@ window.Game = (function () {
       info.className = 'ticket-info';
       var conds = (d.ticket && d.ticket.cond || []).map(condText).filter(Boolean);
       info.innerHTML =
-        '<b>' + esc(d.name) + '</b>' +
-        '<span class="ticket-sub">' + esc(d.sub) + '</span>' +
+        '<b>' + esc(owned ? d.name : '？？？') + '</b>' +
+        '<span class="ticket-sub">' + esc(owned ? d.sub : '目的地未知') + '</span>' +
         '<span class="ticket-state">' +
         (owned ? '🎫 已获得' + (travelVisited(d.id) ? ' · 去过了' : '') : '🔒 未获得') +
         '</span>' +
@@ -2187,6 +2441,8 @@ window.Game = (function () {
       '<div class="res-line"><b>🌸 鲜花</b><span>' + (r.flowers || 0) + ' 朵 · 温室种花收获</span></div>' +
       '<div class="res-line"><b>🌱 种子</b><span>' + (r.seeds || 0) + ' 颗 · 每天进温室领补给</span></div>' +
       '<div class="res-line"><b>🎁 手工礼物</b><span>' + (r.materials || 0) + ' 件 · 工坊制作</span></div>' +
+      '<div class="res-line"><b>🌾 干草</b><span>' + (r.hay || 0) + ' 捆 · 牧场干草垛每天领一份</span></div>' +
+      '<div class="res-line"><b>🥛 牛奶 · 🧶 羊毛 · 🥚 鸡蛋</b><span>' + (r.milk || 0) + ' / ' + (r.wool || 0) + ' / ' + (r.egg || 0) + ' · 牧场每天收</span></div>' +
       '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') + '</span></div>' +
       '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' 段已收进册子</span></div>' +
       '<div class="res-line"><b>🎄 圣诞树</b><span>' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + '</span></div>';
@@ -2196,20 +2452,41 @@ window.Game = (function () {
 
   /* ---------- 任务面板 ---------- */
   function openQuestPanel() {
-    var st = S.quest.step;
+    var ch = chapterNo();
     var rows = '';
-    QUESTS.slice(0, 6).forEach(function (q, i) {
-      var done = st > i, cur = (st === i);
-      var text = q
-        .replace('（0/3）', '（' + (i === 2 ? talkedExtra() : Math.min(3, foundCount())) + '/3）')
-        .replace('（0/4）', '（' + visitedCount() + '/4）');
+    CHAPTERS.forEach(function (c, i) {
+      var done = ch > i, cur = (ch === i);
       rows += '<div class="quest-line' + (done ? ' done' : '') + '">' +
         '<span class="quest-mark">' + (done ? '✔' : (cur ? '▶' : '·')) + '</span>' +
-        '<span>' + esc(text) + '</span></div>';
+        '<span>第 ' + (i + 1) + ' 章 · ' + esc(c.t) +
+        (cur ? '　<b style="color:#ffe08a">' + esc(c.prog()) + '</b>' : '') + '</span></div>';
+      if (cur) rows += '<div class="quest-line tip"><span class="quest-mark">　</span><span>' + esc(c.tip) + '</span></div>';
     });
+    /* 今天的节奏提示：这一章做到了，也得等明天才能推进 */
+    var todayLine = ch >= CHAPTERS.length
+      ? '八章都过完了，就等圣诞夜'
+      : (canAdvanceToday()
+        ? ('今天可以推进一章' + (CHAPTERS[ch].ok() ? '（条件已满足，走两步就会推进）' : ''))
+        : '今天这一章已经推进过了，明天再来继续');
+    rows += '<div class="quest-line"><span class="quest-mark">📅</span><span>' + esc(todayLine) + '</span></div>';
+
+    /* 每日心愿：今天谁在等东西 */
+    var wsh = wishToday();
+    if (wsh) {
+      var w0 = curWorld() || {};
+      var doneWish = !!(w0.wish && w0.wish.day === dayStr() && w0.wish.done);
+      var nm = { santa: '圣诞老人', snowman: '雪人先生', elf: '小精灵', barista: '老板娘' }[wsh.npc] || '镇上的人';
+      rows += '<div class="quest-line"><span class="quest-mark">🎁</span><span>' + esc(
+        doneWish ? ('今天的心愿已经帮 ' + nm + ' 完成了，明天再看') :
+          (nm + '想要 ' + (WISH_NAME[wsh.want] || wsh.want) + ' ×' + wsh.n + '（你有 ' + (worldRes()[wsh.want] || 0) + '）')
+      ) + '</span></div>';
+    }
     rows += '<div class="quest-line"><span class="quest-mark">🎄</span><span>圣诞树：' +
       ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
+      ' · 回忆 ' + foundCount() + ' / ' + ((window.Memories || []).length) +
+      ' · 车票 ' + ticketOwnedCount() + ' / 6' +
       ' · 圣诞夜 2026-12-25（还有 ' + Math.max(0, daysToChristmas()) + ' 天）</span></div>';
+
     var body = $('#quest-body');
     if (!body) return;
     body.innerHTML = rows;
@@ -2386,6 +2663,7 @@ window.Game = (function () {
     if (inter) {
       if (S.interId === 'greenhouse') inter.draw(ctx, ts, plotStates());
       else inter.draw(ctx, ts);
+      if (World.drawRoomEggs) World.drawRoomEggs(ctx, ts, S.self, S.interId);
       if (showRemote) {
         drawables.push({ y: S.remote.y, fn: function () {
           var waving = ts < S.remote.waveUntil;
@@ -2477,6 +2755,7 @@ window.Game = (function () {
       World.drawPond(ctx);
       World.drawBridge(ctx);
       World.drawSnowPiles(ctx);
+      if (World.drawRanchGround) World.drawRanchGround(ctx, ts);
       World.drawProps(ctx, ts);
       World.drawFence(ctx);
       World.drawBorderTrees(ctx, ts);
@@ -2486,6 +2765,11 @@ window.Game = (function () {
       drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
       World.benches.forEach(function (b) { drawables.push({ y: b.y, fn: function () { World.drawBench(ctx, b); } }); });
       World.lamps.forEach(function (l) { drawables.push({ y: l.y, fn: function () { World.drawLamp(ctx, l, ts); } }); });
+      if (World.animals) {
+        World.animals.forEach(function (a) {
+          drawables.push({ y: a.y, fn: function () { World.drawAnimal(ctx, a, ts); } });
+        });
+      }
 
       if (showRemote) {
         drawables.push({ y: S.remote.y, fn: function () {
@@ -2696,7 +2980,11 @@ window.Game = (function () {
       joy: { dx: S.joy.dx, dy: S.joy.dy, mag: S.joy.mag, active: S.joy.active },
       view: { w: S.view.w, h: S.view.h }, dpr: S.dpr,
       cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot,
-      outfit: getOutfit(S.mySlot, 'winter'), otherOutfit: getOutfit(S.otherSlot, 'winter')
+      outfit: getOutfit(S.mySlot, 'winter'), otherOutfit: getOutfit(S.otherSlot, 'winter'),
+      res: Object.assign({}, worldRes()),
+      chapter: chapterNo(), chapterDay: chapterDayStr(),
+      ranch: Object.assign({}, (curWorld() && curWorld().ranch) || {}),
+      indoors: !!S.interId, memoryCount: foundCount()
     };
   }
 
@@ -2747,6 +3035,18 @@ window.Game = (function () {
       if (window.TravelMaps) TravelMaps.list().forEach(function (d) { out[d.id] = hasTicket(d.id); });
       return out;
     },
-    devSpots: function () { return S.spots || {}; }
+    devSpots: function () { return S.spots || {}; },
+    devChapter: function () {
+      var w = curWorld() || {};
+      return { chapter: chapterNo(), day: w.chapterDay || '', canAdvance: canAdvanceToday(),
+               count: CHAPTERS.length, text: questText(), wish: (function () { var x = wishToday(); return x ? x.npc : null; })() };
+    },
+    devPatchWorld: function (patch) {
+      if (!S.dev) return false;
+      var w = curWorld(); if (!w) return false;
+      for (var k in patch) if (patch.hasOwnProperty(k)) w[k] = patch[k];
+      return true;
+    },
+    devQuestPanel: function () { openQuestPanel(); }
   };
 })();

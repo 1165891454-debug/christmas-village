@@ -2594,11 +2594,20 @@ window.TravelMaps = (function () {
     tkRR(g, sx, sy, sw, sh, 5);
     g.save();
     g.clip();
-    var sc = tkScene(id);
-    if (sc) {
-      g.drawImage(sc, 50, 0, 200, 200, sx, sy, sw, sh);
+    if (!owned) {
+      /* 没票的时候连风景窗都不给看——不然一眼就知道要去哪儿了 */
+      g.fillStyle = '#8d8981';
+      g.fillRect(sx, sy, sw, sh);
+      g.fillStyle = 'rgba(255,255,255,.10)';
+      for (var qy = 0; qy < sh; qy += 9) g.fillRect(sx, sy + qy, sw, 4);
+      text(g, '?', sx + sw / 2, sy + 58, 42, 'rgba(245,243,238,.62)', 'center', '700');
     } else {
-      g.fillStyle = tk.color; g.fillRect(sx, sy, sw, sh);
+      var sc = tkScene(id);
+      if (sc) {
+        g.drawImage(sc, 50, 0, 200, 200, sx, sy, sw, sh);
+      } else {
+        g.fillStyle = tk.color; g.fillRect(sx, sy, sw, sh);
+      }
     }
     /* 照片压一层暖光，和整体色纸贴得更近 */
     g.fillStyle = owned ? 'rgba(255,238,205,.12)' : 'rgba(210,206,198,.55)';
@@ -2610,8 +2619,9 @@ window.TravelMaps = (function () {
     g.stroke();
 
     /* 目的地名字 */
-    text(g, d.name, 108, 56, 21, owned ? ink : '#6c6862', 'left', '700');
-    text(g, d.sub, 108, 75, 10.5, owned ? 'rgba(30,20,10,.62)' : 'rgba(90,88,84,.6)', 'left', '400');
+    text(g, owned ? d.name : '？ ？ ？', 108, 56, owned ? 21 : 19, owned ? ink : '#6c6862', 'left', '700');
+    text(g, owned ? d.sub : '目的地未知', 108, 75, 10.5,
+      owned ? 'rgba(30,20,10,.62)' : 'rgba(90,88,84,.6)', 'left', '400');
 
     /* 虚线分隔 */
     g.strokeStyle = owned ? 'rgba(30,20,10,.28)' : 'rgba(90,88,84,.3)';
@@ -2622,7 +2632,7 @@ window.TravelMaps = (function () {
 
     /* 出发站 + 代号 */
     text(g, 'OMO RAIL · 圣诞小镇站', 108, 103, 8.5, owned ? 'rgba(30,20,10,.55)' : 'rgba(90,88,84,.55)', 'left', '400');
-    text(g, '→ ' + d.name, 108, 126, 11.5, owned ? tk.color : '#7b776f', 'left', '700');
+    text(g, '→ ' + (owned ? d.name : '？？？'), 108, 126, 11.5, owned ? tk.color : '#7b776f', 'left', '700');
 
     /* 右侧副券 */
     var cx = 254;

@@ -68,12 +68,34 @@ window.World = (function () {
   obstacles.push({ x: 420, y: 880, w: 180, h: 120 });
   obstacles.push({ x: 60, y: 700, w: 200, h: 150 });
 
+  /* ---------- v4.2 小镇牧场（左侧中部，围栏围起来的一片地） ---------- */
+  var ranch = { x: 312, y: 648, w: 296, h: 224, gateX: 444, gateW: 56 };
+  /* 围栏 + 马厩 + 干草垛 + 水槽都参与碰撞，只在下方留一道门 */
+  obstacles.push({ x: 312, y: 648, w: 296, h: 12 });     // 上
+  obstacles.push({ x: 312, y: 648, w: 12, h: 224 });     // 左
+  obstacles.push({ x: 596, y: 648, w: 12, h: 224 });     // 右
+  obstacles.push({ x: 312, y: 860, w: 132, h: 12 });     // 下（左半）
+  obstacles.push({ x: 500, y: 860, w: 108, h: 12 });     // 下（右半）→ 中间 444~500 是门口
+  obstacles.push({ x: 330, y: 660, w: 116, h: 88 });     // 马厩
+  obstacles.push({ x: 546, y: 690, w: 44, h: 34 });      // 干草垛
+  obstacles.push({ x: 424, y: 796, w: 56, h: 20 });      // 水槽
+
+  /* 牧场里的动物：固定位置、只做原地小动作（不四处乱走），
+     这样互动点不会飘，两个人从两台手机看到的也是同一个位置。 */
+  var ranchAnimals = [
+    { id: 'cow', kind: 'cow', x: 404, y: 800, name: '奶牛 · 奶油', goods: 'milk', goodsName: '牛奶' },
+    { id: 'sheep', kind: 'sheep', x: 524, y: 806, name: '绵羊 · 云朵', goods: 'wool', goodsName: '羊毛' },
+    { id: 'hen', kind: 'hen', x: 356, y: 812, name: '母鸡 · 布丁', goods: 'egg', goodsName: '鸡蛋' }
+  ];
+  var haystack = { x: 568, y: 704, name: '干草垛' };
+
   // ---------- NPC ----------
   var npcs = [
     { id: 'santa', x: 858, y: 648, name: '圣诞老人', lines: [
       'Ho Ho Ho！欢迎回到你们自己的小镇。',
       '这棵树的每一颗灯泡，都在等你们一起点亮。',
-      '去镇子里走走吧——听说有些角落藏着你们旅行的回忆。'
+      '去镇子里走走吧——听说有些角落藏着你们旅行的回忆。',
+      '小镇的一天很短，一天做好一件事就够啦，剩下的明天再说。'
     ], lateLines: [
       'Ho Ho Ho！看，全镇的灯都亮了——因为你们俩呀。',
       '这棵树是今年我见过最漂亮的树。不对，是第二漂亮，第一漂亮的是站在树下的你们。',
@@ -111,7 +133,9 @@ window.World = (function () {
 
   // ---------- 回忆彩蛋（数据来自 memories.js） ----------
   // 六个大型旅行地图的回忆不摆在小镇地上（由 maps.js 的 eggPos 定位）
-  var eggs = (window.Memories || []).filter(function (m) { return !m.map; });
+  var eggs = (window.Memories || []).filter(function (m) { return !m.map && !m.room; });
+  /* v4.2：藏进室内的回忆（cabin / cafe / greenhouse / workshop），按房间取自 memories.js */
+  var roomEggs = (window.Memories || []).filter(function (m) { return !!m.room; });
 
   // ---------- 小镇道具（让地图「有人生活」） ----------
   var props = [
@@ -126,7 +150,7 @@ window.World = (function () {
   ];
 
   var lamps = [
-    { x: 620, y: 470 }, { x: 890, y: 470 }, { x: 560, y: 730 }, { x: 950, y: 730 },
+    { x: 620, y: 470 }, { x: 890, y: 470 }, { x: 288, y: 706 }, { x: 950, y: 730 },
     { x: 1090, y: 560 }, { x: 400, y: 300 }, { x: 1330, y: 430 }, { x: 300, y: 620 }
   ];
   var benches = [
@@ -1642,6 +1666,268 @@ window.World = (function () {
     ctx.restore();
   }
 
+  function drawRoomEggs(ctx, t, self, roomId) {
+    var list = roomEggs.filter(function (m) { return m.room === roomId; });
+    if (!list.length) return;
+    list.forEach(function (e, i) { drawTrace(ctx, e, i + 3); });
+    if (!self) return;
+    list.forEach(function (e) {
+      var dx = self.x - e.x, dy = self.y - e.y;
+      if (dx * dx + dy * dy > 44 * 44) return;
+      ctx.save();
+      ctx.font = '600 9.5px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(18,24,38,.6)';
+      ctx.shadowBlur = 3;
+      ctx.fillStyle = 'rgba(255,250,238,.62)';
+      ctx.fillText('看看这里…', e.x, e.y - 8);
+      ctx.restore();
+    });
+  }
+
+
+  /* ============================================================
+     v4.2 牧场：围栏 / 马厩 / 干草垛 / 水槽 + 三种动物
+     画风和镇上其它东西一致（box + ball + 落影），动物只做原地小动作。
+     ============================================================ */
+  function ranchPost(ctx, x, y, h) {
+    box(ctx, x - 3.5, y - h, 7, h, '#8a6244', { r: 2 });
+    ctx.fillStyle = 'rgba(255,245,225,.35)';
+    ctx.fillRect(x - 2.5, y - h + 1, 1.6, h - 3);
+    /* 柱头的雪 */
+    ctx.fillStyle = '#f4f9ff';
+    ctx.beginPath(); ctx.ellipse(x, y - h, 5, 2.2, 0, 0, 7); ctx.fill();
+  }
+  function ranchRails(ctx, x1, y1, x2, y2) {
+    ctx.strokeStyle = '#a9793f';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    var offs = [-13, -6];
+    for (var i = 0; i < offs.length; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1 + offs[i]);
+      ctx.lineTo(x2, y2 + offs[i]);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(70,44,26,.45)';
+    ctx.lineWidth = 1;
+    for (var j = 0; j < offs.length; j++) {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1 + offs[j] + 1.6);
+      ctx.lineTo(x2, y2 + offs[j] + 1.6);
+      ctx.stroke();
+    }
+  }
+
+  function drawRanchGround(ctx, t) {
+    var r = ranch;
+    /* 踩出来的地面：一层浅泥 + 一层雪，边界不用太规整 */
+    ctx.fillStyle = 'rgba(146,126,104,.20)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(r.x + 6, r.y + 8, r.w - 12, r.h - 14, 14); else ctx.rect(r.x + 6, r.y + 8, r.w - 12, r.h - 14);
+    ctx.fill();
+    var spots = [[380, 720], [470, 760], [430, 830], [540, 780], [360, 800], [500, 700]];
+    for (var i = 0; i < spots.length; i++) {
+      ctx.fillStyle = 'rgba(150,130,108,.16)';
+      ctx.beginPath();
+      ctx.ellipse(spots[i][0], spots[i][1], 26 + (i % 3) * 8, 9 + (i % 2) * 4, 0, 0, 7);
+      ctx.fill();
+    }
+    /* 蹄印 */
+    ctx.fillStyle = 'rgba(120,102,84,.26)';
+    for (var k = 0; k < 14; k++) {
+      var px = 350 + ((k * 53) % 220), py = 700 + ((k * 71) % 150);
+      ctx.beginPath(); ctx.ellipse(px, py, 2.4, 1.6, 0.4, 0, 7); ctx.fill();
+    }
+
+    /* 马厩 */
+    var bx = 330, by = 660, bw = 116, bh = 88;
+    shadow(ctx, bx + bw / 2, by + bh + 2, bw * 0.46, 7);
+    box(ctx, bx, by + 26, bw, bh - 26, '#a4553f', { r: 3 });
+    /* 木板缝 */
+    ctx.strokeStyle = 'rgba(70,32,22,.35)'; ctx.lineWidth = 1;
+    for (var vx = bx + 14; vx < bx + bw; vx += 18) {
+      ctx.beginPath(); ctx.moveTo(vx, by + 28); ctx.lineTo(vx, by + bh); ctx.stroke();
+    }
+    /* 屋顶 */
+    ctx.beginPath();
+    ctx.moveTo(bx - 10, by + 28);
+    ctx.lineTo(bx + bw / 2, by - 6);
+    ctx.lineTo(bx + bw + 10, by + 28);
+    ctx.closePath();
+    ctx.fillStyle = '#7a3f2e'; ctx.fill();
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1.6; ctx.stroke();
+    /* 屋顶的雪 */
+    ctx.fillStyle = 'rgba(248,252,255,.92)';
+    ctx.beginPath();
+    ctx.moveTo(bx - 6, by + 26);
+    ctx.lineTo(bx + bw / 2, by - 3);
+    ctx.lineTo(bx + bw + 6, by + 26);
+    ctx.lineTo(bx + bw + 1, by + 30);
+    ctx.lineTo(bx + bw / 2, by + 4);
+    ctx.lineTo(bx - 1, by + 30);
+    ctx.closePath(); ctx.fill();
+    /* 门 + 白边 + 干草塞在门口 */
+    box(ctx, bx + 38, by + 52, 40, bh - 52, '#6b432c', { r: 2 });
+    ctx.strokeStyle = '#f0e6d2'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bx + 58, by + 52); ctx.lineTo(bx + 58, by + bh); ctx.stroke();
+    ctx.fillStyle = '#d9b96a';
+    ctx.fillRect(bx + 42, by + bh - 10, 32, 8);
+    /* 小窗：暖光 */
+    box(ctx, bx + 16, by + 46, 16, 14, '#f7dfa8', { r: 2 });
+    drawGlow(ctx, bx + 24, by + 53, 'rgba(255,214,150,.30)', 34, 0.8);
+
+    /* 干草垛 */
+    var hx = 546, hy = 690, hw = 44, hh = 34;
+    shadow(ctx, hx + hw / 2, hy + hh + 1, 22, 5);
+    box(ctx, hx, hy + 14, hw, hh - 14, '#c9a45c', { r: 3 });
+    box(ctx, hx + 4, hy + 2, hw - 8, 18, '#dcb96f', { r: 5 });
+    ctx.strokeStyle = 'rgba(150,112,48,.5)'; ctx.lineWidth = 1;
+    for (var s2 = 0; s2 < 5; s2++) {
+      ctx.beginPath(); ctx.moveTo(hx + 3, hy + 8 + s2 * 6); ctx.lineTo(hx + hw - 3, hy + 9 + s2 * 6); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(248,252,255,.85)';
+    ctx.beginPath(); ctx.ellipse(hx + hw / 2, hy + 3, hw * 0.38, 4, 0, 0, 7); ctx.fill();
+
+    /* 水槽 */
+    var tx = 424, ty = 796, tw = 56, th = 20;
+    shadow(ctx, tx + tw / 2, ty + th, 26, 4);
+    box(ctx, tx, ty, tw, th, '#9a8f7c', { r: 3 });
+    ctx.fillStyle = '#7fb6d8';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(tx + 4, ty + 3, tw - 8, th - 9, 3); else ctx.rect(tx + 4, ty + 3, tw - 8, th - 9);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    ctx.fillRect(tx + 7, ty + 5, tw - 20, 2);
+
+    /* 围栏 */
+    var r2 = ranch;
+    var stepX = 33;
+    for (var fx = r2.x + 6; fx <= r2.x + r2.w - 6; fx += stepX) {
+      ranchPost(ctx, fx, r2.y + 12, 26);
+      if (Math.abs(fx - r2.gateX - 2) > 30) ranchPost(ctx, fx, r2.y + r2.h - 4, 26);
+    }
+    for (var fy = r2.y + 30; fy <= r2.y + r2.h - 10; fy += stepX) {
+      ranchPost(ctx, r2.x + 6, fy, 26);
+      ranchPost(ctx, r2.x + r2.w - 6, fy, 26);
+    }
+    ranchRails(ctx, r2.x + 6, r2.y + 12, r2.x + r2.w - 6, r2.y + 12);
+    ranchRails(ctx, r2.x + 6, r2.y + 12, r2.x + 6, r2.y + r2.h - 4);
+    ranchRails(ctx, r2.x + r2.w - 6, r2.y + 12, r2.x + r2.w - 6, r2.y + r2.h - 4);
+    ranchRails(ctx, r2.x + 6, r2.y + r2.h - 4, r2.gateX, r2.y + r2.h - 4);
+    ranchRails(ctx, r2.gateX + r2.gateW, r2.y + r2.h - 4, r2.x + r2.w - 6, r2.y + r2.h - 4);
+    /* 门柱高一点，顶上一盏小灯 */
+    ranchPost(ctx, r2.gateX, r2.y + r2.h - 4, 34);
+    ranchPost(ctx, r2.gateX + r2.gateW, r2.y + r2.h - 4, 34);
+    ball(ctx, r2.gateX + r2.gateW / 2, r2.y + r2.h - 4, 3.2, '#f2e2a8', { outline: false });
+    drawGlow(ctx, r2.gateX + r2.gateW / 2, r2.y + r2.h - 4, 'rgba(255,214,150,.24)', 26, 0.8);
+
+    /* 木牌 */
+    var sgx = r2.gateX + r2.gateW + 10, sgy = r2.y + r2.h + 6;
+    ctx.fillStyle = '#6b4a2f';
+    ctx.fillRect(sgx + 10, sgy - 6, 4, 18);
+    box(ctx, sgx - 6, sgy - 24, 52, 20, '#a9793f', { r: 3 });
+    ctx.fillStyle = '#f7f1e4';
+    ctx.font = '600 10px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🐄 牧场', sgx + 20, sgy - 10);
+  }
+
+  /* ---- 三只动物：只用基本图形，靠小动作显得活着 ---- */
+  function drawAnimal(ctx, a, t) {
+    var bob = Math.sin(t / 640 + a.x * 0.05) * 1.1;
+    var x = a.x, y = a.y;
+    if (a.kind === 'cow') {
+      shadow(ctx, x, y + 2, 24, 5);
+      /* 腿 */
+      ctx.fillStyle = '#5b4332';
+      [-13, -4, 8, 16].forEach(function (lx) { ctx.fillRect(x + lx, y - 12, 4, 13); });
+      /* 身体 */
+      ctx.fillStyle = '#f4f1ea';
+      ctx.beginPath(); ctx.ellipse(x, y - 20 + bob, 23, 14, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.4; ctx.stroke();
+      /* 斑块 */
+      ctx.fillStyle = '#6b4a35';
+      ctx.beginPath(); ctx.ellipse(x - 8, y - 24 + bob, 7, 5.4, 0.3, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x + 9, y - 17 + bob, 6, 4.6, -0.4, 0, 7); ctx.fill();
+      /* 头 */
+      ctx.fillStyle = '#f4f1ea';
+      ctx.beginPath(); ctx.ellipse(x + 20, y - 26 + bob, 9, 8, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.3; ctx.stroke();
+      /* 耳朵 / 角 */
+      ctx.fillStyle = '#e8dfd0';
+      ctx.beginPath(); ctx.ellipse(x + 13, y - 32 + bob, 4, 3, -0.4, 0, 7); ctx.fill();
+      ctx.fillStyle = '#d8cbb4';
+      ctx.beginPath(); ctx.ellipse(x + 26, y - 32 + bob, 3.4, 2.6, 0.4, 0, 7); ctx.fill();
+      /* 鼻子 */
+      ctx.fillStyle = '#e6b7b0';
+      ctx.beginPath(); ctx.ellipse(x + 27, y - 23 + bob, 4.6, 3.4, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#4a3020';
+      ctx.beginPath(); ctx.arc(x + 24, y - 28 + bob, 1.1, 0, 7); ctx.fill();
+      /* 尾巴 */
+      var sw = Math.sin(t / 500) * 3;
+      ctx.strokeStyle = '#6b4a35'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(x - 22, y - 24 + bob); ctx.lineTo(x - 27 + sw, y - 14 + bob); ctx.stroke();
+    } else if (a.kind === 'sheep') {
+      shadow(ctx, x, y + 2, 21, 4.5);
+      ctx.fillStyle = '#4a4038';
+      [-9, -1, 7, 13].forEach(function (lx) { ctx.fillRect(x + lx, y - 10, 3.4, 11); });
+      /* 云朵一样的身子 */
+      ctx.fillStyle = '#f8f6f0';
+      var puffs = [[-12, -18, 12], [0, -23, 13], [12, -18, 11], [2, -14, 12]];
+      puffs.forEach(function (p) {
+        ctx.beginPath(); ctx.arc(x + p[0], y + p[1] + bob, p[2], 0, 7); ctx.fill();
+      });
+      ctx.strokeStyle = 'rgba(74,64,56,.55)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x - 12, y - 18 + bob, 12, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 12, y - 18 + bob, 11, 0, 7); ctx.stroke();
+      /* 头 */
+      ctx.fillStyle = '#4a4038';
+      ctx.beginPath(); ctx.ellipse(x + 18, y - 22 + bob, 7, 6.4, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#f8f6f0';
+      ctx.beginPath(); ctx.ellipse(x + 15, y - 27 + bob, 5, 4, 0.3, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2f2a25';
+      ctx.beginPath(); ctx.arc(x + 22, y - 23 + bob, 1.1, 0, 7); ctx.fill();
+    } else {
+      /* 母鸡：啄食的小动作 */
+      var peck = Math.max(0, Math.sin(t / 340)) * 3.4;
+      shadow(ctx, x, y + 1, 11, 3);
+      ctx.fillStyle = '#c98f3f';
+      ctx.fillRect(x - 4, y - 5, 2, 6);
+      ctx.fillRect(x + 3, y - 5, 2, 6);
+      ctx.fillStyle = '#f0e3cc';
+      ctx.beginPath(); ctx.ellipse(x, y - 10 + bob, 10, 8, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.2; ctx.stroke();
+      /* 翅膀 */
+      ctx.fillStyle = '#e2d1b4';
+      ctx.beginPath(); ctx.ellipse(x - 2, y - 9 + bob, 6, 4.4, 0.2, 0, 7); ctx.fill();
+      /* 尾羽 */
+      ctx.fillStyle = '#d9a06a';
+      ctx.beginPath();
+      ctx.moveTo(x - 9, y - 13 + bob);
+      ctx.lineTo(x - 16, y - 17 + bob);
+      ctx.lineTo(x - 9, y - 8 + bob);
+      ctx.closePath(); ctx.fill();
+      /* 头（啄食时往下点） */
+      var hy = y - 17 + bob + peck * 0.6;
+      ctx.fillStyle = '#f4ead6';
+      ctx.beginPath(); ctx.arc(x + 8, hy, 5, 0, 7); ctx.fill();
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.1; ctx.stroke();
+      /* 鸡冠 */
+      ctx.fillStyle = '#d94c3a';
+      ctx.beginPath(); ctx.arc(x + 6, hy - 4.4, 2.1, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 9, hy - 5, 2.3, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 11.6, hy - 3.8, 1.8, 0, 7); ctx.fill();
+      /* 嘴 */
+      ctx.fillStyle = '#e8a23c';
+      ctx.beginPath();
+      ctx.moveTo(x + 12.6, hy - 0.6); ctx.lineTo(x + 17, hy + 0.8); ctx.lineTo(x + 12.6, hy + 2.2);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#2f2a25';
+      ctx.beginPath(); ctx.arc(x + 9.4, hy - 1.4, 1, 0, 7); ctx.fill();
+    }
+  }
+
   function drawEggs(ctx, t, self) {
     eggs.forEach(function (e, i) {
       drawTrace(ctx, e, i);
@@ -2589,12 +2875,14 @@ window.World = (function () {
     width: width, height: height,
     buildings: buildings, obstacles: obstacles, npcs: npcs, doors: doors,
     tree: tree, lamps: lamps, benches: benches, snowPiles: snowPiles, props: props,
-    eggs: eggs, allMemories: (window.Memories || []), drawTrace: drawTrace,
+    eggs: eggs, roomEggs: roomEggs, allMemories: (window.Memories || []), drawTrace: drawTrace,
     Interior: Interior, interiors: interiors, getInterior: getInterior, slotNames: slotNames,
     getGroundCanvas: getGroundCanvas,
     drawGround: drawGround, drawSnowPiles: drawSnowPiles, drawFence: drawFence,
     drawBorderTrees: drawBorderTrees, drawBuilding: drawBuilding, drawBigTree: drawBigTree,
     drawLamp: drawLamp, drawBench: drawBench, drawPond: drawPond, drawIceRink: drawIceRink,
-    drawBridge: drawBridge, drawEggs: drawEggs, drawProps: drawProps
+    drawBridge: drawBridge, drawEggs: drawEggs, drawRoomEggs: drawRoomEggs, drawProps: drawProps,
+    ranch: ranch, animals: ranchAnimals, haystack: haystack,
+    drawRanchGround: drawRanchGround, drawAnimal: drawAnimal
   };
 })();

@@ -50,7 +50,15 @@ body.playing { padding: var(--safe-t) 0 0 0; overflow: hidden; }
 
 /* ---------- 顶栏 ---------- */
 #topbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.brand { font-weight: 700; font-size: 15px; letter-spacing: .3px; }
+/* v4.1.1：应急入口靠长按标题触发，iOS 长按文字会弹选字菜单并打断手势，
+   这里把标题的文本选择/长按菜单关掉，长按才能稳定按住 5 秒。 */
+.brand {
+  font-weight: 700; font-size: 15px; letter-spacing: .3px;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
 .status-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .room-code { font-family: ui-monospace, Menlo, monospace; background: rgba(255,255,255,.08); padding: 2px 8px; border-radius: 8px; color: var(--text); }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: #888; display: inline-block; }
@@ -810,3 +818,38 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
   letter-spacing: .5px;
 }
 .book-sec:first-child { margin-top: 4px; border-top: 0; padding-top: 0; }
+
+/* ---------- v4.2 合照弹窗：小屏可滚动、关闭随时可达 ---------- */
+#photo-modal {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-start;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;            /* 允许手指上下滑，别被画布手势吃掉 */
+  padding: calc(10px + var(--safe-t)) 10px calc(16px + var(--safe-b));
+}
+#photo-card {
+  margin: auto 0;                 /* 内容短时垂直居中，内容高时可正常滚动 */
+  flex: 0 0 auto;
+  max-height: none;
+  overflow: visible;              /* 滚动交给外层，避免内层套内层滚不动 */
+}
+.photo-head {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; justify-content: space-between;
+  position: sticky; top: -1px; z-index: 2;
+  background: linear-gradient(180deg, #3a2818 70%, rgba(58,40,24,0));
+  padding-bottom: 4px;
+}
+.photo-x {
+  flex: 0 0 auto;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1.5px solid rgba(240,192,64,.65);
+  background: rgba(20,14,8,.75); color: #ffe08a;
+  font-size: 15px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.photo-x:active { transform: scale(.94); }
+#photo-canvas, #photo-img { max-height: 46vh; }   /* 标题行 + 按钮一起放得下 */
+@media (max-height: 700px) {
+  #photo-canvas, #photo-img { max-height: 38vh; }
+}

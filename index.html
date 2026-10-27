@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=4.2.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -384,7 +384,7 @@
       <!-- 任务面板 -->
       <div id="quest-panel" class="panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
-          <div class="panel-name">📜 今晚要做的事</div>
+          <div class="panel-name">📜 小镇日历 · 八章</div>
           <button class="panel-x" data-close="quest-panel" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body"><div id="quest-body"></div></div>
@@ -454,7 +454,10 @@
       <!-- 拍照模式 -->
       <div id="photo-modal" class="hidden">
         <div id="photo-card">
-          <div id="photo-title">📸 Omo's Christmas Night</div>
+          <div class="photo-head">
+            <div id="photo-title">📸 Omo's Christmas Night</div>
+            <button id="photo-x" class="photo-x" aria-label="关闭">✕</button>
+          </div>
           <canvas id="photo-canvas"></canvas>
           <img id="photo-img" alt="我们的圣诞合影" />
           <div id="photo-note"></div>
@@ -481,14 +484,14 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js"></script>
-  <script src="memories.js"></script>
-  <script src="chars.js"></script>
-  <script src="sprites.js"></script>
-  <script src="world.js"></script>
-  <script src="maps.js"></script>
-  <script src="game.js"></script>
-  <script src="app.js"></script>
+  <script src="firebase-config.js?v=4.2.0"></script>
+  <script src="memories.js?v=4.2.0"></script>
+  <script src="chars.js?v=4.2.0"></script>
+  <script src="sprites.js?v=4.2.0"></script>
+  <script src="world.js?v=4.2.0"></script>
+  <script src="maps.js?v=4.2.0"></script>
+  <script src="game.js?v=4.2.0"></script>
+  <script src="app.js?v=4.2.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
