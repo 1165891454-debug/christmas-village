@@ -124,6 +124,42 @@ window.World = (function () {
     ], lateLines: [
       '今晚的咖啡我请！庆祝你们把小镇点亮！',
       '窗边的位置给你们留着呢，看雪最清楚了。'
+    ] },
+    /* ---------- v4.3 四个新邻居 ----------
+       每个人都有明确的一摊事：邮差管信、面包师管吃的、牧羊女管牧场、
+       老木匠管木头。玩家不用猜他们有什么用，聊两句就知道。 */
+    { id: 'postman', x: 1120, y: 500, name: '邮差 · 阿信', style: 'postman', lines: [
+      '有信——！啊，是你们俩呀。这个镇子的信，现在都归我送。',
+      '去过的每个地方都能寄东西。地址嘛，藏在回忆里，找到了就写进本子。',
+      '工坊里那个打包台是我钉的，寄出去的包裹从那儿走。',
+      '寄出去要等一阵子才有回信——好饭不怕晚。'
+    ], lateLines: [
+      '今晚的灯亮成这样，我得加印一批明信片。',
+      '你们寄出去的信，回信都堆成小山啦。'
+    ] },
+    { id: 'baker', x: 1300, y: 470, name: '面包师 · 麦香', style: 'baker', lines: [
+      '刚出炉的，小心烫手。',
+      '牧场要是挤出牛奶、下了蛋，拿来给我，我给你烤一炉。',
+      '面粉、黄油、糖——少一样都不行，做东西这件事最讲道理。'
+    ], lateLines: [
+      '今天烤了一炉星星形状的，专门给你们留的。',
+      '这么多人一起过节，面团都不够用啦。'
+    ] },
+    { id: 'shepherd', x: 660, y: 792, name: '牧羊女 · 小禾', style: 'shepherd', lines: [
+      '奶油、云朵、布丁今天乖不乖？',
+      '先喂饱，第二天才有得收——急不来的。',
+      '干草垛每天能抱三捆，别一次全用完了。'
+    ], lateLines: [
+      '灯一亮，羊都不肯睡了。',
+      '等雪再厚一点，我带它们去坡上跑跑。'
+    ] },
+    { id: 'carpenter', x: 872, y: 300, name: '老木匠 · 老鲁', style: 'carpenter', lines: [
+      '木头是有脾气的，得顺着它的纹路来。',
+      '礼盒我给你钉结实点，路上颠不坏。',
+      '纸在工坊能做，别老想着去镇上买。'
+    ], lateLines: [
+      '这棵树做得漂亮，比我年轻时打的任何一件都好。',
+      '活儿干完了，剩下的就是等日子。'
     ] }
   ];
 
@@ -1666,21 +1702,127 @@ window.World = (function () {
     ctx.restore();
   }
 
-  function drawRoomEggs(ctx, t, self, roomId) {
+  /* ---------- v4.3 信封（六张旅行地图里的回忆改成这个）----------
+     一张真正能看出来是「信」的纸：信封主体 + 折下来的封盖 + 一枚蜡封 +
+     很轻的呼吸光。地图里一直可见，走近可以拆开。 */
+  function drawEnvelope(ctx, e, t, dim) {
+    var x = e.x, y = e.y;
+    var bob = dim ? 0 : Math.sin((t || 0) / 760 + (x || 0) * 0.012) * 1.5;
+    var rot = Math.sin((t || 0) / 1300 + (y || 0) * 0.01) * 0.035;
+    var col = e.color || '#c0392b';
+    ctx.save();
+    ctx.translate(x, y + bob);
+
+    // 地面上的暖光池：远处看不出是信，但走近会看到一小块「这里有点不一样」
+    if (!dim) {
+      var pool = ctx.createRadialGradient(0, 8, 0, 0, 8, 26);
+      pool.addColorStop(0, 'rgba(255,226,160,.22)');
+      pool.addColorStop(1, 'rgba(255,226,160,0)');
+      ctx.fillStyle = pool;
+      ctx.beginPath(); ctx.ellipse(0, 8, 26, 9, 0, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 地面投影（跟着浮起来的高度收一点）
+    ctx.save();
+    ctx.translate(0, -bob + 2);
+    ctx.fillStyle = 'rgba(52,72,100,.22)';
+    ctx.beginPath(); ctx.ellipse(0, 8.4, 17.0, 4.6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    /* 整封信放大到 1.45 倍：原来 22×15 世界像素，缩到 0.8 倍取景后
+       只有 18×12，压在长椅上完全看不出来是一封信。 */
+    ctx.scale(1.45, 1.45);
+
+    // 呼吸光（拆过的信不再发光，只剩一张安静躺着的纸）
+    var gl = dim ? 0 : (0.55 + 0.45 * Math.sin((t || 0) / 900));
+    if (gl > 0) {
+      var rg = ctx.createRadialGradient(0, 0, 1, 0, 0, 26);
+      rg.addColorStop(0, 'rgba(255,232,178,' + (0.20 * gl).toFixed(3) + ')');
+      rg.addColorStop(1, 'rgba(255,232,178,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.rotate(rot);
+
+    // 信封主体
+    ctx.beginPath();
+    ctx.moveTo(-11.4, -7.2);
+    ctx.lineTo(11.4, -7.2);
+    ctx.lineTo(11.4, 7.2);
+    ctx.lineTo(-11.4, 7.2);
+    ctx.closePath();
+    ctx.fillStyle = '#f6eddc';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(74,52,36,.55)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // 内页露出来的一条边（暗示里面真的有东西）
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(-11.4, -7.2); ctx.lineTo(11.4, -7.2); ctx.lineTo(11.4, -4.6); ctx.lineTo(-11.4, -4.6);
+    ctx.closePath();
+    ctx.fillStyle = '#fffaf0';
+    ctx.fill();
+    ctx.restore();
+
+    // 封盖（倒三角）
+    ctx.beginPath();
+    ctx.moveTo(-11.4, -7.2);
+    ctx.lineTo(0, 1.6);
+    ctx.lineTo(11.4, -7.2);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(232,220,196,.95)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(74,52,36,.5)';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+
+    // 两侧的折线
+    ctx.strokeStyle = 'rgba(74,52,36,.22)';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(-11.4, 7.2); ctx.lineTo(-2.6, -0.6);
+    ctx.moveTo(11.4, 7.2); ctx.lineTo(2.6, -0.6);
+    ctx.stroke();
+
+    // 蜡封（用回忆的色）
+    ctx.beginPath();
+    ctx.arc(0, 1.2, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,30,24,.45)';
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(-0.9, 0.4, 1.1, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawRoomEggs(ctx, t, self, roomId, found) {
+    /* v4.3：和地上那六段一样，收过就不再画，只留一点极轻的浮动痕迹、不再写字提示；
+       走近到 26px 会自动收下（game.js 的 autoPickEggs）。 */
     var list = roomEggs.filter(function (m) { return m.room === roomId; });
+    if (!list.length) return;
+    list = list.filter(function (m) { return !(found && found[m.id]); });
     if (!list.length) return;
     list.forEach(function (e, i) { drawTrace(ctx, e, i + 3); });
     if (!self) return;
     list.forEach(function (e) {
       var dx = self.x - e.x, dy = self.y - e.y;
-      if (dx * dx + dy * dy > 44 * 44) return;
+      var d2 = dx * dx + dy * dy;
+      if (d2 > 150 * 150) return;
+      var a = d2 > 90 * 90 ? Math.max(0, (150 - Math.sqrt(d2)) / 60) : 1;
       ctx.save();
-      ctx.font = '600 9.5px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(18,24,38,.6)';
-      ctx.shadowBlur = 3;
-      ctx.fillStyle = 'rgba(255,250,238,.62)';
-      ctx.fillText('看看这里…', e.x, e.y - 8);
+      ctx.globalAlpha = 0.10 + 0.34 * a;
+      ctx.beginPath();
+      ctx.ellipse(e.x, e.y + 6, 9, 3, 0, 0, 7);
+      ctx.fillStyle = 'rgba(255,238,196,.5)';
+      ctx.fill();
       ctx.restore();
     });
   }
@@ -1928,23 +2070,27 @@ window.World = (function () {
     }
   }
 
-  function drawEggs(ctx, t, self) {
+  /* ---------- 地上的回忆（v4.3：彻底藏起来）----------
+     以前的版本会在 60px 内浮一句「看看这里…」，等于把位置摊开了。
+     现在完全没有文字：远看是一片雪，只有走到 150px 以内，
+     那张纸片才慢慢浮出来（越近越清楚），走到脚边（24px）就自动捡起来。
+     已经捡走的不再画——它就真的从地上消失了。 */
+  function drawEggs(ctx, t, self, found) {
     eggs.forEach(function (e, i) {
+      if (found && found[e.id]) return;
+      var d2 = 1;
+      if (self) {
+        var dx = self.x - e.x, dy = self.y - e.y;
+        d2 = dx * dx + dy * dy;
+        if (d2 > 150 * 150) return;
+        var a = (150 - Math.sqrt(d2)) / 150;      // 150px 外 0，脚边 1
+        ctx.save();
+        ctx.globalAlpha = 0.12 + 0.72 * a * a;
+        drawTrace(ctx, e, i);
+        ctx.restore();
+        return;
+      }
       drawTrace(ctx, e, i);
-    });
-    // 走近才有的极轻提示：没有箭头、没有方向、没有图标
-    if (!self) return;
-    eggs.forEach(function (e) {
-      var dx = self.x - e.x, dy = self.y - e.y;
-      if (dx * dx + dy * dy > 60 * 60) return;
-      ctx.save();
-      ctx.font = '600 9.5px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(18,24,38,.6)';
-      ctx.shadowBlur = 3;
-      ctx.fillStyle = 'rgba(255,250,238,.62)';
-      ctx.fillText('看看这里…', e.x, e.y - 8);
-      ctx.restore();
     });
   }
 
@@ -2420,6 +2566,12 @@ window.World = (function () {
         '木头、松果、彩带、铃铛——分门别类码得整整齐齐。',
         '（材料不够的时候，去温室和镇子里就能收集到。）'
       ] },
+      /* v4.2.1 的房间里本来就画了这张包装台，但一直点不动——现在它是工坊的正事：
+         把礼盒寄到一个有地址的地方，过一阵子对方会寄回当地特产。 */
+      { id: 'pack', x: 722, y: 366, r: 78, name: '📮 打包 · 寄包裹', lines: [
+        '包装台上摆着彩带、麻绳和一沓空白地址签。',
+        '（选一个去过的地方，把礼盒寄出去。）'
+      ] },
       { id: 'stove', x: 92, y: 430, r: 86, name: '🔥 小暖炉', lines: [
         '铁炉子烧得暖暖的，手放上去一会儿就不冷了。',
         '「做东西之前先烤烤手，」这是你们俩定下的规矩。'
@@ -2817,6 +2969,43 @@ window.World = (function () {
       // 彩带卷
       ball(ctx, 736, 320, 7, '#58b368', { outline: false });
       ball(ctx, 750, 320, 6, '#f0a83c', { outline: false });
+      /* v4.3：这张台子现在能点——补一叠信封、几张地址签和一块小木牌，
+         让它一眼就看得出来是「寄东西的地方」。 */
+      for (var ev = 0; ev < 3; ev++) {
+        ctx.save();
+        ctx.translate(690 + ev * 2.4, 322 - ev * 2.6);
+        ctx.rotate(-0.06 + ev * 0.05);
+        ctx.fillStyle = ev === 2 ? '#fffaf0' : '#f2e7cf';
+        ctx.fillRect(-1, -6, 20, 9);
+        ctx.strokeStyle = 'rgba(74,52,36,.45)'; ctx.lineWidth = 0.9;
+        ctx.strokeRect(-1, -6, 20, 9);
+        ctx.beginPath(); ctx.moveTo(-1, -6); ctx.lineTo(9, -0.6); ctx.lineTo(19, -6);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ball(ctx, 692, 316, 1.8, '#c0392b', { outline: false });
+      // 桌沿贴的寄件单：一张小纸片 + 红印章，不挡材料架
+      ctx.save();
+      ctx.translate(700, 344);
+      ctx.rotate(-0.02);
+      ctx.fillStyle = '#f6eddc';
+      ctx.fillRect(0, 0, 42, 11);
+      ctx.strokeStyle = 'rgba(74,52,36,.5)'; ctx.lineWidth = 0.8;
+      ctx.strokeRect(0, 0, 42, 11);
+      ctx.strokeStyle = 'rgba(120,90,60,.55)'; ctx.lineWidth = 0.8;
+      for (var ln = 0; ln < 3; ln++) {
+        ctx.beginPath();
+        ctx.moveTo(4, 3 + ln * 3);
+        ctx.lineTo(24 - ln * 5, 3 + ln * 3);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(192,57,43,.85)';
+      ctx.beginPath(); ctx.arc(35, 5.6, 3.4, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,240,230,.75)';
+      ctx.font = '600 4px "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('寄', 35, 7.2);
+      ctx.restore();
 
       /* 墙上挂的成品（木鸟 / 星星 / 小铃铛） */
       [[470, 26], [510, 20], [552, 30]].forEach(function (h, i) {
@@ -2876,6 +3065,7 @@ window.World = (function () {
     buildings: buildings, obstacles: obstacles, npcs: npcs, doors: doors,
     tree: tree, lamps: lamps, benches: benches, snowPiles: snowPiles, props: props,
     eggs: eggs, roomEggs: roomEggs, allMemories: (window.Memories || []), drawTrace: drawTrace,
+    drawEnvelope: drawEnvelope,
     Interior: Interior, interiors: interiors, getInterior: getInterior, slotNames: slotNames,
     getGroundCanvas: getGroundCanvas,
     drawGround: drawGround, drawSnowPiles: drawSnowPiles, drawFence: drawFence,

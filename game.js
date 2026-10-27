@@ -55,10 +55,16 @@ window.Game = (function () {
     { wood: 5, flowers: 8, materials: 2 }     // 挂上彩灯 → 全树点亮（还需 2 件工坊手工礼物）
   ];
   var RECIPES = [
-    { id: 'bird', name: '木头小鸟', wood: 4, flowers: 0, desc: '刻了一只圆滚滚的小鸟，翅膀还会扇。' },
-    { id: 'musicbox', name: '八音盒', wood: 6, flowers: 4, desc: '打开盖子，会响起你们都熟悉的那段旋律。' },
-    { id: 'star', name: '星星挂饰', wood: 2, flowers: 6, desc: '磨得亮亮的，挂在高高的枝头最合适。' }
+    { id: 'bird', name: '木头小鸟', wood: 4, flowers: 0, out: { materials: 1 }, desc: '刻了一只圆滚滚的小鸟，翅膀还会扇。' },
+    { id: 'musicbox', name: '八音盒', wood: 6, flowers: 4, out: { materials: 1 }, desc: '打开盖子，会响起你们都熟悉的那段旋律。' },
+    { id: 'star', name: '星星挂饰', wood: 2, flowers: 6, out: { materials: 1 }, desc: '磨得亮亮的，挂在高高的枝头最合适。' },
+    /* v4.3：工坊真正的工作量在这里——做纸、钉礼盒，然后寄出去。 */
+    { id: 'paper', name: '一沓信纸', wood: 2, flowers: 0, out: { paper: 3 }, desc: '把木头刨薄、压平、裁齐，就是写信用的纸。' },
+    { id: 'giftbox', name: '寄件礼盒', wood: 2, flowers: 2, need: { paper: 1 }, out: { giftbox: 1 }, desc: '钉一个木盒，铺上干花，系上麻绳——寄出去该有的样子。' }
   ];
+  /* 寄一封信要等多久：真实 2 小时；?dev=1 下 20 秒，方便验收 */
+  var PACK_MS = 2 * 60 * 60 * 1000;
+  if (S.dev) PACK_MS = 20 * 1000;
 
   function dayStr() {
     var d = new Date();
@@ -224,6 +230,318 @@ window.Game = (function () {
     });
   }
 
+  /* ============================================================
+   * v4.3 远方物产 / 地址 / 包裹 / 回信 / 村民委托
+   * ------------------------------------------------------------
+   * 设计意图（回应「章节只是在拖时间」）：
+   *   这一段不是加锁，而是加「可以一直做下去的事」——
+   *   41 个去过的地方，每个地方都能寄一个包裹、换回一件特产；
+   *   地址要靠找回忆 / 找邮差 / 拿东西换才到手；
+   *   特产不消耗，收进册子，村民的委托会点名要看某一件。
+   * 存档字段（全部 NEW，老存档不受影响）：
+   *   world.addr      = { 地名id: 时间戳 }     已知地址
+   *   world.spec      = { 地名id: 时间戳 }     收到的特产
+   *   world.parcels   = { 地名id: {at,readyAt} } 在途包裹
+   *   world.mail      = [ {place, at} ]        回信记录
+   *   world.sent      = 累计寄出件数
+   *   world.addrDay   = 今天是否已经从邮差那儿领过地址
+   *   world.commDone  = { '日期#序号': 时间戳 } 当天委托完成情况
+   * ============================================================ */
+  var RES_NAME = {
+    wood: '🪵 木材', flowers: '🌸 鲜花', seeds: '🌱 种子', materials: '🎁 手工礼物',
+    hay: '🌾 干草', milk: '🥛 牛奶', wool: '🧶 羊毛', egg: '🥚 鸡蛋',
+    paper: '📄 信纸', giftbox: '📦 礼盒'
+  };
+  function T() { return window.Travels || null; }
+
+  /* ---------------- 地址 ---------------- */
+  function addrMap() { var w = curWorld() || {}; return w.addr || {}; }
+  function hasAddr(id) { return !!addrMap()[id]; }
+  function addrCount() { return Object.keys(addrMap()).length; }
+  /* 找到一段回忆 → 那个地方就有地址了（回忆本身就是「去过」的证明） */
+  function grantAddrFor(memId) {
+    var t = T();
+    if (!t || !t.has(memId) || hasAddr(memId)) return;
+    mutate(function (w) {
+      w.addr = w.addr || {};
+      if (!w.addr[memId]) w.addr[memId] = Date.now();
+      return w;
+    }).then(function () {
+      var pl = t.get(memId);
+      if (pl) toast('✉️ 记下了一个地址：' + pl.name + '（可以去工坊寄东西了）', 4200);
+    });
+  }
+
+  /* ---------------- 特产 ---------------- */
+  function specMap() { var w = curWorld() || {}; return w.spec || {}; }
+  function specCount() { return Object.keys(specMap()).length; }
+  function hasSpec(id) { return !!specMap()[id]; }
+  function specList() {
+    var t = T(), out = [], m = specMap();
+    if (!t) return out;
+    t.list.forEach(function (p) { if (m[p.id]) out.push(p); });
+    return out;
+  }
+
+  /* ---------------- 包裹 ---------------- */
+  function parcels() { var w = curWorld() || {}; return w.parcels || {}; }
+  function parcelOf(id) { return parcels()[id] || null; }
+  function parcelLeftMs(id) {
+    var p = parcelOf(id);
+    return p ? Math.max(0, p.readyAt - Date.now()) : 0;
+  }
+  function readyParcels() {
+    var ps = parcels(), now = Date.now(), out = [];
+    for (var id in ps) if (ps.hasOwnProperty(id) && ps[id] && ps[id].readyAt <= now) out.push(id);
+    out.sort(function (a, b) { return (ps[a].readyAt || 0) - (ps[b].readyAt || 0); });
+    return out;
+  }
+  function flyingParcels() {
+    var ps = parcels(), now = Date.now(), out = [];
+    for (var id in ps) if (ps.hasOwnProperty(id) && ps[id] && ps[id].readyAt > now) out.push(id);
+    return out;
+  }
+  function sentCount() { var w = curWorld() || {}; return w.sent || 0; }
+  function mailCount() { var w = curWorld() || {}; return (w.mail || []).length; }
+
+  function sendParcel(placeId) {
+    var t = T(), pl = t && t.get(placeId);
+    if (!pl) return;
+    var r = worldRes();
+    if (!hasAddr(placeId)) { toast('✉️ 还没有「' + pl.name + '」的地址', 3000); return; }
+    if (parcelOf(placeId)) { toast('📮 已经有一件寄往' + pl.name + '了，先等它回来', 3200); return; }
+    if ((r.giftbox || 0) < 1) { toast('📦 差一个寄件礼盒——在工坊用 纸×1 + 木材×2 + 鲜花×2 做一个', 4600); return; }
+    mutate(function (w) {
+      w.res = w.res || {};
+      if ((w.res.giftbox || 0) < 1) return w;
+      w.res.giftbox -= 1;
+      w.parcels = w.parcels || {};
+      if (w.parcels[placeId]) return w;
+      w.parcels[placeId] = { at: Date.now(), readyAt: Date.now() + PACK_MS };
+      w.sent = (w.sent || 0) + 1;
+      return w;
+    }).then(function (ok) {
+      if (!ok) { toast('没寄出去，再试一次', 2400); return; }
+      Snd.sfx('craft');
+      toast('📮 包裹寄往' + pl.name + '了 · 大概 ' + fmtRemain(PACK_MS) + '后回来', 4200);
+      refreshHUD();
+      if (S.interId === 'workshop') openPackPanel();
+    });
+  }
+
+  /* 领回信：不消耗任何东西，特产是「一件」，重复领不到第二件 */
+  function claimParcel(placeId) {
+    var t = T(), pl = t && t.get(placeId);
+    if (!pl) return;
+    mutate(function (w) {
+      w.parcels = w.parcels || {};
+      var p = w.parcels[placeId];
+      if (!p || p.readyAt > Date.now()) return w;
+      delete w.parcels[placeId];
+      w.spec = w.spec || {};
+      w.spec[placeId] = w.spec[placeId] || Date.now();
+      w.mail = w.mail || [];
+      w.mail.push({ place: placeId, at: Date.now() });
+      if (w.mail.length > 240) w.mail = w.mail.slice(-240);
+      // 回信里总会夹一点心意：两朵干花
+      w.res = w.res || {};
+      w.res.flowers = (w.res.flowers || 0) + 2;
+      // 每收满 5 种特产，邮局补贴一次
+      var n = Object.keys(w.spec).length;
+      if (n % 5 === 0) {
+        w.res.seeds = (w.res.seeds || 0) + 3;
+        w.res.paper = (w.res.paper || 0) + 2;
+      }
+      return w;
+    }).then(function (ok) {
+      if (!ok) return;
+      Snd.sfx('harvest');
+      burst(S.self.x, S.self.y - 46, 'spark', 6);
+      toast('✉️ ' + pl.name + '的回信到了 · ' + pl.icon + ' ' + pl.item + ' 已收进物产册' +
+        ((specCount() % 5 === 0) ? '（满 5 种，邮局补贴了种子和纸）' : ''), 5200);
+      openMailPanel();
+    });
+  }
+
+  /* ---------------- 邮差：领地址 / 换地址 ---------------- */
+  function addrToday() { var w = curWorld() || {}; return w.addrDay === dayStr(); }
+  function unknownPlaces() {
+    var t = T(); if (!t) return [];
+    return t.list.filter(function (p) { return !hasAddr(p.id); });
+  }
+  function takeAddrToday() {
+    if (addrToday()) { toast('📬 今天的信已经给过你了，明天再来', 2800); return; }
+    var pool = unknownPlaces();
+    if (!pool.length) { toast('📬 所有地址都收齐了——41 个地方，一个不剩', 3400); return; }
+    var ds = parseInt(dayStr().replace(/-/g, ''), 10) || 0;
+    var pl = pool[ds % pool.length];
+    mutate(function (w) {
+      w.addr = w.addr || {};
+      w.addr[pl.id] = w.addr[pl.id] || Date.now();
+      w.addrDay = dayStr();
+      w.res = w.res || {};
+      w.res.paper = (w.res.paper || 0) + 1;
+      return w;
+    }).then(function (ok) {
+      if (!ok) return;
+      Snd.sfx('ding');
+      var left = unknownPlaces().length;
+      toast('📬 阿信递来一个地址：' + pl.name + '（还差 ' + left + ' 个地方）· 顺便给了一张信纸', 4600);
+      openMailPanel();
+    });
+  }
+  function tradeAddr() {
+    var w = curWorld() || {};
+    if (w.addrTradeDay === dayStr()) { toast('📮 今天已经换过一次地址了', 2600); return; }
+    var r = worldRes();
+    if ((r.paper || 0) < 3 || (r.materials || 0) < 1) {
+      toast('📮 换地址要 3 张信纸 + 1 件手工礼物（你现在 📄' + (r.paper || 0) + ' 🎁' + (r.materials || 0) + '）', 4200);
+      return;
+    }
+    var pool = unknownPlaces();
+    if (!pool.length) { toast('📬 已经没有不知道的地方了', 2800); return; }
+    var ds = parseInt(dayStr().replace(/-/g, ''), 10) || 0;
+    var pl = pool[(ds + 13) % pool.length];
+    mutate(function (w2) {
+      w2.res = w2.res || {};
+      if ((w2.res.paper || 0) < 3 || (w2.res.materials || 0) < 1) return w2;
+      w2.res.paper -= 3;
+      w2.res.materials -= 1;
+      w2.addr = w2.addr || {};
+      w2.addr[pl.id] = w2.addr[pl.id] || Date.now();
+      w2.addrTradeDay = dayStr();
+      return w2;
+    }).then(function (ok) {
+      if (!ok) return;
+      Snd.sfx('ding');
+      toast('📮 阿信帮你问到了：' + pl.name + ' 的地址', 3600);
+      openMailPanel();
+    });
+  }
+
+  /* ---------------- 村民委托（v4.3 替代原来的每日心愿） ----------------
+   * 每天两条：一条要材料（会收走），一条要看某件特产（只是看看，不收走）。
+   * 用日期做种子从池子里取，两台设备算出来完全一样，不需要同步「今天是谁」。
+   */
+  var COMM_POOL = [
+    { npc: 'baker', want: { kind: 'res', key: 'milk', n: 1 }, give: { wood: 3, paper: 1 },
+      ask: '牧场要是挤出牛奶，分我一杯？我给你换点木头。', say: '太好了！布丁烤上了，木头你拿去。' },
+    { npc: 'baker', want: { kind: 'res', key: 'egg', n: 2 }, give: { materials: 1 },
+      ask: '缺两颗鸡蛋——蛋糕差一点点就成型了。', say: '正好！这个手工礼物给你，我留着也没用。' },
+    { npc: 'shepherd', want: { kind: 'res', key: 'hay', n: 2 }, give: { wool: 1, seeds: 2 },
+      ask: '干草还有多的吗？今晚要下雪。', say: '替它们谢谢你。这卷毛你拿着。' },
+    { npc: 'shepherd', want: { kind: 'res', key: 'flowers', n: 3 }, give: { milk: 1, egg: 1 },
+      ask: '羊圈边上想摆几朵花，三朵就够。', say: '这样它们睡觉都能闻到香味。' },
+    { npc: 'carpenter', want: { kind: 'res', key: 'wood', n: 4 }, give: { paper: 2, giftbox: 1 },
+      ask: '再给我四根木头，我给你们钉个像样的礼盒。', say: '拿好，钉子是我自己敲直的。' },
+    { npc: 'carpenter', want: { kind: 'res', key: 'wool', n: 1 }, give: { wood: 4 },
+      ask: '羊毛有吗？锯子把手缠一圈就不磨手了。', say: '舒服多了。这些木头你拿去。' },
+    { npc: 'postman', want: { kind: 'res', key: 'paper', n: 2 }, give: { seeds: 3, flowers: 2 },
+      ask: '信纸还有富余吗？我这边快写完了。', say: '够我写到月底了，这些种子换给你。' },
+    { npc: 'postman', want: { kind: 'res', key: 'giftbox', n: 1 }, give: { materials: 1, wood: 2 },
+      ask: '有做好的礼盒吗？有个客人急着寄。', say: '帮大忙了。这个挂饰你收着。' },
+    { npc: 'santa', want: { kind: 'res', key: 'flowers', n: 4 }, give: { materials: 1, seeds: 2 },
+      ask: 'Ho Ho——帽子上想插几朵花，热闹一点。', say: '好看吗？我也觉得。这些给你。' },
+    { npc: 'snowman', want: { kind: 'res', key: 'wood', n: 2 }, give: { hay: 2 },
+      ask: '两根树枝当新手臂，我原来的快断了。', say: '举手试试——嗯，稳。' },
+    { npc: 'elf', want: { kind: 'res', key: 'wool', n: 1 }, give: { flowers: 3 },
+      ask: '货架的垫子破了，一卷羊毛就好。', say: '垫好啦，你看是不是顺眼多了。' },
+    { npc: 'barista', want: { kind: 'res', key: 'flowers', n: 2 }, give: { seeds: 2, paper: 1 },
+      ask: '柜台上想换一束花，两朵就够。', say: '客人说店里好看多了。' }
+  ];
+  /* 「拿给我看看」的委托：从今天有特产的人里挑一件，不消耗 */
+  var SHOW_POOL = [
+    { npc: 'postman', say: '这封信上的邮戳……你们真的去过啊。' },
+    { npc: 'santa', say: 'Ho Ho，这么远的地方，你们都带回来了。' },
+    { npc: 'barista', say: '摆在柜台上，今天的光都变软了。' },
+    { npc: 'carpenter', say: '南北的东西就是不一样，做工很讲究。' },
+    { npc: 'baker', say: '闻着就知道是好东西，我都不敢下锅。' },
+    { npc: 'shepherd', say: '要是能带它们也去看看就好了。' }
+  ];
+
+  function commSeed() { return parseInt(dayStr().replace(/-/g, ''), 10) || 0; }
+  function commsToday() {
+    var ds = commSeed();
+    var a = COMM_POOL[ds % COMM_POOL.length];
+    var b = COMM_POOL[(ds + 5) % COMM_POOL.length];
+    if (b === a) b = COMM_POOL[(ds + 1) % COMM_POOL.length];
+    var out = [
+      { idx: 0, npc: a.npc, want: a.want, give: a.give, ask: a.ask, say: a.say },
+      { idx: 1, npc: b.npc, want: b.want, give: b.give, ask: b.ask, say: b.say }
+    ];
+    /* 第二条如果能换成「看特产」，就换——这样每天至少有一条和远方有关 */
+    var sl = specList();
+    if (sl.length) {
+      var pl = sl[ds % sl.length];
+      var sp = SHOW_POOL[ds % SHOW_POOL.length];
+      out[1] = {
+        idx: 1, npc: sp.npc,
+        want: { kind: 'spec', key: pl.id, n: 1 },
+        give: { seeds: 2, flowers: 2 },
+        ask: '听说你手上有' + pl.name + '的' + pl.item + '，拿给我看看行吗？',
+        say: sp.say + '（' + pl.icon + ' ' + pl.item + '）'
+      };
+    }
+    return out;
+  }
+  function commKey(idx) { return dayStr() + '#' + idx; }
+  function commDone(idx) {
+    var w = curWorld() || {};
+    return !!(w.commDone && w.commDone[commKey(idx)]);
+  }
+  function commFor(npcId) {
+    var list = commsToday();
+    for (var i = 0; i < list.length; i++) if (list[i].npc === npcId && !commDone(list[i].idx)) return list[i];
+    return null;
+  }
+  function commHave(c) {
+    if (!c) return false;
+    if (c.want.kind === 'spec') return hasSpec(c.want.key);
+    return (worldRes()[c.want.key] || 0) >= c.want.n;
+  }
+  function commWantText(c) {
+    if (!c) return '';
+    if (c.want.kind === 'spec') {
+      var t = T(), pl = t && t.get(c.want.key);
+      return pl ? (pl.icon + ' ' + pl.item + '（' + pl.name + '）') : '特产';
+    }
+    return (RES_NAME[c.want.key] || c.want.key) + ' ×' + c.want.n;
+  }
+  function commGiveText(c) {
+    if (!c) return '';
+    var out = [];
+    for (var k in c.give) if (c.give.hasOwnProperty(k)) out.push((RES_NAME[k] || k) + ' ×' + c.give[k]);
+    return out.join(' · ');
+  }
+  /* NPC 说话时调用：能交就交，不能交就提一句。返回要接在对话后面的话。 */
+  function talkComm(npcId) {
+    var c = commFor(npcId);
+    if (!c) return null;
+    if (!commHave(c)) {
+      return '（' + c.ask + ' 需要 ' + commWantText(c) + '，你还没凑够。）';
+    }
+    mutate(function (w) {
+      w.commDone = w.commDone || {};
+      if (w.commDone[commKey(c.idx)]) return w;
+      w.res = w.res || {};
+      if (c.want.kind === 'res') {
+        if ((w.res[c.want.key] || 0) < c.want.n) return w;
+        w.res[c.want.key] -= c.want.n;
+      } else if (!(w.spec && w.spec[c.want.key])) {
+        return w;
+      }
+      for (var k in c.give) if (c.give.hasOwnProperty(k)) w.res[k] = (w.res[k] || 0) + c.give[k];
+      w.commDone[commKey(c.idx)] = Date.now();
+      return w;
+    }).then(function (ok) {
+      if (!ok) return;
+      Snd.sfx('ding');
+      toast('🤝 委托完成：' + commGiveText(c), 3600);
+      refreshHUD();
+    });
+    return '（' + c.say + '）这里是 ' + commGiveText(c) + '，收下吧。';
+  }
+
   function worldRes() {
     var w = curWorld();
     return (w && w.res) || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
@@ -337,7 +655,12 @@ window.Game = (function () {
    * 每章的要求都只用已有进度字段（回忆/对话/树/车票/牧场），不另开存档结构。
    */
   function foundCount() { return Object.keys(S.quest.found).length; }
-  function talkedExtra() { return ['snowman', 'elf', 'barista'].filter(function (k) { return S.quest.talked[k]; }).length; }
+  /* 聊过几个人（八个人都算：老人四个 + 新邻居四个） */
+  function talkCount() {
+    var n = 0, t = S.quest.talked || {};
+    for (var k in t) if (t.hasOwnProperty(k) && t[k]) n++;
+    return n;
+  }
   function visitedCount() { return Object.keys(S.quest.visited).length; }
   /* 藏在屋子里的回忆找到了几段 */
   function roomFoundCount() {
@@ -361,19 +684,21 @@ window.Game = (function () {
     return n > 8 ? 8 : n;
   }
   function chapterDayStr() { var w = curWorld() || {}; return w.chapterDay || ''; }
-  function canAdvanceToday() { return chapterDayStr() !== dayStr(); }
+
+  /* 是否今天已经推进过一章：v4.3 起不再当锁用，只记录日期 */
+  function canAdvanceToday() { return true; }
 
   var CHAPTERS = [
     { t: '回到小镇', tip: '先和圣诞老人打个招呼',
       ok: function () { return !!S.quest.talked.santa; },
       prog: function () { return S.quest.talked.santa ? '✓' : '还没聊过'; } },
-    { t: '认识邻居', tip: '和雪人先生、小精灵、老板娘都说上话，再走进自己的小屋',
-      ok: function () { return talkedExtra() >= 3 && !!S.quest.visited.cabin; },
-      prog: function () { return '邻居 ' + Math.min(3, talkedExtra()) + '/3 · 小屋 ' + (S.quest.visited.cabin ? '✓' : '×'); } },
-    { t: '屋里的旧照片', tip: '有些回忆不在雪地上——去四间屋子里翻翻角落',
+    { t: '认识邻居', tip: '镇上现在有八个人：圣诞老人、雪人、小精灵、老板娘、邮差阿信、面包师麦香、牧羊女小禾、老木匠老鲁',
+      ok: function () { return talkCount() >= 4 && !!S.quest.visited.cabin; },
+      prog: function () { return '聊过 ' + Math.min(4, talkCount()) + '/4 · 小屋 ' + (S.quest.visited.cabin ? '✓' : '×'); } },
+    { t: '屋里的旧照片', tip: '四间屋子的角落都藏着回忆——不只是雪地上有',
       ok: function () { return roomFoundCount() >= 2; },
       prog: function () { return '室内回忆 ' + Math.min(2, roomFoundCount()) + '/2'; } },
-    { t: '开一片牧场', tip: '去左侧牧场抱一捆干草，喂一次牛、羊或鸡',
+    { t: '开一片牧场', tip: '去左边牧场抱一捆干草，喂一次牛、羊或鸡',
       ok: function () {
         var w = curWorld() || {};
         return !!(w.ranch && w.ranch.gotHay) && ranchFedAny();
@@ -383,25 +708,34 @@ window.Game = (function () {
         return '干草 ' + (w.ranch && w.ranch.gotHay ? '✓' : '×') + ' · 喂食 ' + (ranchFedAny() ? '✓' : '×');
       } },
     { t: '收下第一份产物', tip: '喂过的动物第二天来收：牛奶 / 羊毛 / 鸡蛋',
-      ok: function () { return ranchGoodsCount() >= 1 && foundCount() >= 5; },
-      prog: function () { return '产物 ' + Math.min(1, ranchGoodsCount()) + '/1 · 回忆 ' + Math.min(5, foundCount()) + '/5'; } },
+      ok: function () { return ranchGoodsCount() >= 1 && foundCount() >= 4; },
+      prog: function () { return '产物 ' + Math.min(1, ranchGoodsCount()) + '/1 · 回忆 ' + Math.min(4, foundCount()) + '/4'; } },
+    { t: '邮局开张', tip: '去工坊：木材做纸 → 纸+木材+鲜花做礼盒 → 到「寄件」台寄出第一个包裹',
+      ok: function () { return sentCount() >= 1; },
+      prog: function () { return '寄出包裹 ' + Math.min(1, sentCount()) + '/1 · 已知地址 ' + addrCount(); } },
     { t: '把树种起来', tip: '温室种树收木材 → 工坊做一件手工 → 树下装饰',
       ok: function () { return treeStage() >= 1 && (worldRes().materials || 0) >= 1; },
       prog: function () { return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + ' · 手工 ' + Math.min(1, worldRes().materials || 0) + '/1'; } },
     { t: '凑齐三张车票', tip: '车票不会一次给全：先把小镇的日子过得再热闹一点',
-      ok: function () { return ticketOwnedCount() >= 3 && foundCount() >= 8; },
-      prog: function () { return '车票 ' + Math.min(3, ticketOwnedCount()) + '/3 · 回忆 ' + Math.min(8, foundCount()) + '/8'; } },
-    { t: '点亮整棵树', tip: '木材鲜花管够、三种牧场产物都收一遍，把树点到全亮',
-      ok: function () { return treeStage() >= 3 && foundCount() >= 11 && ranchGoodsCount() >= 3; },
-      prog: function () { return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + ' · 回忆 ' + Math.min(11, foundCount()) + '/11 · 产物 ' + Math.min(3, ranchGoodsCount()) + '/3'; } }
+      ok: function () { return ticketOwnedCount() >= 3; },
+      prog: function () { return '车票 ' + Math.min(3, ticketOwnedCount()) + '/3 · 回忆 ' + foundCount(); } },
+    { t: '远方的回信', tip: '寄出去的包裹会带着当地特产回来，收满三种',
+      ok: function () { return mailCount() >= 3 && specCount() >= 3; },
+      prog: function () { return '回信 ' + Math.min(3, mailCount()) + '/3 · 特产 ' + Math.min(3, specCount()) + '/3'; } },
+    { t: '点亮整棵树', tip: '树全亮、三种牧场产物都收过、六种远方特产摆上架',
+      ok: function () { return treeStage() >= 3 && foundCount() >= 11 && ranchGoodsCount() >= 3 && specCount() >= 6; },
+      prog: function () {
+        return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
+          ' · 回忆 ' + Math.min(11, foundCount()) + '/11 · 产物 ' + Math.min(3, ranchGoodsCount()) + '/3' +
+          ' · 特产 ' + Math.min(6, specCount()) + '/6';
+      } }
   ];
 
   function chapterText() {
     var ch = chapterNo();
     if (ch >= CHAPTERS.length) return '🎄 一切就绪，就等 2026 年 12 月 25 日的晚上了';
     var c = CHAPTERS[ch];
-    var tail = canAdvanceToday() ? '' : '（明天再推进）';
-    return '📖 第 ' + (ch + 1) + ' 章 · ' + c.t + '　' + c.prog() + tail;
+    return '📖 第 ' + (ch + 1) + ' 章 · ' + c.t + '　' + c.prog();
   }
   function questText() { return chapterText(); }
 
@@ -425,54 +759,9 @@ window.Game = (function () {
     S.lastQuestText = '';
   }
 
-  /* ---------- NPC 每日心愿（v4.2）----------
-   * 每天换一个人、换一件东西。交上去能换回材料。
-   * 只作为「今天还有件小事可做」的日常，不挡主线、不做前置。
-   */
-  var WISH_POOL = [
-    { npc: 'snowman', want: 'flower', n: 2, give: { seeds: 2 }, line: '给我两朵花吧，我想插在雪人帽子上。' },
-    { npc: 'elf', want: 'wood', n: 2, give: { materials: 1 }, line: '帮我去镇上找两根木头？我想修一下货架。' },
-    { npc: 'barista', want: 'milk', n: 1, give: { flowers: 3 }, line: '牧场要是挤出牛奶，分我一杯？我给你换些鲜花。' },
-    { npc: 'santa', want: 'wool', n: 1, give: { wood: 3 }, line: '袜子上破了个洞，能给我一卷羊毛吗？' },
-    { npc: 'elf', want: 'egg', n: 1, give: { materials: 1 }, line: '厨房想做个布丁，缺一颗鸡蛋。' },
-    { npc: 'barista', want: 'flower', n: 3, give: { seeds: 3 }, line: '柜台上想摆点花，三朵就好。' },
-    { npc: 'snowman', want: 'wood', n: 3, give: { hay: 3 }, line: '给我三根木头，我换你三捆干草——牧场用得着。' }
-  ];
-  var WISH_NAME = { flower: '🌸 鲜花', wood: '🪵 木材', milk: '🥛 牛奶', wool: '🧶 羊毛', egg: '🥚 鸡蛋', hay: '🌾 干草' };
-  function wishToday() {
-    var ch = chapterNo();
-    var pool = WISH_POOL.filter(function (x) { return ch >= 4 || (x.want === 'flower' || x.want === 'wood'); });
-    if (!pool.length || ch < 1) return null;
-    var ds = parseInt(dayStr().replace(/-/g, ''), 10) || 0;
-    return pool[(ds + ch) % pool.length];
-  }
-  /* 和 NPC 说话时顺手带上心愿：够了就收下并回礼，不够就只提一句 */
-  function talkWish(npcId) {
-    var wsh = wishToday();
-    if (!wsh || wsh.npc !== npcId) return null;
-    var w = curWorld() || {};
-    if (w.wish && w.wish.day === dayStr() && w.wish.done) return null;
-    var r = worldRes();
-    var have = r[wsh.want] || 0;
-    if (have < wsh.n) {
-      return '（' + wsh.line + ' 需要 ' + (WISH_NAME[wsh.want] || wsh.want) + ' ×' + wsh.n + '，你现在有 ' + have + '。）';
-    }
-    mutate(function (w2) {
-      w2.res = w2.res || {};
-      w2.res[wsh.want] = Math.max(0, (w2.res[wsh.want] || 0) - wsh.n);
-      w2.wish = { day: dayStr(), npc: npcId, done: true };
-      for (var k in wsh.give) if (wsh.give.hasOwnProperty(k)) w2.res[k] = (w2.res[k] || 0) + wsh.give[k];
-      return w2;
-    }).then(function () {
-      refreshHUD();
-      var back = [];
-      for (var k2 in wsh.give) if (wsh.give.hasOwnProperty(k2)) back.push((WISH_NAME[k2] || k2) + ' ×' + wsh.give[k2]);
-      toast('🎁 心愿完成：换到了 ' + back.join(' · '), 3600);
-      Snd.sfx('ding');
-    });
-    return '（收下了你的 ' + (WISH_NAME[wsh.want] || wsh.want) + '）太谢谢了！这个给你 —— 明天再来看我。';
-  }
-
+  /* v4.3：章节不再「一天只让推一章」，条件到了就推。
+     时长靠真实要做的事撑起来（作物生长 / 牧场隔天 / 包裹往返 / 41 个地址），
+     不靠「明天再来」这四个字。 */
   function updateQuest() {
     var ch = chapterNo();
     if (ch >= CHAPTERS.length) {
@@ -481,16 +770,34 @@ window.Game = (function () {
     }
     var c = CHAPTERS[ch];
     if (!c || !c.ok()) return;
-    if (!canAdvanceToday()) {
-      /* 条件够了、但今天已经推进过一章：只轻轻提一次，不打扰 */
-      if (!S._waitHint) {
-        S._waitHint = true;
-        toast('📖 这一章已经准备好了 —— 今天先歇歇，明天再来推进下一章', 4200);
-      }
-      return;
-    }
     advanceChapter(ch + 1);
   }
+  /* 脚边自动拾起：地上那十段回忆没有任何文字提示，走到 26px 内就收进册子。
+     不弹「要不要捡」的确认，因为发现本身就是奖励。 */
+  function autoPickEggs() {
+    if (S.mapId || S.ending || S.photo) return;
+    var i, e, dx, dy;
+    /* 室外：雪地上那几段 */
+    if (!S.interId && World.eggs) {
+      for (i = 0; i < World.eggs.length; i++) {
+        e = World.eggs[i];
+        if (S.quest.found[e.id]) continue;
+        dx = S.self.x - e.x; dy = S.self.y - e.y;
+        if (dx * dx + dy * dy < 26 * 26) { collectEgg(e); return; }
+      }
+    }
+    /* 室内：藏在桌椅架子后面的那几段（v4.3 起同样不提示、走过就收） */
+    if (S.interId && World.roomEggs) {
+      for (i = 0; i < World.roomEggs.length; i++) {
+        e = World.roomEggs[i];
+        if (e.room !== S.interId) continue;
+        if (S.quest.found[e.id]) continue;
+        dx = S.self.x - e.x; dy = S.self.y - e.y;
+        if (dx * dx + dy * dy < 26 * 26) { collectEgg(e); return; }
+      }
+    }
+  }
+
   function checkVisitZones() {
     if (S.interId || S.mapId || S.quest.step > 3) return;
     var marked = false;
@@ -827,6 +1134,37 @@ window.Game = (function () {
         e.stopPropagation();   // 不要冒泡到遮罩/画布
       });
     });
+    /* v4.3 寄件台 / 信袋里的按钮用事件委托：
+       列表是动态生成的，委托式绑定在手机上也不会有几百个监听器。 */
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var sd = t.closest('[data-send]');
+      if (sd) {
+        e.preventDefault();
+        var pid = sd.getAttribute('data-send');
+        if (parcelState(pid) === 'ready') claimParcel(pid);
+        else if (parcelState(pid) === 'fly') toast('这件还在路上，再等等', 2400);
+        else if (hasSpec(pid)) toast('这个地址的特产已经收过了，可以寄去别的地方', 3000);
+        else sendParcel(pid);
+        return;
+      }
+      var cl = t.closest('[data-claim]');
+      if (cl) { e.preventDefault(); claimParcel(cl.getAttribute('data-claim')); return; }
+      var cm = t.closest('[data-comm]');
+      if (cm) {
+        e.preventDefault();
+        var who = cm.getAttribute('data-comm');
+        var line = talkComm(who);
+        if (line) { toast(line.replace(/[（(].*?[）)]/g, ''), 3600); openMailPanel(); }
+        return;
+      }
+    });
+    var mAddr = $('#mail-addr');
+    if (mAddr) mAddr.addEventListener('click', function () { takeAddrToday(); });
+    var mTrade = $('#mail-trade');
+    if (mTrade) mTrade.addEventListener('click', function () { tradeAddr(); });
+
     // 任务 / 资源角标：点开对应面板
     var qc = $('#quest-chip');
     if (qc) qc.addEventListener('click', function () { openQuestPanel(); });
@@ -872,10 +1210,7 @@ window.Game = (function () {
     if (bpf) bpf.addEventListener('click', function () { plantSeed(S.plotIdx, 'flower'); });
     if (bpt) bpt.addEventListener('click', function () { plantSeed(S.plotIdx, 'tree'); });
     if (bhv) bhv.addEventListener('click', function () { harvest(S.plotIdx); });
-    RECIPES.forEach(function (rc) {
-      var b = $('#craft-' + rc.id);
-      if (b) b.addEventListener('click', function () { craft(rc); });
-    });
+    /* 合成按钮由 openCraftPanel() 动态生成（配方从 3 个变成 5 个），这里不再逐个绑定 */
     $('#end-overlay').addEventListener('click', function () { endNext(); });
     $('#photo-close').addEventListener('click', function () { closePhoto(); });
     var px2 = $('#photo-x');
@@ -1053,6 +1388,7 @@ window.Game = (function () {
     }
 
     checkVisitZones();
+    autoPickEggs();
     updateQuest();
 
     // ---- 结局触发（三重门：日期 + 任务 + 树全亮；已在共享数据里标记看过则不再触发） ----
@@ -1156,28 +1492,47 @@ window.Game = (function () {
     });
   }
 
+  /* 配方现在可以产出任意资源（手工礼物 / 纸 / 礼盒），成本也可以多一项。 */
+  function recipeLackList(recipe, r) {
+    r = r || worldRes();
+    var lack = [];
+    if ((r.wood || 0) < recipe.wood) lack.push({ t: '🪵 木材', need: recipe.wood, have: (r.wood || 0) });
+    if ((r.flowers || 0) < recipe.flowers) lack.push({ t: '🌸 鲜花', need: recipe.flowers, have: (r.flowers || 0) });
+    var nd = recipe.need || {};
+    for (var k in nd) if (nd.hasOwnProperty(k)) {
+      if ((r[k] || 0) < nd[k]) lack.push({ t: (RES_NAME[k] || k), need: nd[k], have: (r[k] || 0) });
+    }
+    return lack;
+  }
+  function recipeLack(recipe, r) {
+    return recipeLackList(recipe, r).map(function (x) {
+      return x.t + ' ' + x.need + '（有 ' + x.have + '）';
+    }).join(' · ');
+  }
   function craft(recipe) {
+    var bad = recipeLack(recipe);
+    if (bad) { toast('材料还不够：' + bad, 3000); return; }
     mutate(function (w) {
-      w.res = w.res || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
+      w.res = w.res || {};
       var r = w.res;
       if ((r.wood || 0) < recipe.wood || (r.flowers || 0) < recipe.flowers) return w;
+      var nd = recipe.need || {};
+      for (var k in nd) if (nd.hasOwnProperty(k) && (r[k] || 0) < nd[k]) return w;
       r.wood -= recipe.wood; r.flowers -= recipe.flowers;
-      r.materials = (r.materials || 0) + 1;
+      for (var k2 in nd) if (nd.hasOwnProperty(k2)) r[k2] = (r[k2] || 0) - nd[k2];
+      var out = recipe.out || { materials: 1 };
+      for (var k3 in out) if (out.hasOwnProperty(k3)) r[k3] = (r[k3] || 0) + out[k3];
       w.crafted = w.crafted || {};
       w.crafted[recipe.id] = (w.crafted[recipe.id] || 0) + 1;
       return w;
     }).then(function (ok) {
-      var w = curWorld();
-      var cnt = w && w.crafted && w.crafted[recipe.id];
-      var r = worldRes();
-      if ((r.materials || 0) > 0 && (S._lastMats || 0) !== (r.materials || 0)) {
-        S._lastMats = r.materials;
-        Snd.sfx('craft');
-        toast('做好了「' + recipe.name + '」🎁 —— ' + recipe.desc);
-        closeAllPanels();
-      } else if (!cnt || (r.materials || 0) <= (S._lastMats || 0)) {
-        toast('材料还不够：需要 🪵 ' + recipe.wood + ' 🌸 ' + recipe.flowers);
-      }
+      if (!ok) return;
+      Snd.sfx('craft');
+      var out = recipe.out || { materials: 1 };
+      var names = [];
+      for (var k in out) if (out.hasOwnProperty(k)) names.push((RES_NAME[k] || k) + ' ×' + out[k]);
+      toast('做好了「' + recipe.name + '」—— ' + names.join(' · ') + '　' + recipe.desc, 4200);
+      refreshHUD();
     });
   }
 
@@ -1677,13 +2032,8 @@ window.Game = (function () {
         }
         consider('roomItem', it.x, it.y, it.r, label, it);
       });
-      /* v4.2 藏进屋里的回忆：桌子底下、架子旁边、木料堆后面……
-         和家具用同一套「最近优先」，走近才看得见那句很轻的提示。 */
-      (World.roomEggs || []).forEach(function (e) {
-        if (e.room !== S.interId) return;
-        var got2 = S.quest.found[e.id];
-        consider('egg', e.x, e.y, 38, got2 ? '💭 再看看这里' : '看看这里…', e);
-      });
+      /* v4.3：藏进屋里的回忆不再出现在最近可互动列表里——
+         走近到 26px 由 autoPickEggs 直接收下，不给任何文字提示。 */
       consider('exit', inter.exit.x, inter.exit.y, 70, '🚪 回到小镇', inter.exit);
       return best;
     }
@@ -1693,7 +2043,7 @@ window.Game = (function () {
       var mm = mapMemory(mp.id);
       if (mm) {
         var got = S.quest.found[mm.id];
-        consider('mapEgg', mp.eggPos.x, mp.eggPos.y, 64, got ? '💭 再看看这里' : '看看这里…', mp.eggPos);
+        consider('mapEgg', mp.eggPos.x, mp.eggPos.y, 70, got ? '💭 再看看这封信' : '✉️ 拆开这封信', mp.eggPos);
       }
       if (mp.view) consider('mapView', mp.view.x, mp.view.y, mp.view.r, mp.view.label, mp.view);
       /* 双人打卡点：站过去就能拍一张横版纪念照，不占任务进度。
@@ -1732,10 +2082,12 @@ window.Game = (function () {
       consider('door', dr.x, dr.y, 78, enterable ? ('🚪 进入 ' + dr.name) : ('👀 ' + dr.name), dr);
     });
     consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
+    /* v4.3：地上这十段回忆完全不给提示——没找到的靠走到跟前自动拾起，
+       找到过的才会在地图上留一句「再看看这里」（重读用）。
+       所以这里只登记「已经找到的」，未找到的不参与互动判定。 */
     World.eggs.forEach(function (e) {
-      var found = S.quest.found[e.id];
-      // 不在地图上做任务式标记：走近了才出现一句很轻的「看看这里」
-      consider('egg', e.x, e.y, 34, found ? '💭 再看看这里' : '看看这里…', e);
+      if (!S.quest.found[e.id]) return;
+      consider('egg', e.x, e.y, 40, '💭 再看看这里', e);
     });
     if (S.remote.seen && S.remote.inter === 0) {
       var o = S.data && S.data.slots && S.data.slots[S.otherSlot];
@@ -1748,11 +2100,20 @@ window.Game = (function () {
     if (!S.curInteract) return;
     var it = S.curInteract;
     if (it.type === 'npc') {
+      /* 邮差不是只说话：他手上有一整个信袋（回信 / 地址 / 委托） */
+      if (it.ref.id === 'postman') {
+        if (!S.quest.talked[it.ref.id]) {
+          S.quest.talked[it.ref.id] = 1;
+          updateQuest(); syncQuest();
+        }
+        openMailPanel();
+        return;
+      }
       var stage = treeStage();
       var lines = (stage >= 2 && it.ref.lateLines) ? it.ref.lateLines : it.ref.lines;
       var idx = (S.npcIdx[it.ref.id] || 0);
-      var wishLine = talkWish(it.ref.id);
-      openDialog(it.ref.name, wishLine ? [lines[idx % lines.length], wishLine] : lines[idx % lines.length]);
+      var commLine = talkComm(it.ref.id);
+      openDialog(it.ref.name, commLine ? [lines[idx % lines.length], commLine] : lines[idx % lines.length]);
       S.npcIdx[it.ref.id] = idx + 1;
       if (!S.quest.talked[it.ref.id]) {
         S.quest.talked[it.ref.id] = 1;
@@ -1817,6 +2178,7 @@ window.Game = (function () {
       if (S.interId === 'cafe' && id === 'cocoa') drinkCocoa();
       else if (S.interId === 'greenhouse' && /^p[1-6]$/.test(id)) openPlotPanel(parseInt(id.slice(1), 10) - 1);
       else if (S.interId === 'workshop' && id === 'craft') openCraftPanel();
+      else if (S.interId === 'workshop' && id === 'pack') openPackPanel();
       else openDialog(it.ref.name, it.ref.lines);
     } else if (it.type === 'exit') {
       leaveIndoor();
@@ -1834,17 +2196,38 @@ window.Game = (function () {
     burst(S.self.x, S.self.y - 50, 'spark', 6);
     Snd.sfx('collect');
     updateQuest();
+    var isMap = !!m.map;
+    var pl = isMap && T() ? T().get(m.id) : null;
     mutate(function (w) {
       w.quest = w.quest || { step: 0, talked: {}, visited: {}, found: {} };
       w.quest.found = w.quest.found || {};
-      if (w.quest.found[m.id]) return w; // 对方先收集过：只补本地记录，不重复发种子
+      if (w.quest.found[m.id]) return w; // 对方先收集过：只补本地记录，不重复发东西
       w.quest.found[m.id] = Date.now();
       w.res = w.res || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
-      w.res.seeds = (w.res.seeds || 0) + 1; // 一段回忆，化作一颗种子
+      w.res.seeds = (w.res.seeds || 0) + 1;      // 一段回忆，化作一颗种子
+      /* v4.3：地图里的回忆是一封信——拆开会附一件当地特产和一封回信 */
+      if (pl) {
+        w.spec = w.spec || {};
+        w.spec[pl.id] = w.spec[pl.id] || Date.now();
+        w.res.flowers = (w.res.flowers || 0) + 1;
+        w.mail = w.mail || [];
+        w.mail.push({ place: pl.id, at: Date.now() });
+      }
+      /* 回忆本身就是「去过」的证明 → 那个地方的地址就到手了 */
+      w.addr = w.addr || {};
+      if (T() && T().has(m.id) && !w.addr[m.id]) w.addr[m.id] = Date.now();
       return w;
     }).then(function () {
       refreshHUD();
-      toast('💭 收进回忆册了 · 这段回忆化作一颗种子 🌱');
+      if (pl) {
+        toast('💭 收进回忆册 · ✉️ 信里还有 ' + pl.icon + ' ' + pl.item + ' 和 ' + pl.name + ' 的地址', 5200);
+      } else {
+        toast('💭 收进回忆册了 · 这段回忆化作一颗种子 🌱', 3200);
+      }
+      var w2 = curWorld() || {};
+      if (w2.addr && w2.addr[m.id]) {
+        // 地址提示已经由上面那条 toast 说过，这里不重复
+      }
     });
     showMemoryCard(m);
   }
@@ -2336,7 +2719,7 @@ window.Game = (function () {
   /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
   var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
     '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
-    '#station-panel', '#ticket-panel', '#admin-panel'];
+    '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel'];
 
   function closeAllPanels() {
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
@@ -2443,6 +2826,8 @@ window.Game = (function () {
       '<div class="res-line"><b>🎁 手工礼物</b><span>' + (r.materials || 0) + ' 件 · 工坊制作</span></div>' +
       '<div class="res-line"><b>🌾 干草</b><span>' + (r.hay || 0) + ' 捆 · 牧场干草垛每天领一份</span></div>' +
       '<div class="res-line"><b>🥛 牛奶 · 🧶 羊毛 · 🥚 鸡蛋</b><span>' + (r.milk || 0) + ' / ' + (r.wool || 0) + ' / ' + (r.egg || 0) + ' · 牧场每天收</span></div>' +
+      '<div class="res-line"><b>📄 信纸 · 📦 礼盒</b><span>' + (r.paper || 0) + ' / ' + (r.giftbox || 0) + ' · 工坊制作（寄包裹要用礼盒）</span></div>' +
+      '<div class="res-line"><b>✉️ 地址 · ' + '🌏 特产</b><span>' + addrCount() + ' / ' + ((T() && T().count) || 41) + ' 个地方 · 已收 ' + specCount() + ' 种特产</span></div>' +
       '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') + '</span></div>' +
       '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' 段已收进册子</span></div>' +
       '<div class="res-line"><b>🎄 圣诞树</b><span>' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + '</span></div>';
@@ -2462,29 +2847,26 @@ window.Game = (function () {
         (cur ? '　<b style="color:#ffe08a">' + esc(c.prog()) + '</b>' : '') + '</span></div>';
       if (cur) rows += '<div class="quest-line tip"><span class="quest-mark">　</span><span>' + esc(c.tip) + '</span></div>';
     });
-    /* 今天的节奏提示：这一章做到了，也得等明天才能推进 */
-    var todayLine = ch >= CHAPTERS.length
-      ? '八章都过完了，就等圣诞夜'
-      : (canAdvanceToday()
-        ? ('今天可以推进一章' + (CHAPTERS[ch].ok() ? '（条件已满足，走两步就会推进）' : ''))
-        : '今天这一章已经推进过了，明天再来继续');
-    rows += '<div class="quest-line"><span class="quest-mark">📅</span><span>' + esc(todayLine) + '</span></div>';
+    /* v4.3：没有「今天只能推一章」这回事了，条件到了就走 */
+    rows += '<div class="quest-line"><span class="quest-mark">📅</span><span>' +
+      (ch >= CHAPTERS.length ? '十章都过完了，剩下的日子就在小镇里慢慢等圣诞夜'
+        : '做事就行——条件一满足，这一章自己就翻过去') + '</span></div>';
 
-    /* 每日心愿：今天谁在等东西 */
-    var wsh = wishToday();
-    if (wsh) {
-      var w0 = curWorld() || {};
-      var doneWish = !!(w0.wish && w0.wish.day === dayStr() && w0.wish.done);
-      var nm = { santa: '圣诞老人', snowman: '雪人先生', elf: '小精灵', barista: '老板娘' }[wsh.npc] || '镇上的人';
-      rows += '<div class="quest-line"><span class="quest-mark">🎁</span><span>' + esc(
-        doneWish ? ('今天的心愿已经帮 ' + nm + ' 完成了，明天再看') :
-          (nm + '想要 ' + (WISH_NAME[wsh.want] || wsh.want) + ' ×' + wsh.n + '（你有 ' + (worldRes()[wsh.want] || 0) + '）')
-      ) + '</span></div>';
-    }
+    /* 今天镇上的两件委托 */
+    var NPCN = { santa: '圣诞老人', snowman: '雪人先生', elf: '小精灵', barista: '老板娘',
+      postman: '邮差阿信', baker: '面包师麦香', shepherd: '牧羊女小禾', carpenter: '老木匠老鲁' };
+    commsToday().forEach(function (c) {
+      var nm = NPCN[c.npc] || '镇上的人';
+      var okc = commDone(c.idx);
+      rows += '<div class="quest-line' + (okc ? ' done' : '') + '"><span class="quest-mark">' + (okc ? '✔' : '🤝') + '</span><span>' +
+        esc(okc ? ('🤝 委托 · ' + nm + ' 的那件已经交付了')
+          : ('🤝 委托 · ' + nm + '：' + c.ask + '（' + commWantText(c) + ' → ' + commGiveText(c) + '）')) + '</span></div>';
+    });
     rows += '<div class="quest-line"><span class="quest-mark">🎄</span><span>圣诞树：' +
       ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
       ' · 回忆 ' + foundCount() + ' / ' + ((window.Memories || []).length) +
       ' · 车票 ' + ticketOwnedCount() + ' / 6' +
+      ' · 特产 ' + specCount() + ' / ' + ((T() && T().count) || 41) +
       ' · 圣诞夜 2026-12-25（还有 ' + Math.max(0, daysToChristmas()) + ' 天）</span></div>';
 
     var body = $('#quest-body');
@@ -2540,7 +2922,7 @@ window.Game = (function () {
        加上六张旅行地图里各藏的一段（它们不在 World.eggs 里）。 */
     var all = World.allMemories || World.eggs;
     var foundList = all.filter(function (m) { return !!found[m.id]; });
-    if (!foundList.length && !spotList().length) {
+    if (!foundList.length && !spotList().length && !specCount()) {
       var empty = document.createElement('div');
       empty.className = 'book-empty';
       empty.innerHTML = '<b>册子还是空的</b><p>照片和明信片会散落在小镇各处——' +
@@ -2593,9 +2975,45 @@ window.Game = (function () {
       });
     }
 
+    /* v4.3 远方物产：41 个地方，收到一件亮一格。
+       没收到但已经有地址的，先露地名；连地址都没有的，只有「还没去过」。 */
+    var spGot = specList();
+    var tt = T();
+    if (tt) {
+      var head2 = document.createElement('div');
+      head2.className = 'book-sec';
+      head2.textContent = '✉️ 远方物产 · ' + spGot.length + ' / ' + tt.count;
+      list.appendChild(head2);
+      var grid = document.createElement('div');
+      grid.className = 'spec-grid';
+      /* 收到的排前面：翻到这一节就能看见自己攒了什么，不用在 41 格里找 */
+      var ordered = tt.list.slice().sort(function (a, b) {
+        var ma = specMap()[a.id] ? 1 : 0, mb = specMap()[b.id] ? 1 : 0;
+        return mb - ma;
+      });
+      ordered.forEach(function (p) {
+        var has = !!specMap()[p.id];
+        var cell = document.createElement('div');
+        cell.className = 'spec-cell' + (has ? ' is-got' : '');
+        cell.innerHTML = has
+          ? '<span class="sp-ico">' + p.icon + '</span><b>' + esc(p.item) + '</b><em>' + esc(p.name) + '</em>'
+          : '<span class="sp-ico">·</span><b>？？？</b><em>' + (hasAddr(p.id) ? esc(p.name) : '还没去过') + '</em>';
+        if (has) cell.title = p.line;
+        grid.appendChild(cell);
+      });
+      list.appendChild(grid);
+      var tip = document.createElement('p');
+      tip.className = 'book-empty-note';
+      tip.textContent = spGot.length
+        ? '每一件都是从那个地方寄回来的。寄包裹去工坊的寄件台，收信找邮差阿信。'
+        : '寄出去的包裹，会带回当地的一件特产。地址在回忆里，也在邮差手上。';
+      list.appendChild(tip);
+    }
+
     var cnt = $('#book-count');
-    if (cnt) cnt.textContent = (foundList.length || sps.length)
-      ? ('已收录 ' + foundList.length + ' 段' + (sps.length ? ' · 合影 ' + sps.length + ' 张' : ''))
+    if (cnt) cnt.textContent = (foundList.length || sps.length || spGot.length)
+      ? ('回忆 ' + foundList.length + ' 段' + (sps.length ? ' · 合影 ' + sps.length + ' 张' : '') +
+         (spGot.length ? ' · 特产 ' + spGot.length : ''))
       : '';
     $('#book-panel').classList.remove('hidden');
     pause();
@@ -2629,19 +3047,159 @@ window.Game = (function () {
     pause();
   }
 
-  /* ---------- 工坊制作面板 ---------- */
+  /* ---------- 工坊制作面板（v4.3：配方动态生成） ---------- */
   function openCraftPanel() {
     var r = worldRes();
-    var made = (curWorld() && curWorld().crafted) || {};
-    RECIPES.forEach(function (rc) {
-      var b = $('#craft-' + rc.id);
-      if (!b) return;
-      var enough = (r.wood || 0) >= rc.wood && (r.flowers || 0) >= rc.flowers;
-      b.disabled = !enough;
-      b.textContent = (made[rc.id] ? '再做一件 · ' : '') + rc.name + '（🪵' + rc.wood + ' 🌸' + rc.flowers + '）' + (enough ? '' : ' · 材料不足');
-    });
-    $('#craft-res').textContent = '现有材料：🪵 ' + (r.wood || 0) + ' · 🌸 ' + (r.flowers || 0) + ' · 🎁 ' + (r.materials || 0) + '（手工礼物用于把圣诞树点到全亮）';
+    var box = $('#craft-list');
+    if (box) {
+      box.innerHTML = '';
+      RECIPES.forEach(function (rc) {
+        var out = rc.out || { materials: 1 };
+        var outTxt = [];
+        for (var k in out) if (out.hasOwnProperty(k)) outTxt.push((RES_NAME[k] || k) + '×' + out[k]);
+        var cost = '🪵' + rc.wood + (rc.flowers ? ' 🌸' + rc.flowers : '');
+        var need = rc.need || {};
+        for (var nk in need) if (need.hasOwnProperty(nk)) cost += ' ' + (RES_NAME[nk] || nk) + '×' + need[nk];
+        var b = document.createElement('button');
+        b.className = 'btn craft-btn';
+        var lackList = recipeLackList(rc, r);
+        var lackTxt = lackList.map(function (x) {
+          return '<span>' + esc(x.t) + ' ' + x.need + '<i>（有 ' + x.have + '）</i></span>';
+        }).join('');
+        b.innerHTML = '<b>' + esc(rc.name) + '</b><span>' + outTxt.join(' · ') + '　（' + cost + '）</span>' +
+          (lackTxt ? '<span class="craft-lack">还差 ' + lackTxt + '</span>' : '');
+        b.disabled = lackList.length > 0;
+        b.addEventListener('click', function () { craft(rc); openCraftPanel(); });
+        box.appendChild(b);
+      });
+    }
+    $('#craft-res').textContent = '现有：🪵 ' + (r.wood || 0) + ' · 🌸 ' + (r.flowers || 0) +
+      ' · 📄 ' + (r.paper || 0) + ' · 📦 ' + (r.giftbox || 0) + ' · 🎁 ' + (r.materials || 0);
     $('#craft-panel').classList.remove('hidden');
+    pause();
+  }
+
+  /* ---------- v4.3 寄件台（工坊里那张包装台） ---------- */
+  function parcelState(id) {
+    var p = parcels()[id];
+    if (!p) return 'none';
+    return p.readyAt <= Date.now() ? 'ready' : 'fly';
+  }
+  function openPackPanel() {
+    var t = T();
+    if (!t) return;
+    var r = worldRes();
+    var sub = $('#pack-sub');
+    if (sub) sub.textContent = '📦 礼盒 ' + (r.giftbox || 0) + ' · 地址 ' + addrCount() + '/' + t.count + ' · 特产 ' + specCount() + '/' + t.count;
+    var flyEl = $('#pack-fly');
+    if (flyEl) {
+      var fly = flyingParcels();
+      flyEl.innerHTML = fly.length
+        ? '🚚 在路上：' + fly.map(function (id) {
+          var pl = t.get(id);
+          return '<b>' + esc(pl ? pl.name : id) + '</b>（还有 ' + fmtRemain(parcelLeftMs(id)) + '）';
+        }).join('　·　')
+        : '<span class="muted">现在没有在路上的包裹。</span>';
+    }
+    var list = $('#pack-list');
+    if (!list) return;
+    var am = addrMap();
+    var known = t.list.filter(function (p) { return am[p.id]; });
+    var html = '';
+    if (!known.length) {
+      html = '<div class="book-empty"><b>还没有地址</b><p>找到一段回忆，那个地方的地址就写进本子了；' +
+        '也可以去镇上找邮差阿信，他每天会给你一个。</p></div>';
+    } else {
+      t.regions.forEach(function (rg) {
+        var grp = known.filter(function (p) { return p.region === rg; });
+        if (!grp.length) return;
+        html += '<div class="book-sec">' + rg + '</div><div class="pack-grid">';
+        grp.forEach(function (p) {
+          var st = parcelState(p.id);
+          var got = hasSpec(p.id);
+          var cls = 'pack-chip' + (st === 'fly' ? ' is-fly' : '') + (st === 'ready' ? ' is-ready' : '') + (got ? ' is-got' : '');
+          var tail = got ? '✓ 已收 ' + p.icon
+            : (st === 'fly' ? '在途 ' + fmtRemain(parcelLeftMs(p.id))
+              : (st === 'ready' ? '✉️ 取回信' : '寄一个'));
+          html += '<button class="' + cls + '" data-send="' + p.id + '">' +
+            '<span class="pc-name">' + esc(p.name) + '</span>' +
+            '<span class="pc-item">' + p.icon + ' ' + esc(p.item) + '</span>' +
+            '<span class="pc-tail">' + tail + '</span></button>';
+        });
+        html += '</div>';
+      });
+      var unknown = t.count - known.length;
+      if (unknown > 0) html += '<p class="muted small-note">还有 ' + unknown + ' 个地方没有地址——去镇上找回忆，或者找阿信。</p>';
+    }
+    list.innerHTML = html;
+    $('#pack-panel').classList.remove('hidden');
+    pause();
+  }
+
+  /* ---------- v4.3 邮差的信袋 ---------- */
+  function openMailPanel() {
+    var t = T();
+    if (!t) return;
+    var sub = $('#mail-sub');
+    if (sub) sub.textContent = '地址 ' + addrCount() + '/' + t.count + ' · 特产 ' + specCount() + '/' + t.count;
+    var ready = readyParcels();
+    var body = $('#mail-body');
+    if (!body) return;
+    var html = '';
+    html += '<div class="mail-say">「有信——！」阿信把邮包放在腿上，一张一张数给你听。</div>';
+
+    /* 今天托付给邮差的事 */
+    var c = commFor('postman');
+    if (c) {
+      html += '<div class="book-sec">今天托付给你的事</div>';
+      html += '<div class="mail-item"><span>' + esc(c.ask) + '</span><em>' +
+        commWantText(c) + ' → ' + commGiveText(c) + '</em>' +
+        (commHave(c) ? '<button class="btn primary small" data-comm="postman">交给他</button>'
+          : '<span class="mail-dim">还没凑够</span>') + '</div>';
+    }
+
+    /* 待拆的信 */
+    html += '<div class="book-sec">等你拆的信' + (ready.length ? '（' + ready.length + '）' : '') + '</div>';
+    if (!ready.length) {
+      html += '<div class="mail-item"><span class="mail-dim">暂时没有新信。寄出去的包裹回来时，我会喊你。</span></div>';
+    } else {
+      ready.forEach(function (id) {
+        var pl = t.get(id);
+        if (!pl) return;
+        html += '<div class="mail-item"><span>' + pl.icon + ' 来自 <b>' + esc(pl.name) + '</b></span><em>' +
+          esc(pl.item) + '</em><button class="btn primary small" data-claim="' + id + '">拆开</button></div>';
+      });
+    }
+
+    /* 已经收到的特产 */
+    var got = specList();
+    if (got.length) {
+      html += '<div class="book-sec">已经收到的特产（' + got.length + ' / ' + t.count + '）</div><div class="mail-tags">';
+      got.forEach(function (p) {
+        html += '<span class="mail-tag" title="' + esc(p.line) + '">' + p.icon + ' ' + esc(p.item) + ' · ' + esc(p.name) + '</span>';
+      });
+      html += '</div>';
+    }
+
+    /* 地址情况 */
+    var un = unknownPlaces();
+    html += '<div class="book-sec">地址</div>';
+    html += '<div class="mail-item"><span>已经知道 <b>' + addrCount() + '</b> 个地方，还有 <b>' + un.length + '</b> 个不知道。</span>' +
+      (addrToday() ? '<span class="mail-dim">今天的已经领过</span>' : '<span class="mail-dim">今天还有一封</span>') + '</div>';
+    if (un.length) {
+      html += '<div class="mail-dim small-note">没去过的地方，等你收到那边的信，地址就自然有了。</div>';
+    }
+    body.innerHTML = html;
+
+    var a = $('#mail-addr');
+    if (a) { a.disabled = addrToday() || !un.length; a.textContent = addrToday() ? '今天领过了' : '领今天的地址'; }
+    var tr = $('#mail-trade');
+    if (tr) {
+      var r = worldRes();
+      tr.disabled = (r.paper || 0) < 3 || (r.materials || 0) < 1 || !un.length;
+      tr.textContent = '换地址（📄3 🎁1）';
+    }
+    $('#mail-panel').classList.remove('hidden');
     pause();
   }
 
@@ -2663,7 +3221,7 @@ window.Game = (function () {
     if (inter) {
       if (S.interId === 'greenhouse') inter.draw(ctx, ts, plotStates());
       else inter.draw(ctx, ts);
-      if (World.drawRoomEggs) World.drawRoomEggs(ctx, ts, S.self, S.interId);
+      if (World.drawRoomEggs) World.drawRoomEggs(ctx, ts, S.self, S.interId, S.quest.found);
       if (showRemote) {
         drawables.push({ y: S.remote.y, fn: function () {
           var waving = ts < S.remote.waveUntil;
@@ -2705,25 +3263,12 @@ window.Game = (function () {
         try { ctx.save(); TravelMaps.animExtra(md.id, ctx, ts); ctx.restore(); } catch (e) { }
       }
 
-      /* 那段回忆的「小纸片」就压在那块地上——不发光、不浮动，走近了才有一行小字 */
+      /* v4.3：每张地图上的回忆是一封真正的信——躺在那里，能看见、能拆。
+         拆过之后不再发光，只留一张安静的纸（还能再看一遍）。 */
       var memObj = mapMemory(md.id);
       if (memObj) {
-        var got = !!S.quest.found[memObj.id];
-        if (!got) {
-          var ord = ['sayram', 'tibet', 'doha', 'wuhan', 'wuhai', 'kl'].indexOf(md.id);
-          World.drawTrace(ctx, { x: md.eggPos.x, y: md.eggPos.y, color: memObj.color }, ord < 0 ? 0 : ord);
-          var ddx = S.self.x - md.eggPos.x, ddy = S.self.y - md.eggPos.y;
-          if (ddx * ddx + ddy * ddy < 60 * 60) {
-            ctx.save();
-            ctx.font = '600 9.5px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = 'rgba(10,14,24,.65)';
-            ctx.shadowBlur = 3;
-            ctx.fillStyle = 'rgba(255,250,238,.66)';
-            ctx.fillText('看看这里…', md.eggPos.x, md.eggPos.y - 8);
-            ctx.restore();
-          }
-        }
+        var gotLetter = !!S.quest.found[memObj.id];
+        World.drawEnvelope(ctx, { x: md.eggPos.x, y: md.eggPos.y, color: memObj.color }, ts, gotLetter);
       }
 
       if (showRemote) {
@@ -2759,7 +3304,7 @@ window.Game = (function () {
       World.drawProps(ctx, ts);
       World.drawFence(ctx);
       World.drawBorderTrees(ctx, ts);
-      World.drawEggs(ctx, ts, S.self);
+      World.drawEggs(ctx, ts, S.self, S.quest.found);
 
       World.buildings.forEach(function (b) { drawables.push({ y: b.y + b.h, fn: function () { World.drawBuilding(ctx, b, ts); } }); });
       drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
@@ -2791,6 +3336,7 @@ window.Game = (function () {
           if (S.ending && n.id === 'santa') return;
           if (n.id === 'santa') Sprites.drawSanta(ctx, n.x, n.y, ts);
           else if (n.id === 'snowman') Sprites.drawSnowman(ctx, n.x, n.y, ts);
+          else if (n.style) Sprites.drawVillager(ctx, n.x, n.y, ts, n.style, Math.floor(ts / 320) % 4);
           else if (n.id === 'elf') Sprites.drawElf(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
           else Sprites.drawBarista(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
           nameTag(ctx, n.x, n.y - (n.id === 'santa' ? 84 : 66), n.name, false, '#ffe08a');
@@ -3039,7 +3585,9 @@ window.Game = (function () {
     devChapter: function () {
       var w = curWorld() || {};
       return { chapter: chapterNo(), day: w.chapterDay || '', canAdvance: canAdvanceToday(),
-               count: CHAPTERS.length, text: questText(), wish: (function () { var x = wishToday(); return x ? x.npc : null; })() };
+               count: CHAPTERS.length, text: questText(),
+               comms: commsToday().map(function (c) { return c.npc; }),
+               addr: addrCount(), spec: specCount(), mail: mailCount() };
     },
     devPatchWorld: function (patch) {
       if (!S.dev) return false;
@@ -3047,6 +3595,38 @@ window.Game = (function () {
       for (var k in patch) if (patch.hasOwnProperty(k)) w[k] = patch[k];
       return true;
     },
-    devQuestPanel: function () { openQuestPanel(); }
+    /* 和 devPatchWorld 的区别：这个走 mutate() 真正落盘，
+       所以能触发依赖存档的异步流程（寄包裹 / 章节推进）——验收脚本要用这个。 */
+    devPatchPersist: function (patch) {
+      if (!S.dev) return Promise.resolve(false);
+      return mutate(function (w) {
+        for (var k in patch) if (patch.hasOwnProperty(k)) w[k] = patch[k];
+        return w;
+      });
+    },
+    devLeaveMap: function () { if (!S.dev) return false; leaveMap(); return true; },
+    devOpenCraft: function () { openCraftPanel(); },
+    devQuestPanel: function () { openQuestPanel(); },
+    devPack: function () { openPackPanel(); },
+    devMail: function () { openMailPanel(); },
+    devTravels: function () {
+      var t = T();
+      return {
+        count: t ? t.count : 0,
+        addr: addrCount(),
+        spec: specCount(),
+        mail: mailCount(),
+        sent: sentCount(),
+        ready: readyParcels(),
+        fly: flyingParcels(),
+        gifts: { paper: (worldRes().paper || 0), giftbox: (worldRes().giftbox || 0) }
+      };
+    },
+    devSend: function (id) { sendParcel(id); },
+    devClaim: function (id) { claimParcel(id); },
+    devAddr: function () { takeAddrToday(); },
+    devComm: function () { return commsToday(); },
+    devCommDone: function () { return commDone(0) && commDone(1); },
+    devSpecIds: function () { return Object.keys(specMap()); }
   };
 })();

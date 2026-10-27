@@ -168,8 +168,20 @@ window.Sprites = (function () {
     r(ctx, x0 + 15.6 * U, y0 + 14.6 * U, 1.4 * U, 1.8 * U, '#8a5a3a');
   }
 
+  /* v4.3 村民（邮差 / 面包师 / 牧羊女 / 老木匠）：直接交给 Chars 画，
+     没有降级版本——这几个人只在 v4.3 之后存在，老浏览器降级不影响主线。 */
+  function drawVillager(ctx, cx, cy, t, style, frame) {
+    if (window.Chars && window.Chars.drawVillager) { window.Chars.drawVillager(ctx, cx, cy, t, style, frame); return; }
+    var x0 = cx - 8 * U, y0 = cy - 28 * U;
+    r(ctx, x0 + 4 * U, y0 + 13 * U, 8 * U, 9 * U, '#5c7f9e');
+    r(ctx, x0 + 3.5 * U, y0 + 4 * U, 9 * U, 8.5 * U, '#f6cfa8');
+    r(ctx, x0 + 3.1 * U, y0 + 3 * U, 9.8 * U, 2.6 * U, '#4a3b32');
+    r(ctx, x0 + 5.4 * U, y0 + 7.2 * U, 1.1 * U, 1.4 * U, '#2b2119');
+    r(ctx, x0 + 9.5 * U, y0 + 7.2 * U, 1.1 * U, 1.4 * U, '#2b2119');
+  }
+
   return {
     drawCharacter: drawCharacter, drawSanta: drawSanta, drawSnowman: drawSnowman,
-    drawElf: drawElf, drawBarista: drawBarista
+    drawElf: drawElf, drawBarista: drawBarista, drawVillager: drawVillager
   };
 })();

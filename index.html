@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.2.0" />
+  <link rel="stylesheet" href="style.css?v=4.3.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -361,14 +361,40 @@
         </div>
         <div class="panel-body">
           <div id="craft-res" class="panel-sub"></div>
-          <div class="craft-list">
-            <button id="craft-bird" class="btn craft-btn"></button>
-            <button id="craft-musicbox" class="btn craft-btn"></button>
-            <button id="craft-star" class="btn craft-btn"></button>
-          </div>
-          <p class="muted small-note">手工礼物 🎁 用来把广场圣诞树点到「全树点亮」。</p>
+          <div id="craft-list" class="craft-list"></div>
+          <p class="muted small-note">手工礼物 🎁 用来把广场圣诞树点到「全树点亮」；
+            信纸 📄 和礼盒 📦 用来给远方寄包裹。</p>
         </div>
         <div class="panel-actions"><button id="craft-close" class="btn ghost small">关闭</button></div>
+      </div>
+
+      <!-- 寄件台（工坊里那张包装台） -->
+      <div id="pack-panel" class="panel pack-panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">📮 寄件台 <span id="pack-sub" class="panel-sub"></span></div>
+          <button class="panel-x" data-close="pack-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <div id="pack-fly" class="pack-fly"></div>
+          <p class="muted small-note">选一个已经知道地址的地方，寄出一个礼盒。
+            包裹大概两小时后回来，会带回当地的一件特产。</p>
+          <div id="pack-list" class="pack-list"></div>
+        </div>
+        <div class="panel-actions"><button class="btn ghost small" data-close="pack-panel">关闭</button></div>
+      </div>
+
+      <!-- 邮差的信袋 -->
+      <div id="mail-panel" class="panel mail-panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">✉️ 阿信的信袋 <span id="mail-sub" class="panel-sub"></span></div>
+          <button class="panel-x" data-close="mail-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body"><div id="mail-body"></div></div>
+        <div class="panel-actions">
+          <button id="mail-addr" class="btn primary small">领今天的地址</button>
+          <button id="mail-trade" class="btn ghost small">换地址</button>
+          <button class="btn ghost small" data-close="mail-panel">关闭</button>
+        </div>
       </div>
 
       <!-- 资源面板 -->
@@ -384,7 +410,7 @@
       <!-- 任务面板 -->
       <div id="quest-panel" class="panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
-          <div class="panel-name">📜 小镇日历 · 八章</div>
+          <div class="panel-name">📜 小镇日历 · 十章</div>
           <button class="panel-x" data-close="quest-panel" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body"><div id="quest-body"></div></div>
@@ -484,14 +510,15 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js?v=4.2.0"></script>
-  <script src="memories.js?v=4.2.0"></script>
-  <script src="chars.js?v=4.2.0"></script>
-  <script src="sprites.js?v=4.2.0"></script>
-  <script src="world.js?v=4.2.0"></script>
-  <script src="maps.js?v=4.2.0"></script>
-  <script src="game.js?v=4.2.0"></script>
-  <script src="app.js?v=4.2.0"></script>
+  <script src="firebase-config.js?v=4.3.0"></script>
+  <script src="memories.js?v=4.3.0"></script>
+  <script src="chars.js?v=4.3.0"></script>
+  <script src="sprites.js?v=4.3.0"></script>
+  <script src="world.js?v=4.3.0"></script>
+  <script src="maps.js?v=4.3.0"></script>
+  <script src="specialties.js?v=4.3.0"></script>
+  <script src="game.js?v=4.3.0"></script>
+  <script src="app.js?v=4.3.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
