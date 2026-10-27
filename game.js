@@ -25,7 +25,7 @@ window.Game = (function () {
     lastSent: 0, lastSentDir: -1, flakes: [], data: null, otherSlot: null, mySlot: 'a',
     npcIdx: {}, paused: false, curInteract: null,
     parts: [], interId: null, outdoorPos: null,
-    mapId: null, mapReturn: null,
+    mapId: null, mapReturn: null, spots: {}, photoOpt: null,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -193,6 +193,11 @@ window.Game = (function () {
       for (var key in rem) if (rem[key] && !S.quest[k][key]) S.quest[k][key] = rem[key];
     });
     if ((q.step || 0) > S.quest.step) S.quest.step = q.step;
+    /* 旅行打卡点（共享）：改完立刻能算「已经拍过」 */
+    if (w.spots) {
+      S.spots = S.spots || {};
+      for (var sk in w.spots) if (w.spots[sk] && !S.spots[sk]) S.spots[sk] = w.spots[sk];
+    }
   }
   // 本地 quest 推到共享（并集 + step 取最大）
   function syncQuest() {
@@ -217,6 +222,7 @@ window.Game = (function () {
   // ---------- 结局日期门 ----------
   function endingUnlocked() {
     if (S.dev) return true;
+    if (S.adminEnding) return true;   // 只在应急入口按下时置位，平时一直是 false
     var d = new Date();
     if (d.getFullYear() > 2026) return true;
     return d.getFullYear() === 2026 && d.getMonth() === 11 && d.getDate() >= 25;
@@ -424,6 +430,7 @@ window.Game = (function () {
       absorbQuest(w);
       if (w.ended && !S.ended) S.ended = true; // 另一台设备已经看过结局
     }
+    syncTickets();      // 条件达成 / 老存档里去过的地方 → 自动补票并同步给另一台设备
     refreshHUD();
     var o = d.slots && d.slots[S.otherSlot];
     if (o) {
@@ -559,6 +566,7 @@ window.Game = (function () {
     base.addEventListener('pointercancel', joyEnd);
     base.addEventListener('lostpointercapture', joyEnd);
 
+    bindAdmin();   // 隐藏应急入口（长按标题 5 秒），不占界面任何位置
     $('#btn-interact').addEventListener('click', function () { doInteract(); });
     $('#btn-menu').addEventListener('click', function () { toggleMenu(); });
     $('#menu-close').addEventListener('click', function () { closeAllPanels(); });
@@ -630,6 +638,10 @@ window.Game = (function () {
     $('#outfit-close').addEventListener('click', function () { closeAllPanels(); });
     $('#mem-close').addEventListener('click', function () { closeAllPanels(); });
     $('#book-close').addEventListener('click', function () { closeAllPanels(); });
+    var stk = $('#station-tickets');
+    if (stk) stk.addEventListener('click', function () { closeAllPanels(); openTicketBook(); });
+    var tkc = $('#ticket-close');
+    if (tkc) tkc.addEventListener('click', function () { closeAllPanels(); });
     var stc = $('#station-close');
     if (stc) stc.addEventListener('click', function () { closeAllPanels(); });
     $('#plot-close').addEventListener('click', function () { closeAllPanels(); });
@@ -1073,24 +1085,28 @@ window.Game = (function () {
   }
 
   /* ---------- 拍照模式（按实际进度构图）---------- */
-  function openPhoto() {
+  function openPhoto(opt) {
+    opt = opt || {};
     S.photo = true;
+    S.photoOpt = opt;
     S.paused = true;
     hidePanelsForPhoto();
     var cv = $('#photo-canvas');
-    cv.width = 1125; cv.height = 1500;
-    renderPhoto(cv.getContext('2d'), 1125, 1500);
+    cv.width = PHOTO_W; cv.height = PHOTO_H;
+    renderPhoto(cv.getContext('2d'), PHOTO_W, PHOTO_H, opt);
     try {
       var url = cv.toDataURL('image/png');
       var img = $('#photo-img');
       img.src = url;
       img.style.display = 'block';
       cv.style.display = 'none';
-      $('#photo-note').textContent = '📱 iPhone：长按图片 → 「存储到照片」';
+      $('#photo-note').textContent = '📱 长按图片 → 「存储到照片」（1920 × 1080 横版）';
     } catch (err) {
       cv.style.display = 'block';
-      $('#photo-note').textContent = '长按上方画布保存';
+      $('#photo-note').textContent = '长按上方画布保存（1920 × 1080）';
     }
+    var title = $('#photo-title');
+    if (title) title.textContent = opt.mapId ? ('📷 ' + (opt.label || '旅行打卡')) : '📷 我们的圣诞合照';
     $('#photo-modal').classList.remove('hidden');
   }
   function closePhoto() {
@@ -1103,7 +1119,7 @@ window.Game = (function () {
       var img = $('#photo-img');
       var a = document.createElement('a');
       a.href = img.src;
-      a.download = 'Omos-Christmas-Village-2026.png';
+      a.download = 'Omos-Christmas-Village-' + (S.photoOpt && S.photoOpt.mapId ? S.photoOpt.mapId : 'town') + '-' + Date.now() + '.png';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1121,90 +1137,289 @@ window.Game = (function () {
     syncPanelChrome();
   }
 
-  function renderPhoto(ctx, W, H) {
-    var stage = Math.max(2, Math.min(3, treeStage()));
-    var memN = foundCount();
+  /* ---------- 照片：统一 1920×1080 横版 ----------
+   * 两种照片（小镇最终合照 / 旅行打卡）用同一套尺寸和收尾，
+   * 不截手机屏幕，全部在独立画布上重画，所以人物和环境都不会被 UI 压住。
+   */
+  var PHOTO_W = 1920, PHOTO_H = 1080;
+
+  function photoNightSky(ctx, W, H) {
     var sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#0d1c3a'); sky.addColorStop(0.6, '#1e3357'); sky.addColorStop(1, '#31486e');
+    sky.addColorStop(0, '#08122a');
+    sky.addColorStop(0.45, '#15294a');
+    sky.addColorStop(1, '#2c4666');
     ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
-    for (var i = 0; i < 90; i++) {
-      ctx.fillStyle = 'rgba(255,255,255,' + (0.3 + Math.random() * 0.6) + ')';
-      ctx.fillRect(Math.random() * W, Math.random() * H * 0.55, 2.2, 2.2);
+    var rnd = seeded(77);
+    for (var i = 0; i < 150; i++) {
+      var sx = rnd() * W, sy = rnd() * H * 0.6;
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.18 + rnd() * 0.55) + ')';
+      ctx.fillRect(sx, sy, 1.8 + rnd() * 1.6, 1.8 + rnd() * 1.6);
     }
-    ctx.fillStyle = '#f6f0d8';
-    ctx.beginPath(); ctx.arc(W - 190, 170, 52, 0, 7); ctx.fill();
-    ctx.fillStyle = 'rgba(13,28,58,.25)';
-    ctx.beginPath(); ctx.arc(W - 172, 158, 44, 0, 7); ctx.fill();
-    for (var bld = 0; bld < 9; bld++) {
-      var bx = 40 + bld * 128, bw = 70 + (bld % 3) * 26, bh = 70 + (bld % 4) * 34;
-      ctx.fillStyle = '#16223d';
-      ctx.fillRect(bx, H * 0.52 - bh, bw, bh);
-      ctx.fillStyle = '#0f1830';
-      ctx.beginPath(); ctx.moveTo(bx - 8, H * 0.52 - bh); ctx.lineTo(bx + bw / 2, H * 0.52 - bh - 26); ctx.lineTo(bx + bw + 8, H * 0.52 - bh); ctx.closePath(); ctx.fill();
-      for (var wl = 0; wl < 4; wl++) {
-        if ((bld + wl) % 3 !== 0) {
-          ctx.fillStyle = 'rgba(255,210,120,.85)';
-          ctx.fillRect(bx + 10 + (wl % 2) * 30, H * 0.52 - bh + 14 + Math.floor(wl / 2) * 26, 12, 14);
+    /* 月亮 + 月晕 */
+    var mx = W - 250, my = 165;
+    var hg = ctx.createRadialGradient(mx, my, 20, mx, my, 220);
+    hg.addColorStop(0, 'rgba(255,247,214,.34)');
+    hg.addColorStop(1, 'rgba(255,247,214,0)');
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.arc(mx, my, 220, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fbf4d8';
+    ctx.beginPath(); ctx.arc(mx, my, 56, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(226,220,190,.55)';
+    ctx.beginPath(); ctx.arc(mx - 14, my - 12, 12, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 16, my + 14, 8, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 4, my - 24, 6, 0, 7); ctx.fill();
+  }
+
+  function photoMountains(ctx, W, H, baseY) {
+    /* 后排更淡更远，前排更实——两排就够撑起纵深 */
+    [[0.42, '#1b2c48', '#243756'], [0.52, '#22375a', '#2c4569']].forEach(function (row, ri) {
+      var y = baseY - ri * 26;
+      ctx.beginPath();
+      ctx.moveTo(-40, baseY + 60);
+      var step = W / 5;
+      for (var i = 0; i <= 5; i++) {
+        var px = i * step;
+        var peak = y - (ri === 0 ? 120 : 168) - ((i * 53 + ri * 31) % 90);
+        ctx.lineTo(px - step / 2, y - 30);
+        ctx.lineTo(px, peak);
+      }
+      ctx.lineTo(W + 40, baseY + 60);
+      ctx.closePath();
+      ctx.fillStyle = row[1]; ctx.fill();
+      /* 雪线 */
+      ctx.save(); ctx.clip();
+      ctx.fillStyle = row[2];
+      ctx.fillRect(0, y - 210, W, 60);
+      ctx.restore();
+    });
+  }
+
+  function photoTownSilhouette(ctx, W, H, baseY) {
+    var rnd = seeded(19);
+    for (var b = 0; b < 12; b++) {
+      var bw = 60 + rnd() * 80;
+      var bh = 70 + rnd() * 90;
+      var bx = -30 + b * (W / 11);
+      var by = baseY - bh;
+      ctx.fillStyle = 'rgba(16,26,44,.92)';
+      ctx.fillRect(bx, by, bw, bh);
+      /* 屋顶 */
+      ctx.beginPath();
+      ctx.moveTo(bx - 8, by + 4);
+      ctx.lineTo(bx + bw / 2, by - 24 - rnd() * 14);
+      ctx.lineTo(bx + bw + 8, by + 4);
+      ctx.closePath();
+      ctx.fill();
+      /* 窗灯 */
+      for (var wq = 0; wq < 3; wq++) {
+        if (rnd() > 0.35) {
+          ctx.fillStyle = 'rgba(255,206,130,' + (0.5 + rnd() * 0.4) + ')';
+          ctx.fillRect(bx + 10 + wq * 22, by + 18 + (wq % 2) * 26, 11, 13);
         }
       }
+      /* 屋顶积雪 */
+      ctx.fillStyle = 'rgba(236,246,255,.35)';
+      ctx.fillRect(bx - 4, by - 2, bw + 8, 4);
     }
-    var gr = ctx.createLinearGradient(0, H * 0.5, 0, H);
-    gr.addColorStop(0, '#3d5578'); gr.addColorStop(0.35, '#7f97ba'); gr.addColorStop(1, '#c6d4ea');
-    ctx.fillStyle = gr; ctx.fillRect(0, H * 0.52, W, H * 0.48);
-    ctx.fillStyle = 'rgba(255,255,255,.5)';
-    for (var sp = 0; sp < 60; sp++) {
-      ctx.beginPath(); ctx.ellipse(Math.random() * W, H * 0.56 + Math.random() * H * 0.42, 10 + Math.random() * 26, 4 + Math.random() * 8, 0, 0, 7); ctx.fill();
-    }
+  }
 
-    ctx.save();
-    ctx.translate(W / 2 - 750 * 2.1, H * 0.56 - 560 * 2.1);
-    ctx.scale(2.1, 2.1);
-    World.drawBigTree(ctx, World.tree, stage, 1000);
-    Sprites.drawSanta(ctx, 828, 640, 1000);
-    Sprites.drawSnowman(ctx, 560, 650, 1200);
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(W / 2, H * 0.82);
-    ctx.scale(4.4, 4.4);
-    Sprites.drawCharacter(ctx, -46, 0, 0, 0, Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 800);
-    Sprites.drawCharacter(ctx, 46, 0, 0, 0, Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, 800);
-    ctx.restore();
-    ctx.fillStyle = '#f26d7d';
-    [[W / 2 - 60, H * 0.62, 9], [W / 2 + 54, H * 0.60, 7], [W / 2, H * 0.57, 11]].forEach(function (h) {
-      var s = h[2];
+  function photoSnowGround(ctx, W, H, groundY) {
+    var g = ctx.createLinearGradient(0, groundY, 0, H);
+    g.addColorStop(0, '#cfdcee');
+    g.addColorStop(0.35, '#bacbe4');
+    g.addColorStop(1, '#8fa5c8');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, groundY + 30);
+    ctx.bezierCurveTo(W * 0.25, groundY - 6, W * 0.6, groundY + 16, W, groundY - 4);
+    ctx.lineTo(W, H); ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+    /* 雪面起伏 */
+    var rnd = seeded(451);
+    for (var i = 0; i < 26; i++) {
+      var x = rnd() * W, y = groundY + 40 + rnd() * (H - groundY - 40);
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.12 + rnd() * 0.22) + ')';
       ctx.beginPath();
-      ctx.moveTo(h[0], h[1] + s * 0.35);
-      ctx.bezierCurveTo(h[0] - s, h[1] - s * 0.45, h[0] - s * 0.42, h[1] - s * 1.1, h[0], h[1] - s * 0.4);
-      ctx.bezierCurveTo(h[0] + s * 0.42, h[1] - s * 1.1, h[0] + s, h[1] - s * 0.45, h[0], h[1] + s * 0.35);
+      ctx.ellipse(x, y, 40 + rnd() * 90, 8 + rnd() * 14, 0, 0, 7);
+      ctx.fill();
+    }
+  }
+
+  function photoPerson(ctx, x, y, s, opt, isJulie, dir) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    /* 影子 */
+    ctx.fillStyle = 'rgba(40,60,90,.22)';
+    ctx.beginPath(); ctx.ellipse(0, 2, 30, 7, 0, 0, 7); ctx.fill();
+    Sprites.drawCharacter(ctx, 0, 0, dir === undefined ? 0 : dir, 0, opt, isJulie, 800);
+    ctx.restore();
+  }
+
+  function photoSnowfall(ctx, W, H, n) {
+    var rnd = seeded(913);
+    for (var i = 0; i < n; i++) {
+      var x = rnd() * W, y = rnd() * H;
+      var r = 1.6 + rnd() * 3.4;
+      ctx.globalAlpha = 0.25 + rnd() * 0.55;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function photoVignette(ctx, W, H) {
+    var vg = ctx.createRadialGradient(W / 2, H * 0.52, H * 0.34, W / 2, H * 0.52, H * 0.86);
+    vg.addColorStop(0, 'rgba(8,16,32,0)');
+    vg.addColorStop(1, 'rgba(8,16,32,.52)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+
+  /* 小镇里的最终合照：整棵树 + 两个人 + 小镇背景都在画面里 */
+  function renderTownPhoto(ctx, W, H) {
+    var stage = Math.max(2, Math.min(3, treeStage()));
+    var groundY = H * 0.63;
+
+    photoNightSky(ctx, W, H);
+    photoMountains(ctx, W, H, groundY - 40);
+    photoTownSilhouette(ctx, W, H, groundY + 6);
+    photoSnowGround(ctx, W, H, groundY);
+
+    /* 树：用世界坐标套一层缩放搬到画面右侧（放大到接近满高，才有仪式感） */
+    var s = 2.05;
+    var treeScreenX = W * 0.655, treeScreenY = H * 0.825;
+    ctx.save();
+    ctx.translate(treeScreenX, treeScreenY);
+    ctx.scale(s, s);
+    ctx.translate(-World.tree.x, -World.tree.y);
+    World.drawBigTree(ctx, World.tree, stage, 1000);
+    ctx.restore();
+
+    /* 两个人的暖光 */
+    var glow = ctx.createRadialGradient(treeScreenX - 120, H * 0.82, 20, treeScreenX - 120, H * 0.82, 420);
+    glow.addColorStop(0, 'rgba(255,206,132,.22)');
+    glow.addColorStop(1, 'rgba(255,206,132,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, H * 0.5, W, H * 0.5);
+
+    photoPerson(ctx, W * 0.285, H * 0.815, 3.4,
+      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 0);
+    photoPerson(ctx, W * 0.355, H * 0.822, 3.4,
+      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, 0);
+
+    /* 心形 */
+    ctx.fillStyle = 'rgba(242,109,125,.9)';
+    [[W * 0.32, H * 0.62, 19], [W * 0.292, H * 0.675, 13], [W * 0.355, H * 0.685, 15]].forEach(function (h) {
+      var hx = h[0], hy = h[1], hs = h[2];
+      ctx.beginPath();
+      ctx.moveTo(hx, hy + hs * 0.36);
+      ctx.bezierCurveTo(hx - hs, hy - hs * 0.45, hx - hs * 0.42, hy - hs * 1.12, hx, hy - hs * 0.4);
+      ctx.bezierCurveTo(hx + hs * 0.42, hy - hs * 1.12, hx + hs, hy - hs * 0.45, hx, hy + hs * 0.36);
       ctx.fill();
     });
 
-    ctx.fillStyle = 'rgba(255,255,255,.85)';
-    for (var fl = 0; fl < 130; fl++) {
-      ctx.globalAlpha = 0.4 + Math.random() * 0.5;
-      ctx.beginPath(); ctx.arc(Math.random() * W, Math.random() * H, 1.5 + Math.random() * 3, 0, 7); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
+    photoSnowfall(ctx, W, H, 150);
+    photoVignette(ctx, W, H);
 
-    var vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.75);
-    vg.addColorStop(0, 'rgba(10,20,40,0)'); vg.addColorStop(1, 'rgba(10,20,40,.5)');
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-
-    ctx.fillStyle = 'rgba(40,26,14,.88)';
-    roundRectPath(ctx, W / 2 - 420, H - 240, 840, 150, 26);
-    ctx.fill();
-    ctx.strokeStyle = '#f0c040'; ctx.lineWidth = 5;
-    roundRectPath(ctx, W / 2 - 404, H - 226, 808, 122, 18);
-    ctx.stroke();
-    ctx.fillStyle = '#f4ead8';
-    ctx.font = 'bold 64px "PingFang SC", Georgia, serif';
+    /* 铭牌 */
+    var pw = 1000, ph = 104, px = (W - pw) / 2, py = H - ph - 14;
+    ctx.fillStyle = 'rgba(20,14,10,.72)';
+    roundRectPath(ctx, px, py, pw, ph, 22); ctx.fill();
+    ctx.strokeStyle = 'rgba(240,192,64,.85)'; ctx.lineWidth = 3;
+    roundRectPath(ctx, px + 10, py + 10, pw - 20, ph - 20, 15); ctx.stroke();
     ctx.textAlign = 'center';
-    ctx.fillText("Omo's Christmas Village", W / 2, H - 168);
     ctx.fillStyle = '#ffe08a';
-    ctx.font = '34px "PingFang SC", Georgia, serif';
-    ctx.fillText('✦ Charles ♥ Julie · 回忆 ' + memN + ' 段 · ' + dayStr() + ' ✦', W / 2, H - 112);
+    ctx.font = 'bold 38px "PingFang SC", Georgia, serif';
+    ctx.fillText("Omo's Christmas Village", W / 2, py + 47);
+    ctx.fillStyle = '#f4ead8';
+    ctx.font = '22px "PingFang SC", Georgia, serif';
+    ctx.fillText('✦ Charles ♥ Julie · 回忆 ' + foundCount() + ' 段 · ' + dayStr() + ' ✦', W / 2, py + 82);
   }
+
+  /* 旅行打卡照：当地风景当底，两个人站在景里 */
+  function renderTravelPhoto(ctx, W, H, mapId, spotLabel) {
+    var d = TravelMaps.get(mapId);
+    if (!d) { renderTownPhoto(ctx, W, H); return; }
+    var bg = TravelMaps.bg(mapId);
+    /* 所有「固定像素」都乘这个系数：1920 宽时 k=1（和以前一模一样），
+       回忆册里的 320×180 小图也按同一套比例排，不会变成大头贴。 */
+    var k = W / 1920;
+
+    /* 地图是 1500×1200；按 16:9 取一条横向的带，让代表性景观留在画面里 */
+    var srcH = Math.round(d.w * H / W);
+    var sy = function (spotY) { return Math.max(0, Math.min(d.h - srcH, spotY - 600)); };
+    var focus = d.view ? { x: d.view.x, y: d.view.y } : d.spawn;
+    var srcY = sy(focus.y);
+    var sc = W / d.w;
+
+    if (bg) {
+      ctx.drawImage(bg, 0, srcY, d.w, srcH, 0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#16223d'; ctx.fillRect(0, 0, W, H);
+    }
+
+    /* 世界坐标 → 照片坐标 */
+    var toPx = function (wx, wy) { return { x: wx * sc, y: (wy - srcY) * sc }; };
+    var cxw = Math.round(d.w * 0.5);
+    var cyp = toPx(cxw, d.spawn.y).y;
+    var footY = Math.min(H * 0.85, Math.max(H * 0.60, cyp));
+
+    photoPerson(ctx, W * 0.435, footY, 3.05 * k,
+      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 1);
+    photoPerson(ctx, W * 0.545, footY + 4 * k, 3.05 * k,
+      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, -1);
+
+    /* 暖光 + 飘落物（夜里/雪地才加，白天少一点） */
+    var warm = ctx.createRadialGradient(W * 0.5, footY, 40 * k, W * 0.5, footY, 620 * k);
+    warm.addColorStop(0, 'rgba(255,214,150,.16)');
+    warm.addColorStop(1, 'rgba(255,214,150,0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, H * 0.35, W, H * 0.65);
+
+    photoSnowfall(ctx, W, H, (mapId === 'doha' || mapId === 'kl' || mapId === 'wuhan') ? 40 : 90);
+    photoVignette(ctx, W, H);
+
+    /* 左上角票根标签 */
+    var tw = 470 * k, th = 116 * k, tx = 60 * k, ty = 56 * k;
+    ctx.fillStyle = 'rgba(14,18,26,.66)';
+    roundRectPath(ctx, tx, ty, tw, th, 14 * k); ctx.fill();
+    ctx.fillStyle = (d.ticket && d.ticket.color) || '#f0c040';
+    ctx.fillRect(tx, ty + 18 * k, 7 * k, th - 36 * k);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = 'bold ' + (38 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText(d.name, tx + 26 * k, ty + 54 * k);
+    ctx.fillStyle = 'rgba(244,234,216,.86)';
+    ctx.font = (20 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText(d.sub, tx + 26 * k, ty + 86 * k);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(244,234,216,.6)';
+    ctx.font = (17 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText('No.' + ((d.ticket && d.ticket.no) || '00'), tx + tw - 22 * k, ty + 40 * k);
+
+    /* 底部一行 */
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(12,16,24,.55)';
+    roundRectPath(ctx, W / 2 - 430 * k, H - 108 * k, 860 * k, 66 * k, 16 * k); ctx.fill();
+    ctx.fillStyle = '#f4ead8';
+    ctx.font = (24 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText('✦ Charles ♥ Julie · ' + (spotLabel || d.name) + ' · ' + dayStr() + ' ✦', W / 2, H - 64 * k);
+  }
+
+  function renderPhoto(ctx, W, H, opt) {
+    opt = opt || {};
+    if (opt.mapId) renderTravelPhoto(ctx, W, H, opt.mapId, opt.label);
+    else renderTownPhoto(ctx, W, H);
+  }
+
+  /* 固定种子随机：照片里的星、雪、屋顶都按同一个种子铺，
+     这样同一张照片每次导出都是一样的，不会看起来"抖"。 */
+  function seeded(seed) {
+    var v = seed;
+    return function () { v = (v * 1103515245 + 12345) % 2147483648; return v / 2147483648; };
+  }
+
   function roundRectPath(ctx, x, y, w, h, r) {
     ctx.beginPath();
     if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
@@ -1247,6 +1462,17 @@ window.Game = (function () {
         consider('mapEgg', mp.eggPos.x, mp.eggPos.y, 64, got ? '💭 再看看这里' : '看看这里…', mp.eggPos);
       }
       if (mp.view) consider('mapView', mp.view.x, mp.view.y, mp.view.r, mp.view.label, mp.view);
+      /* 双人打卡点：站过去就能拍一张横版纪念照，不占任务进度。
+         观景点范围内一律优先「看风景」——不然在观景台按互动会突然弹相机，
+         想安静看个景都做不到（两处已经拉开距离，重叠只是边角）。 */
+      var viewWins = !!(mp.view && best && best.type === 'mapView');
+      if (mp.spots && !viewWins) {
+        mp.spots.forEach(function (sp, si) {
+          var done = !!(S.spots && S.spots[mp.id + ':' + si]);
+          consider('mapSpot', sp.x, sp.y, sp.r || 86,
+            done ? '📷 再拍一张' : sp.label, { spot: sp, idx: si, mapId: mp.id });
+        });
+      }
       consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, '🚉 回小镇', mp.exitPos);
       if (S.remote.seen && S.remote.inter === hereKey()) {
         var op = S.data && S.data.slots && S.data.slots[S.otherSlot];
@@ -1301,6 +1527,26 @@ window.Game = (function () {
       var mpE = curMap();
       var mmE = mpE && mapMemory(mpE.id);
       if (mmE) collectEgg(mmE);
+    } else if (it.type === 'mapSpot') {
+      /* 双人打卡：先让两个人都挥挥手，再出横版照片。
+         完成状态写进共享存档，另一台设备也会看到「已经拍过」。 */
+      var sp = it.ref;
+      var mpS = curMap();
+      if (!mpS) return;
+      S.self.waveUntil = performance.now() + 1500;
+      try { Snd.sfx('spark'); } catch (e) { }
+      var spotKey = sp.mapId + ':' + sp.idx;
+      if (!(S.spots && S.spots[spotKey])) {
+        mutate(function (w) {
+          w.spots = w.spots || {};
+          if (!w.spots[spotKey]) w.spots[spotKey] = Date.now();
+          return w;
+        }).then(function () { refreshHUD(); }, function () { });
+      }
+      var spotLabel = (sp.spot.label || '').replace(/^📷\s*/, '');
+      setTimeout(function () {
+        openPhoto({ mapId: sp.mapId, label: spotLabel });
+      }, 240);
     } else if (it.type === 'door') {
       var b = World.buildings.filter(function (x) { return x.id === it.ref.id; })[0];
       if (!b) return;
@@ -1388,18 +1634,269 @@ window.Game = (function () {
     return null;
   }
 
-  /* 本阶段：六个目的地全部免费开放（用户要求「目前可以随意进出六张地图」）。
-     以后要做「农作物换随机票」时，把这里换成读 world.travel[id] 即可，
-     面板里的锁定态与线索文案已经写好了。 */
-  var TRAVEL_FREE = true;
-  function travelUnlocked(id) {
-    if (TRAVEL_FREE) return true;
+  /* ---------- 车票 ----------
+   * 每张票的「获得条件」写在 maps.js 的 ticket.cond 里（一个数组，任一条满足即可）。
+   * 判定只用现成的进度字段（回忆数 / 热可可 / 对话过的人 / 手作 / 树阶段 / 去过的城市），
+   * 不另开一套任务系统，也不要求连续登录。
+   * 一旦条件达成，就同步写进共享存档 world.tickets——两台设备都会随即看到「有票了」。
+   */
+  function ticketOf(id) {
+    var d = window.TravelMaps && TravelMaps.get(id);
+    return (d && d.ticket) ? d.ticket : null;
+  }
+  function condMet(c) {
+    if (!c) return false;
+    var w = curWorld() || {};
+    if (c.type === 'free') return true;
+    if (c.type === 'mem') return foundCount() >= (c.n || 1);
+    if (c.type === 'cocoa') return ((w.cocoa && w.cocoa.count) || 0) >= (c.n || 1);
+    if (c.type === 'talk') return Object.keys(S.quest.talked || {}).length >= (c.n || 1);
+    if (c.type === 'craft') return Object.keys(w.crafted || {}).length >= (c.n || 1);
+    if (c.type === 'tree') return treeStage() >= (c.n || 1);
+    if (c.type === 'visit') return Object.keys(w.travel || {}).length >= (c.n || 1);
+    return false;
+  }
+  function condText(c) {
+    if (!c) return '';
+    if (c.type === 'free') return '第一次走到车站就有';
+    if (c.type === 'mem') return '收进 ' + (c.n || 1) + ' 段回忆';
+    if (c.type === 'cocoa') return '在咖啡店喝过一杯热可可';
+    if (c.type === 'talk') return '和镇上 ' + (c.n || 1) + ' 个人说过话';
+    if (c.type === 'craft') return '在工坊做过一件小东西';
+    if (c.type === 'tree') return '小镇的树长到第 ' + (c.n || 1) + ' 阶';
+    if (c.type === 'visit') return '已经去过 ' + (c.n || 1) + ' 个地方';
+    return '';
+  }
+  function ticketCondMet(id) {
+    var tk = ticketOf(id);
+    if (!tk || !tk.cond) return false;
+    for (var i = 0; i < tk.cond.length; i++) if (condMet(tk.cond[i])) return true;
+    return false;
+  }
+  /* 「有票」= 存档里已经记下，或此刻条件就满足（后者会被 syncTickets 落盘） */
+  function hasTicket(id) {
     var w = curWorld();
-    return !!(w && w.travel && w.travel[id]);
+    if (w && w.tickets && w.tickets[id]) return true;
+    return ticketCondMet(id);
+  }
+  function ticketHint(id) {
+    var tk = ticketOf(id);
+    return (tk && tk.hint) || '再在镇子上走走，这张票就会出现。';
   }
   function travelVisited(id) {
     var w = curWorld();
     return !!(w && w.travel && w.travel[id]);
+  }
+  function ticketOwnedCount() {
+    var n = 0;
+    if (!window.TravelMaps) return 0;
+    TravelMaps.list().forEach(function (d) { if (hasTicket(d.id)) n++; });
+    return n;
+  }
+
+  /* 条件满足就补票；已去过的城市也补票（老存档迁移，绝不让玩过的地方退回去锁住） */
+  function syncTickets() {
+    if (!window.TravelMaps) return;
+    var w = curWorld();
+    if (!w) return;
+    var owned = w.tickets || {};
+    var travel = w.travel || {};
+    var need = null;
+    TravelMaps.list().forEach(function (d) {
+      if (owned[d.id]) return;
+      if (travel[d.id] || ticketCondMet(d.id)) {
+        need = need || {};
+        need[d.id] = Date.now();
+      }
+    });
+    if (!need) return;
+    mutate(function (ww) {
+      ww.tickets = ww.tickets || {};
+      for (var k in need) if (!ww.tickets[k]) ww.tickets[k] = need[k];
+      return ww;
+    }).then(function () { refreshHUD(); }, function () { });
+  }
+
+  /* ============================================================
+   * 应急管理（默认隐藏）
+   *   入口：长按顶部标题 5 秒。界面上没有任何按钮，正常流程不会误触。
+   *   口令：4 位数字（默认是圣诞节那天 1225）。前端只存哈希值，不存明文。
+   *   说明：这是「隐藏入口」，不是真正的安全边界——网页是公开的，
+   *   任何人都能改前端代码。真正需要防人的改动，必须走 Firebase 安全规则，
+   *   这里所有写操作都仍然老老实实经过原来的 world 事务与规则校验。
+   * ============================================================ */
+  var ADMIN_HASH = 1786157946;   // djb2('omo1225')
+  var adminOk = false;
+
+  function djb2(str) {
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+    return h;
+  }
+
+  function openAdminGate() {
+    var p = $('#admin-panel');
+    if (!p) return;
+    closeAllPanelsSilent();
+    p.classList.remove('hidden');
+    pause();
+    var wrap = $('#admin-pin-wrap'), body = $('#admin-body');
+    if (adminOk) {
+      wrap.classList.add('hidden');
+      body.classList.remove('hidden');
+      renderAdminStatus();
+    } else {
+      wrap.classList.remove('hidden');
+      body.classList.add('hidden');
+      $('#admin-pin').value = '';
+      $('#admin-pin-err').classList.add('hidden');
+    }
+  }
+
+  function renderAdminStatus() {
+    var el = $('#admin-status');
+    if (!el) return;
+    var lines = [];
+    var owned = [], locked = [];
+    if (window.TravelMaps) {
+      TravelMaps.list().forEach(function (d) { (hasTicket(d.id) ? owned : locked).push(d.name); });
+    }
+    lines.push('<div class="admin-sec"><b>车票</b><span>' + owned.length + ' / 6' +
+      (locked.length ? '　未获得：' + esc(locked.join('、')) : '　全部到手') + '</span></div>');
+
+    var found = foundCount();
+    var all = World.allMemories || [];
+    var miss = all.filter(function (m) { return !S.quest.found[m.id]; }).map(function (m) { return m.title; });
+    lines.push('<div class="admin-sec"><b>回忆</b><span>' + found + ' / ' + all.length +
+      (miss.length ? '　未找到：' + esc(miss.slice(0, 6).join('、')) + (miss.length > 6 ? '…' : '') : '　全部收齐') + '</span></div>');
+
+    var st = treeStage();
+    var stName = ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][Math.min(3, st)] || '小树苗';
+    lines.push('<div class="admin-sec"><b>圣诞树</b><span>第 ' + st + ' 阶 · ' + stName + '</span></div>');
+
+    var canEnd = treeStage() >= 3 && S.quest.step >= 6;
+    lines.push('<div class="admin-sec"><b>结局</b><span>' +
+      (S.ended ? '已经看过结局' : (canEnd ? '可以触发（日期闸门由应急开关放行）' : '还没满足：需要树到第 3 阶且主线走到第 6 步')) +
+      '</span></div>');
+
+    var bak = null;
+    try { bak = JSON.parse(localStorage.getItem('omo_admin_backup') || 'null'); } catch (e) { }
+    lines.push('<div class="admin-sec"><b>备份</b><span>' +
+      (bak && bak.at ? ('上次备份：' + new Date(bak.at).toLocaleString()) : '还没有备份（第一次操作会自动建一个）') +
+      '</span></div>');
+
+    el.innerHTML = lines.join('');
+  }
+
+  function backupWorld() {
+    try {
+      var w = curWorld() || {};
+      localStorage.setItem('omo_admin_backup', JSON.stringify({ at: Date.now(), world: w }));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  var ADMIN_LABEL = {
+    tickets: '补齐全部车票',
+    memories: '补齐全部回忆',
+    tree: '直接把树点亮到最终阶段',
+    ending: '立刻开启最终结局',
+    restore: '恢复上次备份'
+  };
+
+  function adminDo(kind) {
+    var label = ADMIN_LABEL[kind] || kind;
+    if (!window.confirm('确定要「' + label + '」吗？\n\n操作前会先备份当前进度，出问题可以从这里恢复。')) return;
+    if (!backupWorld()) toast('⚠️ 备份没写进本机，仍然继续。');
+
+    if (kind === 'tickets') {
+      mutate(function (w) {
+        w.tickets = w.tickets || {};
+        TravelMaps.list().forEach(function (d) { if (!w.tickets[d.id]) w.tickets[d.id] = Date.now(); });
+        return w;
+      }).then(function () { renderAdminStatus(); toast('🎫 六张车票都补上了'); });
+    } else if (kind === 'memories') {
+      mutate(function (w) {
+        w.quest = w.quest || {};
+        w.quest.found = w.quest.found || {};
+        (World.allMemories || []).forEach(function (m) { if (!w.quest.found[m.id]) w.quest.found[m.id] = Date.now(); });
+        if ((w.quest.step || 0) < 4) w.quest.step = 4;
+        return w;
+      }).then(function () { renderAdminStatus(); toast('💭 回忆册补齐了'); });
+    } else if (kind === 'tree') {
+      mutate(function (w) { w.treeStage = 3; return w; })
+        .then(function () { renderAdminStatus(); toast('🎄 树已经点亮到最后阶段'); });
+    } else if (kind === 'ending') {
+      S.adminEnding = true;
+      mutate(function (w) {
+        w.treeStage = 3;
+        w.quest = w.quest || {};
+        if ((w.quest.step || 0) < 6) w.quest.step = 6;
+        w.ended = false;
+        return w;
+      }).then(function () {
+        renderAdminStatus();
+        closeAllPanelsSilent();
+        S.paused = false;
+        S.endHintShown = true;
+        setTimeout(function () { if (!S.ending) startEnding(); }, 260);
+        toast('🎁 结局开始了');
+      });
+    } else if (kind === 'restore') {
+      var raw = null;
+      try { raw = JSON.parse(localStorage.getItem('omo_admin_backup') || 'null'); } catch (e) { }
+      if (!raw || !raw.world) { toast('还没有可恢复的备份'); return; }
+      if (!window.confirm('恢复会覆盖当前进度（' + new Date(raw.at).toLocaleString() + ' 的备份）。确定？')) return;
+      mutate(function () { return raw.world; }).then(function () {
+        renderAdminStatus();
+        toast('已恢复备份');
+      });
+    }
+  }
+
+  function bindAdmin() {
+    var brand = document.querySelector('#topbar .brand');
+    if (brand && !brand.dataset.adminBound) {
+      brand.dataset.adminBound = '1';
+      var timer = null, moved = false;
+      var start = function () {
+        moved = false;
+        timer = setTimeout(function () {
+          timer = null;
+          if (!moved) openAdminGate();
+        }, 5000);
+      };
+      var stop = function () { if (timer) { clearTimeout(timer); timer = null; } };
+      brand.addEventListener('pointerdown', start);
+      brand.addEventListener('pointerup', stop);
+      brand.addEventListener('pointercancel', stop);
+      brand.addEventListener('pointerleave', stop);
+      brand.addEventListener('pointermove', function () { moved = true; });
+    }
+    var okBtn = $('#admin-pin-ok');
+    if (okBtn && !okBtn.dataset.bound) {
+      okBtn.dataset.bound = '1';
+      okBtn.addEventListener('click', function () {
+        var v = ($('#admin-pin').value || '').trim();
+        if (djb2('omo' + v) === ADMIN_HASH) {
+          adminOk = true;
+          $('#admin-pin-wrap').classList.add('hidden');
+          $('#admin-body').classList.remove('hidden');
+          renderAdminStatus();
+        } else {
+          $('#admin-pin-err').classList.remove('hidden');
+        }
+      });
+      $('#admin-pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') okBtn.click(); });
+    }
+    var ab = document.querySelectorAll('[data-admin]');
+    for (var i = 0; i < ab.length; i++) {
+      if (ab[i].dataset.bound) continue;
+      ab[i].dataset.bound = '1';
+      ab[i].addEventListener('click', function () { adminDo(this.getAttribute('data-admin')); });
+    }
+    var ac = $('#admin-close');
+    if (ac && !ac.dataset.bound) { ac.dataset.bound = '1'; ac.addEventListener('click', function () { closeAllPanels(); }); }
   }
 
   function openStationPanel() {
@@ -1407,57 +1904,100 @@ window.Game = (function () {
     if (!list || !window.TravelMaps) return;
     list.innerHTML = '';
     TravelMaps.list().forEach(function (d) {
-      var unlocked = travelUnlocked(d.id);
+      var owned = hasTicket(d.id);
       var visited = travelVisited(d.id);
       var mm = mapMemory(d.id);
       var got = !!(mm && S.quest.found[mm.id]);
 
       var card = document.createElement('button');
-      card.className = 'station-card' + (unlocked ? '' : ' locked');
+      card.className = 'station-card' + (owned ? '' : ' locked');
       card.type = 'button';
       card.setAttribute('data-map', d.id);
 
+      /* 卡片上半就是这张票本身：有票是彩色，没票是盖了章的灰票 */
       var cv = document.createElement('canvas');
-      cv.className = 'station-thumb';
-      cv.width = 300; cv.height = 200;
+      cv.className = 'station-ticket';
+      cv.width = 320; cv.height = 150;
       card.appendChild(cv);
-      try { TravelMaps.thumb(d.id, cv); } catch (e) { }
+      try { TravelMaps.ticket(d.id, cv, owned); } catch (e) { }
 
       var body = document.createElement('div');
       body.className = 'station-card-body';
       body.innerHTML =
         '<b>' + esc(d.name) + '</b>' +
         '<span class="station-sub">' + esc(d.sub) + '</span>' +
-        '<p>' + esc(unlocked ? d.card : '这条线还没有票。先在镇子上忙一阵子吧。') + '</p>' +
+        '<p>' + esc(owned ? d.card : ticketHint(d.id)) + '</p>' +
         '<em class="station-state">' +
-        (!unlocked ? '🔒 还没票' : (visited ? '✓ 去过了' : '🚉 随时可以走')) +
+        (!owned ? '🔒 还没有这张票' : (visited ? '✓ 去过了' : '🎫 有票 · 随时可以走')) +
         (got ? ' · 💭 找到了那里的东西' : '') +
         '</em>';
       card.appendChild(body);
 
-      if (unlocked) {
+      if (owned) {
         card.addEventListener('click', function () { enterMap(d.id); });
       } else {
         card.addEventListener('click', function () {
-          toast('🚉 这趟车还没有票 —— 攒点农作物，之后能换到随机的一张。', 3200);
+          toast('🎫 ' + ticketHint(d.id), 3400);
         });
       }
       list.appendChild(card);
     });
+
+    var n = ticketOwnedCount();
+    var sub = $('#station-sub');
+    if (sub) sub.textContent = '车票 ' + n + ' / 6';
     var note = $('#station-note');
     if (note) {
-      note.textContent = TRAVEL_FREE
-        ? '今天六个方向都发车。选一个地方，和 Julie 一起过去走走——那里都留下过一件小东西。'
-        : '有票的方向才能上车。到了以后，别忘了找找那里留下的一件小东西。';
+      note.textContent = n >= 6
+        ? '六张票都到手了。想去哪儿，就挑一张。'
+        : '有票的方向才能上车。没票的那几张，先把小镇上的日子过得再热闹一点。';
     }
     $('#station-panel').classList.remove('hidden');
+    pause();
+  }
+
+  /* ---------- 车票册 ---------- */
+  function openTicketBook() {
+    var list = $('#ticket-list');
+    if (!list || !window.TravelMaps) return;
+    list.innerHTML = '';
+    TravelMaps.list().forEach(function (d) {
+      var owned = hasTicket(d.id);
+      var row = document.createElement('div');
+      row.className = 'ticket-row' + (owned ? '' : ' locked');
+
+      var cv = document.createElement('canvas');
+      cv.className = 'ticket-canvas';
+      cv.width = 320; cv.height = 150;
+      row.appendChild(cv);
+      try { TravelMaps.ticket(d.id, cv, owned); } catch (e) { }
+
+      var info = document.createElement('div');
+      info.className = 'ticket-info';
+      var conds = (d.ticket && d.ticket.cond || []).map(condText).filter(Boolean);
+      info.innerHTML =
+        '<b>' + esc(d.name) + '</b>' +
+        '<span class="ticket-sub">' + esc(d.sub) + '</span>' +
+        '<span class="ticket-state">' +
+        (owned ? '🎫 已获得' + (travelVisited(d.id) ? ' · 去过了' : '') : '🔒 未获得') +
+        '</span>' +
+        (owned ? '' : '<span class="ticket-cond">' + esc(conds.join(' 或 ') || '再走走就会遇到') + '</span>');
+      row.appendChild(info);
+      list.appendChild(row);
+    });
+    var n = ticketOwnedCount();
+    $('#ticket-count').textContent = n + ' / 6';
+    $('#ticket-note').textContent = n >= 6
+      ? '集齐了。六张票、六个地方，都去过一遍。'
+      : '有票才能上车。每张票都只差一件小事——看看下面写的那行字。';
+    $('#ticket-panel').classList.remove('hidden');
     pause();
   }
 
   function enterMap(id) {
     var d = window.TravelMaps && TravelMaps.get(id);
     if (!d) return;
-    if (!travelUnlocked(id)) { toast('🚉 这条线还没有票。'); return; }
+    if (!hasTicket(id)) { toast('🎫 ' + ticketHint(id), 3400); return; }
     closeAllPanels();          // 顺手解除暂停，否则上车后走不动
     // 记住小镇上的位置，回来时站回原处
     S.mapReturn = { x: S.self.x, y: S.self.y, dir: S.self.dir };
@@ -1542,7 +2082,7 @@ window.Game = (function () {
   /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
   var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
     '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
-    '#station-panel'];
+    '#station-panel', '#ticket-panel', '#admin-panel'];
 
   function closeAllPanels() {
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
@@ -1691,6 +2231,26 @@ window.Game = (function () {
   }
 
   /* ---------- 回忆册 ---------- */
+  /* 已打卡的合影点：S.spots 的键是 "地图id:序号"，这里翻译成能直接用的对象 */
+  function spotList() {
+    var out = [];
+    var spots = S.spots || {};
+    Object.keys(spots).forEach(function (key) {
+      var p = key.split(':');
+      var d = window.TravelMaps && TravelMaps.get(p[0]);
+      if (!d) return;
+      var idx = parseInt(p[1], 10) || 0;
+      var sp = d.spots && d.spots[idx];
+      out.push({
+        mapId: d.id, mapName: d.name, idx: idx,
+        label: (sp && sp.label) ? String(sp.label).replace(/^📷\s*/, '') : '在这里合影',
+        at: spots[key]
+      });
+    });
+    out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+    return out;
+  }
+
   /* v3.7：只列已找到的回忆。
      - 以前把 16 条全列出来、还写「待发现 · i/16」，等于把总数和进度都摊开了；
      - 现在没有总数的概念：找到一段，册子里才多一页；没找到时只有一句提示。 */
@@ -1703,7 +2263,7 @@ window.Game = (function () {
        加上六张旅行地图里各藏的一段（它们不在 World.eggs 里）。 */
     var all = World.allMemories || World.eggs;
     var foundList = all.filter(function (m) { return !!found[m.id]; });
-    if (!foundList.length) {
+    if (!foundList.length && !spotList().length) {
       var empty = document.createElement('div');
       empty.className = 'book-empty';
       empty.innerHTML = '<b>册子还是空的</b><p>照片和明信片会散落在小镇各处——' +
@@ -1729,8 +2289,37 @@ window.Game = (function () {
       div.appendChild(info);
       list.appendChild(div);
     });
+
+    /* v4.1 旅行合影：六张地图的打卡点拍过的照片都收在这里。
+       不给每张单独存图片（一张 1080P 就是几百 KB，双人同步会爆），
+       只记「哪张地图的第几个点拍过」，点开时用同一套固定构图重画一遍。 */
+    var sps = spotList();
+    if (sps.length) {
+      var head = document.createElement('div');
+      head.className = 'book-sec';
+      head.textContent = '📷 旅行合影';
+      list.appendChild(head);
+      sps.forEach(function (sp) {
+        var div2 = document.createElement('div');
+        div2.className = 'book-item';
+        var cv2 = document.createElement('canvas');
+        cv2.width = 320; cv2.height = 180;
+        try { renderTravelPhoto(cv2.getContext('2d'), 320, 180, sp.mapId, sp.label); } catch (e) { }
+        cv2.addEventListener('click', function () { openPhoto({ mapId: sp.mapId, label: sp.label }); });
+        div2.appendChild(cv2);
+        var info2 = document.createElement('div');
+        info2.className = 'book-info';
+        info2.innerHTML = '<b>' + esc(sp.mapName) + ' · 合影</b><span>' + esc(sp.label) + '</span>' +
+          '<p>在这个位置一起站了一会儿，就顺手拍下来了。</p>';
+        div2.appendChild(info2);
+        list.appendChild(div2);
+      });
+    }
+
     var cnt = $('#book-count');
-    if (cnt) cnt.textContent = foundList.length ? ('已收录 ' + foundList.length + ' 段') : '';
+    if (cnt) cnt.textContent = (foundList.length || sps.length)
+      ? ('已收录 ' + foundList.length + ' 段' + (sps.length ? ' · 合影 ' + sps.length + ' 张' : ''))
+      : '';
     $('#book-panel').classList.remove('hidden');
     pause();
   }
@@ -1832,6 +2421,11 @@ window.Game = (function () {
         if (vw > 0 && vh > 0) ctx.drawImage(bgi, vx, vy, vw, vh, vx, vy, vw, vh);
       }
       if (typeof md.anim === 'function') { ctx.save(); md.anim(ctx, ts); ctx.restore(); }
+      /* v4.1 环境细节的动态部分（草浪 / 浮尘 / 灯光呼吸 / 水花），
+         只在人物之前薄薄叠一层，不参与碰撞，也不吃帧率。 */
+      if (window.TravelMaps && TravelMaps.animExtra) {
+        try { ctx.save(); TravelMaps.animExtra(md.id, ctx, ts); ctx.restore(); } catch (e) { }
+      }
 
       /* 那段回忆的「小纸片」就压在那块地上——不发光、不浮动，走近了才有一行小字 */
       var memObj = mapMemory(md.id);
@@ -2097,6 +2691,8 @@ window.Game = (function () {
       x: S.self.x, y: S.self.y, dir: S.self.dir, frame: S.self.frame,
       dt: S.dt, t: S.simT, paused: !!S.paused, inter: S.interId || 0,
       map: S.mapId || null, here: hereKey(), photo: !!S.photo, ending: !!S.ending,
+      tickets: ticketOwnedCount(), spots: Object.keys(S.spots || {}).length,
+      stage: treeStage(),
       joy: { dx: S.joy.dx, dy: S.joy.dy, mag: S.joy.mag, active: S.joy.active },
       view: { w: S.view.w, h: S.view.h }, dpr: S.dpr,
       cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot,
@@ -2120,9 +2716,37 @@ window.Game = (function () {
     doInteract();
     return S.curInteract ? S.curInteract.type : null;
   }
+  /* 调试口：直接进某间屋子（只为了截图验收，不改存档、不触发奖励之外的行为） */
+  function devIndoor(id) {
+    if (!S.dev) return false;
+    if (!id) { leaveIndoor(); return true; }
+    enterIndoor(id); return true;
+  }
+  /* 调试口：把镜头挪到世界某点，方便截树 / 截建筑 */
+  function devLook(wx, wy) {
+    if (!S.dev) return false;
+    S.cam.x = wx - S.view.w / zoomNow() / 2;
+    S.cam.y = wy - S.view.h / zoomNow() / 2;
+    return true;
+  }
 
   return {
     enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave,
-    devEnterMap: devEnterMap, devStation: devStation, devInteract: devInteract
+    devEnterMap: devEnterMap, devStation: devStation, devInteract: devInteract,
+    devIndoor: devIndoor, devLook: devLook,
+    /* v4.1 给验收脚本用的口子（只在 ?dev=1 时有意义，但本身不改变游戏行为） */
+    devTicketBook: function () { openTicketBook(); },
+    devBook: function () { openBook(); },
+    devAdmin: function () { openAdminGate(); },
+    devAdminUnlock: function (pin) { return djb2('omo' + (pin || '1225')) === ADMIN_HASH; },
+    devAdminAct: function (k) { adminDo(k); },
+    devPhoto: function (opt) { openPhoto(opt); },
+    devPhotoSize: function () { var cv = $('#photo-canvas'); return cv ? { w: cv.width, h: cv.height } : null; },
+    devTickets: function () {
+      var out = {};
+      if (window.TravelMaps) TravelMaps.list().forEach(function (d) { out[d.id] = hasTicket(d.id); });
+      return out;
+    },
+    devSpots: function () { return S.spots || {}; }
   };
 })();

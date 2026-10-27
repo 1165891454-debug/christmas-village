@@ -279,7 +279,53 @@
           <div id="station-list" class="station-list"></div>
           <p id="station-note" class="muted small-note">选一个方向，和 Julie 一起过去看看。到了以后，找找那里留下的一件小东西。</p>
         </div>
-        <div class="panel-actions"><button id="station-close" class="btn ghost small">留在小镇</button></div>
+        <div class="panel-actions">
+          <button id="station-tickets" class="btn ghost small">🎫 车票册</button>
+          <button id="station-close" class="btn ghost small">留在小镇</button>
+        </div>
+      </div>
+
+      <!-- 车票收藏册 -->
+      <div id="ticket-panel" class="panel ticket-panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🎫 车票册 <span id="ticket-count" class="panel-sub"></span></div>
+          <button class="panel-x" data-close="ticket-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <p class="muted small-note" id="ticket-note">六张票，六条线。拿到一张，就能去一个地方。</p>
+          <div id="ticket-list" class="ticket-list"></div>
+        </div>
+        <div class="panel-actions"><button id="ticket-close" class="btn ghost small">合上票册</button></div>
+      </div>
+
+      <!-- 应急管理（默认隐藏：长按顶部标题 5 秒才出现） -->
+      <div id="admin-panel" class="panel admin-panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🧰 应急管理 <span class="panel-sub">仅自己可见 · 改动会同步到两台设备</span></div>
+          <button class="panel-x" data-close="admin-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <div id="admin-pin-wrap">
+            <p class="muted small-note">输入 4 位口令。默认是圣诞节的日子。</p>
+            <div class="admin-pin-row">
+              <input id="admin-pin" class="admin-pin" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off" />
+              <button id="admin-pin-ok" class="btn primary small">进入</button>
+            </div>
+            <p id="admin-pin-err" class="admin-err hidden">口令不对。</p>
+          </div>
+          <div id="admin-body" class="admin-body hidden">
+            <div id="admin-status" class="admin-status"></div>
+            <div class="admin-actions">
+              <button class="btn ghost small" data-admin="tickets">补齐全部车票</button>
+              <button class="btn ghost small" data-admin="memories">补齐全部回忆</button>
+              <button class="btn ghost small" data-admin="tree">直接点亮最终的树</button>
+              <button class="btn primary small" data-admin="ending">开启最终结局</button>
+              <button class="btn ghost small" data-admin="restore">恢复上次备份</button>
+            </div>
+            <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。</p>
+          </div>
+        </div>
+        <div class="panel-actions"><button id="admin-close" class="btn ghost small">关闭</button></div>
       </div>
 
       <!-- 旅行回忆册 -->

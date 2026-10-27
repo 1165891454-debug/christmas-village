@@ -491,6 +491,13 @@ window.TravelMaps = (function () {
       ]
     },
     eggPos: { x: 1160, y: 862 },
+    ticket: { no: '01', code: 'SRM', color: '#2f7fb8', ink: '#0b2740', paper: '#e8f3fa',
+      cond: [{ type: 'free' }],
+      hint: '走到车站，第一张票就在你手上。' },
+    spots: [
+      { x: 860, y: 1030, r: 86, label: '📷 在栈道上合影' },
+      { x: 700, y: 1012, r: 86, label: '📷 在湖边合影' }
+    ],
     obstacles: [
       { x: 976, y: 752, w: 366, h: 116 },
       { x: 300, y: 946, w: 132, h: 74 },
@@ -775,6 +782,13 @@ window.TravelMaps = (function () {
       ]
     },
     eggPos: { x: 352, y: 884 },
+    ticket: { no: '02', code: 'TBT', color: '#b8452f', ink: '#3a1410', paper: '#f7ece4',
+      cond: [{ type: 'mem', n: 2 }, { type: 'talk', n: 2 }],
+      hint: '再收两段回忆，或者和镇上的两个人多说说话。' },
+    spots: [
+      { x: 700, y: 950, r: 86, label: '📷 在经幡前合影' },
+      { x: 878, y: 1002, r: 86, label: '📷 在山路转弯处合影' }
+    ],
     obstacles: [
       { x: 1150, y: 660, w: 232, h: 130 },
       { x: 286, y: 872, w: 130, h: 62 },
@@ -1034,6 +1048,13 @@ window.TravelMaps = (function () {
       ]
     },
     eggPos: { x: 1124, y: 908 },
+    ticket: { no: '03', code: 'DOH', color: '#c08b4a', ink: '#3a2410', paper: '#faf1e2',
+      cond: [{ type: 'cocoa', n: 1 }, { type: 'mem', n: 4 }],
+      hint: '去咖啡店喝一杯热可可，或者把回忆册再收厚一点。' },
+    spots: [
+      { x: 962, y: 962, r: 86, label: '📷 在海滨步道合影' },
+      { x: 1078, y: 992, r: 86, label: '📷 在棕榈树下合影' }
+    ],
     obstacles: [
       { x: 1096, y: 906, w: 96, h: 40 },
       { x: 300, y: 830, w: 26, h: 60 },
@@ -1283,6 +1304,13 @@ window.TravelMaps = (function () {
       ]
     },
     eggPos: { x: 656, y: 962 },
+    ticket: { no: '04', code: 'WUH', color: '#2c4a72', ink: '#0d1c30', paper: '#e9edf5',
+      cond: [{ type: 'mem', n: 5 }, { type: 'craft', n: 1 }],
+      hint: '回忆册再厚一点，或者在工坊里做一件小东西。' },
+    spots: [
+      { x: 762, y: 1020, r: 86, label: '📷 在桥景前合影' },
+      { x: 556, y: 1022, r: 86, label: '📷 在江边长椅旁合影' }
+    ],
     obstacles: [
       { x: 612, y: 960, w: 96, h: 40 },
       { x: 200, y: 962, w: 70, h: 40 },
@@ -1529,6 +1557,13 @@ window.TravelMaps = (function () {
       ]
     },
     eggPos: { x: 1058, y: 938 },
+    ticket: { no: '05', code: 'WHI', color: '#b07a3c', ink: '#3a2610', paper: '#f9efdd',
+      cond: [{ type: 'mem', n: 7 }, { type: 'tree', n: 2 }],
+      hint: '把回忆册攒到七段，或者让小镇的大树再长一阶。' },
+    spots: [
+      { x: 520, y: 992, r: 86, label: '📷 在越野车旁合影' },
+      { x: 1310, y: 1092, r: 86, label: '📷 在沙丘上合影' }
+    ],
     obstacles: [
       { x: 408, y: 884, w: 232, h: 74 },   // 越野车（车头朝湖，挡着别穿过去）
       { x: 696, y: 900, w: 16, h: 74 }
@@ -1785,6 +1820,13 @@ window.TravelMaps = (function () {
       ]
     },
     eggPos: { x: 616, y: 962 },
+    ticket: { no: '06', code: 'KUL', color: '#2f6b52', ink: '#0c2618', paper: '#eaf3ec',
+      cond: [{ type: 'mem', n: 9 }, { type: 'visit', n: 3 }],
+      hint: '收满九段回忆，或者先坐三次车去别的地方。' },
+    spots: [
+      { x: 1100, y: 980, r: 86, label: '📷 在双子塔前合影' },
+      { x: 432, y: 1022, r: 86, label: '📷 在公园喷泉旁合影' }
+    ],
     obstacles: [
       { x: 570, y: 960, w: 96, h: 40 },
       { x: 1352, y: 906, w: 26, h: 60 },
@@ -2079,6 +2121,376 @@ window.TravelMaps = (function () {
    * ============================================================ */
   var cache = {}, cacheOrder = [];
 
+  /* ============================================================
+   * v4.1 地图环境细节
+   *   只做「加法」：在原有 paint 画完之后，往地面层补草丛、石头、花、
+   *   长椅、栅栏、路灯、旅行小物——不重画任何已有地标与插画。
+   *   全部用固定种子撒点，并避开出生点/出口/回忆点/观景点/打卡点，
+   *   保证不挡人、不压互动。
+   * ============================================================ */
+  function avoidHit(x, y, list, pad) {
+    if (!list) return false;
+    for (var i = 0; i < list.length; i++) {
+      var dx = x - list[i][0], dy = y - list[i][1];
+      if (dx * dx + dy * dy < pad * pad) return true;
+    }
+    return false;
+  }
+
+  function tuft(g, x, y, s, col) {
+    g.strokeStyle = col;
+    g.lineWidth = Math.max(1, s * 0.34);
+    for (var i = -2; i <= 2; i++) {
+      g.beginPath();
+      g.moveTo(x + i * s * 0.5, y);
+      g.quadraticCurveTo(x + i * s * 0.9, y - s * 1.1, x + i * s * 1.5, y - s * 1.9);
+      g.stroke();
+    }
+  }
+
+  function pebble(g, x, y, s, col, hi) {
+    g.fillStyle = col;
+    g.beginPath(); g.ellipse(x, y, s, s * 0.62, 0, 0, 7); g.fill();
+    g.fillStyle = hi || 'rgba(255,255,255,.32)';
+    g.beginPath(); g.ellipse(x - s * 0.24, y - s * 0.22, s * 0.45, s * 0.24, 0, 0, 7); g.fill();
+  }
+
+  function flowerDot(g, x, y, s, col) {
+    g.strokeStyle = 'rgba(72,112,70,.65)'; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - s * 2.4); g.stroke();
+    g.fillStyle = col;
+    for (var i = 0; i < 5; i++) {
+      var a = -Math.PI / 2 + i * Math.PI * 2 / 5;
+      g.beginPath();
+      g.arc(x + Math.cos(a) * s * 0.8, y - s * 2.4 + Math.sin(a) * s * 0.8, s * 0.55, 0, 7);
+      g.fill();
+    }
+    g.fillStyle = '#f7d774';
+    g.beginPath(); g.arc(x, y - s * 2.4, s * 0.42, 0, 7); g.fill();
+  }
+
+  /* 长椅：木条 + 铁腿 + 一点影子 */
+  function bench(g, x, y, s, wood, iron) {
+    g.fillStyle = 'rgba(30,40,60,.20)';
+    g.beginPath(); g.ellipse(x, y + 4 * s, 34 * s, 7 * s, 0, 0, 7); g.fill();
+    g.fillStyle = wood || '#a8763f';
+    for (var i = 0; i < 3; i++) g.fillRect(x - 32 * s, y - 10 * s + i * 7 * s, 64 * s, 5 * s);
+    g.fillRect(x - 32 * s, y - 26 * s, 64 * s, 5 * s);
+    g.fillRect(x - 32 * s, y - 20 * s, 64 * s, 4 * s);
+    g.fillStyle = iron || '#4a4238';
+    g.fillRect(x - 28 * s, y - 8 * s, 5 * s, 16 * s);
+    g.fillRect(x + 23 * s, y - 8 * s, 5 * s, 16 * s);
+    g.fillRect(x - 30 * s, y - 26 * s, 4 * s, 20 * s);
+    g.fillRect(x + 26 * s, y - 26 * s, 4 * s, 20 * s);
+  }
+
+  /* 木栅栏：立柱 + 两道横杆 */
+  function fence(g, x0, x1, y, s, col) {
+    var step = 26 * s;
+    g.strokeStyle = col || 'rgba(122,86,54,.85)';
+    g.lineWidth = 4 * s;
+    g.beginPath(); g.moveTo(x0, y - 16 * s); g.lineTo(x1, y - 16 * s); g.stroke();
+    g.lineWidth = 3 * s;
+    g.beginPath(); g.moveTo(x0, y - 30 * s); g.lineTo(x1, y - 30 * s); g.stroke();
+    g.lineWidth = 5 * s;
+    for (var x = x0; x <= x1; x += step) {
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - 36 * s); g.stroke();
+    }
+  }
+
+  /* 路灯：柱 + 灯罩 + 一圈暖光（夜里用） */
+  function lampPost(g, x, y, s, col, glowCol, a) {
+    g.fillStyle = col || '#3a3f4a';
+    g.fillRect(x - 2.2 * s, y - 62 * s, 4.4 * s, 62 * s);
+    g.fillRect(x - 7 * s, y - 4 * s, 14 * s, 4 * s);
+    g.beginPath();
+    g.moveTo(x - 9 * s, y - 62 * s); g.lineTo(x + 9 * s, y - 62 * s);
+    g.lineTo(x + 6 * s, y - 74 * s); g.lineTo(x - 6 * s, y - 74 * s);
+    g.closePath();
+    g.fillStyle = '#2e333d'; g.fill();
+    g.fillStyle = '#ffe2a4';
+    g.fillRect(x - 5 * s, y - 72 * s, 10 * s, 8 * s);
+    var rg = g.createRadialGradient(x, y - 68 * s, 2 * s, x, y - 68 * s, 46 * s);
+    rg.addColorStop(0, glowCol || 'rgba(255,214,140,.42)');
+    rg.addColorStop(1, 'rgba(255,214,140,0)');
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(x, y - 68 * s, 46 * s, 0, 7); g.fill();
+  }
+
+  var EXTRA = {
+    /* ---------------- 赛里木湖 ---------------- */
+    sayram: function (g) {
+      var av = [[360, 1040], [196, 1074], [1160, 862], [1036, 916], [1030, 952], [700, 1012]];
+      var rnd = seeded(3001);
+      /* 湖岸一带的碎石（贴着岸线，让水陆交界咬得住） */
+      for (var i = 0; i < 26; i++) {
+        var x = 60 + rnd() * 1380;
+        var y = 880 + rnd() * 40;
+        if (avoidHit(x, y, av, 60)) continue;
+        pebble(g, x, y, 3 + rnd() * 6, 'rgba(150,146,134,.55)', 'rgba(255,255,255,.35)');
+      }
+      /* 草地上的野花和草丛 */
+      for (var j = 0; j < 70; j++) {
+        var fx = 40 + rnd() * 1420, fy = 930 + rnd() * 210;
+        if (avoidHit(fx, fy, av, 54)) continue;
+        if (rnd() > 0.72) flowerDot(g, fx, fy, 2.4 + rnd() * 1.4, rnd() > 0.5 ? '#f4f0e0' : '#f2d06a');
+        else tuft(g, fx, fy, 3 + rnd() * 3, 'rgba(96,132,78,.62)');
+      }
+      /* 观景台旁边的一张长椅，正对湖 */
+      bench(g, 820, 1004, 1, '#b98a52', '#4a4a52');
+      /* 栈道外侧的一段矮栅栏 */
+      fence(g, 950, 1160, 980, 0.85, 'rgba(126,90,58,.8)');
+      /* 一顶远处的毡房炊烟（极淡，只做气氛） */
+      g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(300, 838);
+      g.quadraticCurveTo(292, 812, 306, 792);
+      g.stroke();
+    },
+
+    /* ---------------- 西藏 ---------------- */
+    tibet: function (g) {
+      var av = [[700, 1030], [196, 1092], [352, 884], [512, 902], [512, 942], [878, 1002]];
+      var rnd = seeded(3002);
+      /* 山谷里的碎石堆 */
+      for (var i = 0; i < 34; i++) {
+        var x = 40 + rnd() * 1420, y = 900 + rnd() * 200;
+        if (avoidHit(x, y, av, 56)) continue;
+        pebble(g, x, y, 4 + rnd() * 9, 'rgba(132,124,110,.5)', 'rgba(255,255,255,.28)');
+      }
+      /* 高山草甸：矮丛，颜色偏冷 */
+      for (var j = 0; j < 80; j++) {
+        var fx = 30 + rnd() * 1440, fy = 920 + rnd() * 220;
+        if (avoidHit(fx, fy, av, 50)) continue;
+        if (rnd() > 0.86) flowerDot(g, fx, fy, 2.2, '#e8dfc8');
+        else tuft(g, fx, fy, 2.6 + rnd() * 2.6, 'rgba(104,124,86,.55)');
+      }
+      /* 路边一小段玛尼石（三块叠起来的白石） */
+      pebble(g, 620, 964, 15, 'rgba(206,206,198,.85)', 'rgba(255,255,255,.5)');
+      pebble(g, 620, 950, 11, 'rgba(196,196,188,.85)', 'rgba(255,255,255,.45)');
+      pebble(g, 620, 939, 7, 'rgba(216,216,208,.9)', 'rgba(255,255,255,.55)');
+      /* 歇脚的石凳 */
+      bench(g, 780, 1044, 0.9, '#8a7a62', '#5a5348');
+      /* 斜插在坡上的一根经幡杆（细，不抢主体） */
+      g.strokeStyle = '#7a6a52'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(1080, 1010); g.lineTo(1072, 900); g.stroke();
+    },
+
+    /* ---------------- 多哈 ---------------- */
+    doha: function (g) {
+      var av = [[420, 1030], [200, 1094], [1124, 908], [760, 880], [760, 924], [1078, 992]];
+      var rnd = seeded(3003);
+      /* 海滨步道的栏杆（沿步道边缘一排立柱） */
+      g.strokeStyle = 'rgba(226,214,190,.55)';
+      g.lineWidth = 3;
+      g.beginPath(); g.moveTo(60, 984); g.lineTo(520, 968); g.stroke();
+      for (var f = 0; f < 12; f++) {
+        var fx0 = 70 + f * 40;
+        g.fillStyle = 'rgba(226,214,190,.5)';
+        g.fillRect(fx0, 966, 2.6, 20);
+      }
+      /* 棕榈的落叶影 + 沿路的矮灌木 */
+      for (var j = 0; j < 54; j++) {
+        var x = 40 + rnd() * 1420, y = 940 + rnd() * 190;
+        if (avoidHit(x, y, av, 54)) continue;
+        if (rnd() > 0.7) tuft(g, x, y, 3 + rnd() * 2.6, 'rgba(96,122,84,.5)');
+        else pebble(g, x, y, 3 + rnd() * 4, 'rgba(198,178,148,.45)', 'rgba(255,255,255,.3)');
+      }
+      /* 步道灯（暖白，两盏） */
+      lampPost(g, 300, 1000, 0.86, '#3f4450', 'rgba(255,226,164,.34)');
+      lampPost(g, 980, 1010, 0.86, '#3f4450', 'rgba(255,226,164,.34)');
+      /* 面海的木长椅 */
+      bench(g, 560, 1024, 1, '#c8a878', '#4a4a52');
+      /* 沙滩上的遮阳伞影（斜长的一道，暗示时间） */
+      g.fillStyle = 'rgba(60,60,80,.10)';
+      g.beginPath();
+      g.moveTo(1200, 1040); g.lineTo(1330, 1006); g.lineTo(1344, 1026); g.lineTo(1214, 1060);
+      g.closePath(); g.fill();
+    },
+
+    /* ---------------- 武汉 ---------------- */
+    wuhan: function (g) {
+      var av = [[480, 1040], [198, 1096], [656, 962], [940, 900], [940, 952], [556, 1022]];
+      var rnd = seeded(3004);
+      /* 江岸铺地：一排方砖的接缝（很淡，只在近处看得见） */
+      g.strokeStyle = 'rgba(220,226,238,.10)'; g.lineWidth = 1.5;
+      for (var bx = 40; bx < 1460; bx += 74) {
+        g.beginPath(); g.moveTo(bx, 980); g.lineTo(bx - 26, 1200); g.stroke();
+      }
+      for (var by = 1000; by < 1200; by += 46) {
+        g.beginPath(); g.moveTo(0, by); g.lineTo(W, by); g.stroke();
+      }
+      /* 系船柱 + 铁链（江边特征，克制地放一组） */
+      [180, 320, 460].forEach(function (px) {
+        g.fillStyle = '#4a5260';
+        g.fillRect(px, 986, 12, 26);
+        g.beginPath(); g.ellipse(px + 6, 985, 8, 4, 0, 0, 7); g.fill();
+        g.fillStyle = 'rgba(255,255,255,.18)';
+        g.fillRect(px + 2, 988, 3, 20);
+      });
+      g.strokeStyle = 'rgba(70,78,92,.55)'; g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(192, 992);
+      g.quadraticCurveTo(256, 1006, 320, 992);
+      g.quadraticCurveTo(390, 1006, 460, 992);
+      g.stroke();
+      /* 江堤的灯（两盏，冷白偏暖） */
+      lampPost(g, 760, 1030, 0.9, '#3a4250', 'rgba(255,222,170,.3)');
+      lampPost(g, 1240, 1000, 0.9, '#3a4250', 'rgba(255,222,170,.3)');
+      /* 长椅旁的小树池 */
+      for (var t2 = 0; t2 < 40; t2++) {
+        var x = 40 + rnd() * 1400, y = 1010 + rnd() * 160;
+        if (avoidHit(x, y, av, 52)) continue;
+        if (rnd() > 0.55) tuft(g, x, y, 2.6 + rnd() * 2.2, 'rgba(96,118,84,.45)');
+        else pebble(g, x, y, 2.4 + rnd() * 3, 'rgba(160,166,178,.4)', 'rgba(255,255,255,.25)');
+      }
+    },
+
+    /* ---------------- 乌海 ---------------- */
+    wuhai: function (g) {
+      var av = [[420, 1046], [190, 1098], [1058, 938], [1310, 916], [520, 992], [1176, 982]];
+      var rnd = seeded(3005);
+      /* 沙地纹理：细长的风纹 */
+      g.strokeStyle = 'rgba(196,150,102,.22)'; g.lineWidth = 2;
+      for (var i = 0; i < 30; i++) {
+        var x = 20 + rnd() * 1460, y = 960 + rnd() * 220;
+        if (avoidHit(x, y, av, 46)) continue;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.quadraticCurveTo(x + 40 + rnd() * 50, y - 6, x + 90 + rnd() * 70, y + 2);
+        g.stroke();
+      }
+      /* 沙丘上的枯草丛 */
+      for (var j = 0; j < 48; j++) {
+        var fx = 30 + rnd() * 1440, fy = 950 + rnd() * 220;
+        if (avoidHit(fx, fy, av, 50)) continue;
+        tuft(g, fx, fy, 2.6 + rnd() * 2.4, 'rgba(168,142,96,.55)');
+      }
+      /* 湖边竖着的旧木桩（当地人用来拴船的） */
+      [[760, 1010], [790, 1016], [828, 1008]].forEach(function (p, i) {
+        g.fillStyle = 'rgba(30,26,22,.18)';
+        g.beginPath(); g.ellipse(p[0] + 6, p[1] + 4, 10, 4, 0, 0, 7); g.fill();
+        g.fillStyle = i % 2 ? '#7a5a3c' : '#8a6a48';
+        g.fillRect(p[0] - 4, p[1] - 34, 8, 38);
+        g.fillStyle = 'rgba(255,240,214,.25)';
+        g.fillRect(p[0] - 4, p[1] - 34, 2.5, 38);
+      });
+      /* 一辆车的车辙尽头，一个小小的路标（写着「湖」） */
+      g.fillStyle = '#8a6242'; g.fillRect(1122, 1030, 8, 40);
+      g.fillStyle = '#e8d9b8';
+      g.beginPath();
+      g.moveTo(1126, 1034); g.lineTo(1176, 1037); g.lineTo(1168, 1051); g.lineTo(1126, 1049);
+      g.closePath(); g.fill();
+      text(g, '湖', 1148, 1048, 11, '#4a3020');
+    },
+
+    /* ---------------- 吉隆坡 ---------------- */
+    kl: function (g) {
+      var av = [[500, 1046], [200, 1098], [616, 962], [900, 914], [880, 962], [432, 1022]];
+      var rnd = seeded(3006);
+      /* 公园里的热带灌木丛（成团，不是散点） */
+      for (var i = 0; i < 16; i++) {
+        var cx = 60 + rnd() * 1380, cy = 990 + rnd() * 170;
+        if (avoidHit(cx, cy, av, 70)) continue;
+        for (var k = 0; k < 5; k++) {
+          g.fillStyle = k % 2 ? 'rgba(46,92,64,.55)' : 'rgba(58,110,74,.5)';
+          g.beginPath();
+          g.ellipse(cx + (k - 2) * 12, cy - Math.abs(k - 2) * 5, 18, 12, 0, 0, 7);
+          g.fill();
+        }
+      }
+      /* 步道灯（两盏，暖白） */
+      lampPost(g, 520, 1016, 0.88, '#333a3a', 'rgba(255,226,168,.34)');
+      lampPost(g, 1130, 1030, 0.88, '#333a3a', 'rgba(255,226,168,.34)');
+      /* 公园长椅 */
+      bench(g, 700, 1032, 0.95, '#a8804c', '#3f4a44');
+      /* 喷泉边的一圈矮石栏 */
+      g.strokeStyle = 'rgba(226,232,222,.28)'; g.lineWidth = 3;
+      g.beginPath(); g.ellipse(432, 1010, 64, 20, 0, 0, 7); g.stroke();
+      /* 草坪上零星的小花 */
+      for (var j = 0; j < 40; j++) {
+        var fx = 40 + rnd() * 1420, fy = 1000 + rnd() * 170;
+        if (avoidHit(fx, fy, av, 48)) continue;
+        flowerDot(g, fx, fy, 2, rnd() > 0.5 ? '#f6e8a8' : '#f0a0b8');
+      }
+    }
+  };
+
+  /* 动态细节：只在背景之上叠很少几笔，避免 iPhone 掉帧 */
+  var EXTRA_ANIM = {
+    sayram: function (g, t) {
+      /* 草地上被风吹的一小片草浪 */
+      g.strokeStyle = 'rgba(132,168,104,.34)'; g.lineWidth = 1.6;
+      for (var i = 0; i < 26; i++) {
+        var x = 120 + i * 52;
+        var sway = Math.sin(t / 900 + i * 0.6) * 4;
+        g.beginPath();
+        g.moveTo(x, 1080 + (i % 3) * 18);
+        g.quadraticCurveTo(x + sway, 1062, x + sway * 1.6, 1046);
+        g.stroke();
+      }
+    },
+    tibet: function (g, t) {
+      /* 高原风里的一层浮尘 */
+      g.fillStyle = 'rgba(232,226,206,.10)';
+      for (var i = 0; i < 12; i++) {
+        var x = ((t / 60 + i * 130) % 1600) - 50;
+        g.beginPath();
+        g.ellipse(x, 1000 + (i % 4) * 40, 22, 5, 0, 0, 7);
+        g.fill();
+      }
+    },
+    doha: function (g, t) {
+      /* 路灯的呼吸感（很轻，只在灯罩附近） */
+      var a = 0.16 + 0.08 * Math.sin(t / 900);
+      var rg = g.createRadialGradient(300, 926, 2, 300, 926, 40);
+      rg.addColorStop(0, 'rgba(255,226,164,' + a + ')');
+      rg.addColorStop(1, 'rgba(255,226,164,0)');
+      g.fillStyle = rg;
+      g.beginPath(); g.arc(300, 926, 40, 0, 7); g.fill();
+    },
+    wuhan: function (g, t) {
+      /* 江边灯影在水里被拉长、轻轻晃 */
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      for (var i = 0; i < 5; i++) {
+        var x = 220 + i * 210 + Math.sin(t / 1600 + i) * 10;
+        g.fillStyle = 'rgba(255,210,140,.045)';
+        g.beginPath();
+        g.ellipse(x, 800 + i * 22, 30 + Math.sin(t / 1200 + i) * 8, 4, 0, 0, 7);
+        g.fill();
+      }
+      g.restore();
+    },
+    wuhai: function (g, t) {
+      /* 沙面上被风带起来的一层薄沙（只在近处） */
+      g.fillStyle = 'rgba(232,196,148,.09)';
+      for (var i = 0; i < 10; i++) {
+        var x = ((t / 40 + i * 170) % 1700) - 60;
+        g.beginPath();
+        g.ellipse(x, 1090 + (i % 3) * 26, 40, 6, 0, 0, 7);
+        g.fill();
+      }
+    },
+    kl: function (g, t) {
+      /* 喷泉水花：一圈起落的水柱 */
+      ctxSpray(g, 432, 1012, t);
+    }
+  };
+
+  function ctxSpray(g, x, y, t) {
+    g.strokeStyle = 'rgba(216,238,246,.6)'; g.lineWidth = 2;
+    for (var i = 0; i < 6; i++) {
+      var ph = (t / 900 + i / 6) % 1;
+      var h = 26 + Math.sin(ph * Math.PI) * 26;
+      var dx = (i - 2.5) * 7;
+      g.beginPath();
+      g.moveTo(x + dx * 0.4, y);
+      g.quadraticCurveTo(x + dx * 0.8, y - h * 0.7, x + dx, y - h);
+      g.stroke();
+    }
+  }
+
   function paintBg(id) {
     var d = D[id];
     if (!d || typeof document === 'undefined') return null;
@@ -2087,6 +2499,8 @@ window.TravelMaps = (function () {
     var g = c.getContext('2d');
     g.save();
     try { d.paint(g, 'full'); } catch (e) { g.fillStyle = '#2a3350'; g.fillRect(0, 0, d.w, d.h); }
+    /* v4.1 环境细节：草丛/石头/长椅/路灯……叠在地面层，人物仍然画在它上面 */
+    try { if (EXTRA[id]) EXTRA[id](g); } catch (e) { }
     g.restore();
     return c;
   }
@@ -2115,13 +2529,161 @@ window.TravelMaps = (function () {
     g.restore();
   }
 
+  /* ---------- 车票 ----------
+   * 六张票共用同一套版式（纸张 + 顶部色带 + 左侧风景窗 + 右侧副券），
+   * 各张只换颜色、编号和目的地代号——统一里带地方感。
+   * 画到任意 canvas 上：TravelMaps.ticket(id, cv, owned)
+   */
+  var TK_W = 320, TK_H = 150;
+  var tkCache = {};
+
+  function tkRR(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+
+  /* 票面上的小风景窗：把缩略图按正方形裁一块，缓存起来（别为每张票重烘全图） */
+  function tkScene(id) {
+    if (tkCache[id]) return tkCache[id];
+    var d = D[id];
+    if (!d) return null;
+    var cv = document.createElement('canvas');
+    cv.width = 300; cv.height = 200;
+    var g = cv.getContext('2d');
+    g.save();
+    g.scale(300 / d.w, 200 / d.h);
+    try { d.paint(g, 'thumb'); } catch (e) { }
+    g.restore();
+    tkCache[id] = cv;
+    return cv;
+  }
+
+  function drawTicket(g, id, owned) {
+    var d = D[id];
+    if (!d) return;
+    var tk = d.ticket || { color: '#8a7a5a', paper: '#f4ead8', ink: '#2a2118', no: '00', code: '---' };
+    var ink = tk.ink || '#2a2118';
+
+    g.clearRect(0, 0, TK_W, TK_H);
+    g.save();
+
+    /* 纸面 */
+    tkRR(g, 0.5, 0.5, TK_W - 1, TK_H - 1, 10);
+    g.fillStyle = owned ? tk.paper : '#d9d5cc';
+    g.fill();
+    g.save();
+    g.clip();
+
+    /* 一点纸纹（很淡，只在深色纸上看得出层次） */
+    g.fillStyle = 'rgba(255,255,255,.30)';
+    for (var i = 0; i < 26; i++) g.fillRect((i * 47) % TK_W, (i * 29) % TK_H, 26, 1);
+
+    /* 顶部色带 */
+    g.fillStyle = owned ? tk.color : '#9a958c';
+    g.fillRect(0, 0, TK_W, 9);
+    g.fillStyle = 'rgba(255,255,255,.32)';
+    g.fillRect(0, 0, TK_W, 2);
+
+    /* 左侧风景窗 */
+    var sx = 14, sy = 26, sw = 80, sh = 80;
+    tkRR(g, sx, sy, sw, sh, 5);
+    g.save();
+    g.clip();
+    var sc = tkScene(id);
+    if (sc) {
+      g.drawImage(sc, 50, 0, 200, 200, sx, sy, sw, sh);
+    } else {
+      g.fillStyle = tk.color; g.fillRect(sx, sy, sw, sh);
+    }
+    /* 照片压一层暖光，和整体色纸贴得更近 */
+    g.fillStyle = owned ? 'rgba(255,238,205,.12)' : 'rgba(210,206,198,.55)';
+    g.fillRect(sx, sy, sw, sh);
+    g.restore();
+    g.strokeStyle = 'rgba(30,20,10,.28)';
+    g.lineWidth = 1;
+    tkRR(g, sx, sy, sw, sh, 5);
+    g.stroke();
+
+    /* 目的地名字 */
+    text(g, d.name, 108, 56, 21, owned ? ink : '#6c6862', 'left', '700');
+    text(g, d.sub, 108, 75, 10.5, owned ? 'rgba(30,20,10,.62)' : 'rgba(90,88,84,.6)', 'left', '400');
+
+    /* 虚线分隔 */
+    g.strokeStyle = owned ? 'rgba(30,20,10,.28)' : 'rgba(90,88,84,.3)';
+    g.lineWidth = 1;
+    g.setLineDash([4, 3]);
+    g.beginPath(); g.moveTo(108, 86); g.lineTo(240, 86); g.stroke();
+    g.setLineDash([]);
+
+    /* 出发站 + 代号 */
+    text(g, 'OMO RAIL · 圣诞小镇站', 108, 103, 8.5, owned ? 'rgba(30,20,10,.55)' : 'rgba(90,88,84,.55)', 'left', '400');
+    text(g, '→ ' + d.name, 108, 126, 11.5, owned ? tk.color : '#7b776f', 'left', '700');
+
+    /* 右侧副券 */
+    var cx = 254;
+    g.strokeStyle = owned ? 'rgba(30,20,10,.3)' : 'rgba(90,88,84,.3)';
+    g.setLineDash([5, 4]);
+    g.beginPath(); g.moveTo(cx, 14); g.lineTo(cx, TK_H - 14); g.stroke();
+    g.setLineDash([]);
+
+    text(g, 'No.', cx + 34, 34, 8.5, owned ? 'rgba(30,20,10,.5)' : 'rgba(90,88,84,.5)', 'center', '400');
+    text(g, tk.no || '00', cx + 34, 60, 26, owned ? ink : '#7b776f', 'center', '700');
+    text(g, tk.code || '---', cx + 34, 78, 9.5, owned ? tk.color : '#8b8780', 'center', '600');
+
+    /* 打孔 */
+    g.fillStyle = owned ? '#ffffff' : '#efece6';
+    g.beginPath(); g.arc(cx + 34, 102, 6.5, 0, 7); g.fill();
+    g.strokeStyle = owned ? 'rgba(30,20,10,.22)' : 'rgba(90,88,84,.25)';
+    g.lineWidth = 1; g.stroke();
+
+    text(g, 'CHRISTMAS', cx + 34, 124, 6.6, owned ? 'rgba(30,20,10,.45)' : 'rgba(90,88,84,.45)', 'center', '600');
+    text(g, 'LINE', cx + 34, 134, 6.6, owned ? 'rgba(30,20,10,.45)' : 'rgba(90,88,84,.45)', 'center', '600');
+
+    g.restore(); // clip
+
+    /* 边框 */
+    g.strokeStyle = owned ? 'rgba(30,20,10,.30)' : 'rgba(110,106,98,.45)';
+    g.lineWidth = 1.4;
+    tkRR(g, 0.5, 0.5, TK_W - 1, TK_H - 1, 10);
+    g.stroke();
+
+    /* 未获得：斜盖章 */
+    if (!owned) {
+      g.save();
+      g.translate(TK_W / 2 - 6, TK_H / 2 + 8);
+      g.rotate(-0.16);
+      g.strokeStyle = 'rgba(150,72,58,.55)';
+      g.lineWidth = 2;
+      g.strokeRect(-52, -17, 104, 34);
+      text(g, '还没有票', 0, 6, 15, 'rgba(150,72,58,.68)', 'center', '700');
+      g.restore();
+    }
+
+    g.restore();
+  }
+
+  function ticket(id, cv, owned) {
+    if (!cv) return;
+    cv.width = TK_W; cv.height = TK_H;
+    drawTicket(cv.getContext('2d'), id, owned);
+  }
+
   function list() {
     return ORDER.filter(function (id) { return !!D[id]; }).map(function (id) { return D[id]; });
   }
   function get(id) { return D[id] || null; }
 
+  function animExtra(id, g, t) {
+    if (EXTRA_ANIM[id]) { try { EXTRA_ANIM[id](g, t); } catch (e) { } }
+  }
+
   return {
-    get: get, list: list, bg: bg, thumb: thumb,
+    get: get, list: list, bg: bg, thumb: thumb, ticket: ticket, animExtra: animExtra,
     W: W, H: H, has: function (id) { return !!D[id]; }
   };
 })();

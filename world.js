@@ -779,11 +779,21 @@ window.World = (function () {
     { apex: -318, bot: -246, half: 33, tips: 5 }
   ];
 
-  /* 层的外轮廓：两侧上是弧线，底缘是一排下垂的枝尖 */
-  function firTierPath(ctx, cx, apexY, botY, halfW, tips) {
+  /* 固定种子的伪随机（0~1）：同一个 seed 每次结果一样，
+     这样枝尖的不规则形状在「实时画面 / 合照 / 缩略图」里永远一致，不会闪烁。 */
+  function jag(seed, j) {
+    var s = Math.sin(seed * 12.9898 + j * 78.233) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
+  /* 层的外轮廓：两侧上是弧线，底缘是一排下垂的枝尖。
+     seed 传了才加不规则（只有大圣诞树用），其它小树保持原来的规整形状。 */
+  function firTierPath(ctx, cx, apexY, botY, halfW, tips, seed) {
     var span = botY - apexY;
     var notchY = botY - Math.max(5, halfW * 0.12);
     var rX = cx + halfW * 0.94, lX = cx - halfW * 0.94;
+    var jAmpX = seed ? 2.2 + halfW * 0.030 : 0;
+    var jAmpY = seed ? 1.6 + halfW * 0.020 : 0;
     ctx.beginPath();
     ctx.moveTo(cx, apexY);
     ctx.bezierCurveTo(cx + halfW * 0.50, apexY + span * 0.13,
@@ -791,8 +801,10 @@ window.World = (function () {
     for (var j = 0; j < tips; j++) {
       var x0 = rX + (lX - rX) * (j / tips);
       var x1 = rX + (lX - rX) * ((j + 1) / tips);
-      var xm = (x0 + x1) / 2 + (j % 2 ? 1.6 : -1.6);
-      var tipY = botY + (halfW > 60 ? 5 : 2);
+      var jx = seed ? (jag(seed, j) - 0.5) * jAmpX * 2 : 0;
+      var jy = seed ? (jag(seed + 7.3, j) - 0.5) * jAmpY * 2 : 0;
+      var xm = (x0 + x1) / 2 + (j % 2 ? 1.6 : -1.6) + jx;
+      var tipY = botY + (halfW > 60 ? 5 : 2) + jy;
       ctx.quadraticCurveTo(x0 + (xm - x0) * 0.62, tipY - 3, xm, tipY);
       ctx.quadraticCurveTo(xm + (x1 - xm) * 0.38, tipY - 3, x1, notchY);
     }
@@ -801,17 +813,21 @@ window.World = (function () {
     ctx.closePath();
   }
 
-  /* 只走底缘那条锯齿（用来压雪） */
-  function firEdgePath(ctx, cx, botY, halfW, tips) {
+  /* 只走底缘那条锯齿（用来压雪）——jitter 必须和上面完全一致，雪才贴着枝条 */
+  function firEdgePath(ctx, cx, botY, halfW, tips, seed) {
     var notchY = botY - Math.max(5, halfW * 0.12);
     var rX = cx + halfW * 0.94, lX = cx - halfW * 0.94;
+    var jAmpX = seed ? 2.2 + halfW * 0.030 : 0;
+    var jAmpY = seed ? 1.6 + halfW * 0.020 : 0;
     ctx.beginPath();
     ctx.moveTo(rX, notchY);
     for (var j = 0; j < tips; j++) {
       var x0 = rX + (lX - rX) * (j / tips);
       var x1 = rX + (lX - rX) * ((j + 1) / tips);
-      var xm = (x0 + x1) / 2 + (j % 2 ? 1.6 : -1.6);
-      var tipY = botY + (halfW > 60 ? 5 : 2);
+      var jx = seed ? (jag(seed, j) - 0.5) * jAmpX * 2 : 0;
+      var jy = seed ? (jag(seed + 7.3, j) - 0.5) * jAmpY * 2 : 0;
+      var xm = (x0 + x1) / 2 + (j % 2 ? 1.6 : -1.6) + jx;
+      var tipY = botY + (halfW > 60 ? 5 : 2) + jy;
       ctx.quadraticCurveTo(x0 + (xm - x0) * 0.62, tipY - 3, xm, tipY);
       ctx.quadraticCurveTo(xm + (x1 - xm) * 0.38, tipY - 3, x1, notchY);
     }
@@ -825,16 +841,26 @@ window.World = (function () {
     return { x: px, y: py };
   }
 
-  function firTier(ctx, cx, apexY, botY, halfW, tips, top, bottom, snowA, lit) {
+  /* 层「表面」上的点：u 左右，v 从上(0)到下(1)。
+     彩球要挂在面上、不能全挤在底缘，所以单独有这个函数。 */
+  function surfPt(cx, apexY, botY, halfW, u, v) {
+    var r = halfW * (0.13 + 0.87 * v);
+    return {
+      x: cx + r * u * 0.94,
+      y: apexY + (botY - apexY) * v
+    };
+  }
+
+  function firTier(ctx, cx, apexY, botY, halfW, tips, top, bottom, snowA, lit, seed, full) {
     // 底部暗影（把层与层分开）
     ctx.save();
     ctx.translate(0, 6);
-    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     ctx.fillStyle = 'rgba(12,44,30,.42)';
     ctx.fill();
     ctx.restore();
 
-    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     var g = ctx.createLinearGradient(cx - halfW * 0.55, apexY, cx + halfW * 0.6, botY);
     g.addColorStop(0, top);
     g.addColorStop(0.55, bottom);
@@ -844,7 +870,7 @@ window.World = (function () {
 
     // 枝纹：几道顺着层的浅弧
     ctx.save();
-    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     ctx.clip();
     ctx.strokeStyle = 'rgba(120,190,150,.16)';
     ctx.lineWidth = 1.2;
@@ -855,9 +881,26 @@ window.World = (function () {
       ctx.quadraticCurveTo(cx, by - 4, cx + halfW * 0.92, by + 6);
       ctx.stroke();
     }
-    if (lit) {
+    /* v4.1 放射状枝条：从层心向外散开，让整层有「编织」的质感，
+       不再是一整块平的绿色。固定种子 → 每帧、每张照片都一样。 */
+    var notchB = botY - Math.max(5, halfW * 0.12);
+    ctx.lineWidth = Math.max(1, halfW * 0.015);
+    var branchN = Math.min(tips, 7);
+    for (var br = 0; br < branchN; br++) {
+      var bu = -0.98 + 1.96 * (br / (branchN - 1));
+      var ax0 = cx + halfW * 0.08 * bu;
+      var ay0 = apexY + (botY - apexY) * 0.10;
+      var bx0 = cx + halfW * 0.96 * bu;
+      var by0 = notchB - (botY - apexY) * (0.02 + 0.12 * jag(seed + 9.1, br));
+      ctx.beginPath();
+      ctx.moveTo(ax0, ay0);
+      ctx.quadraticCurveTo((ax0 + bx0) / 2, ay0 + (by0 - ay0) * 0.62, bx0, by0);
+      ctx.strokeStyle = (br % 2 ? 'rgba(18,62,42,.17)' : 'rgba(156,214,178,.13)');
+      ctx.stroke();
+    }
+    if (lit && !full) {   /* 满树阶段由树后的光柱负责暖光，这里省一次大半径渐变 */
       var lg2 = ctx.createRadialGradient(cx, apexY + (botY - apexY) * 0.55, 2, cx, apexY + (botY - apexY) * 0.55, halfW * 0.95);
-      lg2.addColorStop(0, 'rgba(255,214,130,.20)');
+      lg2.addColorStop(0, 'rgba(255,214,130,.13)');
       lg2.addColorStop(1, 'rgba(255,214,130,0)');
       ctx.fillStyle = lg2;
       ctx.fillRect(cx - halfW, apexY - 4, halfW * 2, botY - apexY + 8);
@@ -866,7 +909,7 @@ window.World = (function () {
 
     // 左侧月光边：给圆锥一点体积
     ctx.save();
-    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     ctx.clip();
     ctx.beginPath();
     ctx.moveTo(cx - halfW * 0.95, botY);
@@ -880,34 +923,39 @@ window.World = (function () {
 
     ctx.strokeStyle = 'rgba(16,58,40,.45)';
     ctx.lineWidth = 1.2;
-    firTierPath(ctx, cx, apexY, botY, halfW, tips);
+    firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     ctx.stroke();
 
-    // 积雪：沿外露枝尖压一道白，越靠外越厚
+    /* 积雪（v4.1 重做）
+       以前是沿锯齿描一条粗白线，放大看像贴在树上的白花边。
+       现在改成：极薄的一道白边 + 每个枝尖一小团雪，雪只「落在枝头」，
+       不在枝与枝之间拉横幅。 */
     if (snowA > 0) {
-      firEdgePath(ctx, cx, botY, halfW, tips);
-      ctx.strokeStyle = 'rgba(250,253,255,' + Math.min(1, snowA * 0.55 + 0.42) + ')';
-      ctx.lineWidth = Math.max(2.6, halfW * 0.048);
+      firEdgePath(ctx, cx, botY, halfW, tips, seed);
+      ctx.strokeStyle = 'rgba(232,244,255,' + Math.min(0.30, snowA * 0.30) + ')';
+      ctx.lineWidth = Math.max(1.0, halfW * 0.014);
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.stroke();
-      // 枝尖的雪团只在靠外的一半，避免整排白点
-      var rX = cx + halfW * 0.86, lX = cx - halfW * 0.86;
-      for (var j3 = 0; j3 < tips; j3++) {
-        var uu = (j3 + 0.5) / tips;
-        if (Math.abs(uu - 0.5) < 0.20) continue;
-        var px3 = rX + (lX - rX) * uu;
+
+      var notchYs = botY - Math.max(5, halfW * 0.12);
+      var sRX = cx + halfW * 0.94, sLX = cx - halfW * 0.94;
+      for (var js = 0; js < tips; js++) {
+        var sx0 = sRX + (sLX - sRX) * (js / tips);
+        var sx1 = sRX + (sLX - sRX) * ((js + 1) / tips);
+        var sjx = seed ? (jag(seed, js) - 0.5) * (2.2 + halfW * 0.030) * 2 : 0;
+        var sjy = seed ? (jag(seed + 7.3, js) - 0.5) * (1.6 + halfW * 0.020) * 2 : 0;
+        var sxm = (sx0 + sx1) / 2 + (js % 2 ? 1.6 : -1.6) + sjx;
+        var stY = botY + (halfW > 60 ? 5 : 2) + sjy;
+        var sr = Math.max(1.7, halfW * (0.022 + 0.016 * jag(seed + 2.2, js)) * (0.7 + snowA * 0.6));
         ctx.beginPath();
-        ctx.ellipse(px3, botY - Math.max(1.6, halfW * 0.03), Math.max(3.0, halfW * 0.075), Math.max(2.0, halfW * 0.048), 0, 0, 7);
-        ctx.fillStyle = 'rgba(252,254,255,' + Math.min(1, snowA * 0.5 + 0.48) + ')';
+        ctx.ellipse(sxm, stY - sr * 0.45, sr * 1.55, sr * 0.80, 0, 0, 7);
+        ctx.fillStyle = 'rgba(250,253,255,' + Math.min(0.95, snowA * 0.55 + 0.30) + ')';
         ctx.fill();
-      }
-      var rX = cx + halfW * 0.86, lX = cx - halfW * 0.86;
-      for (var j2 = 0; j2 < tips; j2++) {
-        var px = rX + (lX - rX) * ((j2 + 0.5) / tips);
+        /* 雪团上沿的一点冷高光，别让雪看起来像纯白纸片 */
         ctx.beginPath();
-        ctx.ellipse(px, botY - Math.max(2, halfW * 0.035), Math.max(3.4, halfW * 0.085), Math.max(2.2, halfW * 0.055), 0, 0, 7);
-        ctx.fillStyle = 'rgba(252,254,255,' + Math.min(1, snowA + 0.1) + ')';
+        ctx.ellipse(sxm - sr * 0.3, stY - sr * 0.72, sr * 0.85, sr * 0.34, 0, 0, 7);
+        ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.8, snowA * 0.4 + 0.22) + ')';
         ctx.fill();
       }
     }
@@ -988,10 +1036,12 @@ window.World = (function () {
         var ang = i * Math.PI / 4 + Math.PI / 8;
         var len = R * (2.5 + (i % 2 ? 1.1 : 0)) * pulse;
         var gg = ctx.createLinearGradient(x, y, x + Math.cos(ang) * len, y + Math.sin(ang) * len);
-        gg.addColorStop(0, 'rgba(255,228,150,.5)');
-        gg.addColorStop(1, 'rgba(255,228,150,0)');
+        gg.addColorStop(0, 'rgba(255,238,180,.62)');
+        gg.addColorStop(0.45, 'rgba(255,222,140,.24)');
+        gg.addColorStop(1, 'rgba(255,222,140,0)');
         ctx.strokeStyle = gg;
-        ctx.lineWidth = 3.4;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 5.0;
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
@@ -1049,11 +1099,69 @@ window.World = (function () {
     ctx.fill();
   }
 
+  /* ============================================================
+   * v4.1 大圣诞树
+   * 成长阶段完全不变（0 树苗 / 1 挂上彩球 / 2 挂上彩灯 / 3 全树点亮），
+   * 只把「看得见」的部分做厚：
+   *   轮廓  每层枝尖带固定种子的轻微不规则，左右不再完全对称
+   *   层次  树干从层间露出、层底压暗、亮灯后自下而上有一层暖光
+   *   挂饰  按层排布 + 固定配色（暖金为主、红蓝点缀），下大上小，不再是随机彩球
+   *   礼物  绕树根一圈，树后的先画（被枝叶遮住一点）、树前的后画
+   *   终局  光柱 + 地面涟漪 + 柔和飘雪
+   * 全部是固定算式，同一 t 重绘结果一致 → 合照 / 缩略图可复现、不会闪。
+   * ============================================================ */
+
+  /* 树下礼物：dx/dy 相对树根，back=1 表示摆在树后。
+     顺序就是「得到的先后」：第 1~3 件第 1 阶就有，第 4~6 件第 2 阶，第 7~9 件满树时。 */
+  var TREE_GIFTS = [
+    [-54, 16, 28, 21, '#58b368', '#f4ead8', 0],
+    [40, 14, 32, 25, '#f0a83c', '#7a3f2a', 0],
+    [0, 24, 24, 18, '#c86bb1', '#fff0f8', 0],
+    [-132, 4, 38, 28, '#d94c3a', '#f6ecd8', 0],
+    [96, 6, 32, 25, '#4f86d6', '#eef4ff', 0],
+    [-90, -8, 30, 24, '#f2e2a8', '#b4573f', 1],
+    [-108, 20, 26, 20, '#e2754f', '#fdf6ea', 0],
+    [78, 22, 24, 18, '#a97ed6', '#f7eefc', 0],
+    [56, -6, 26, 21, '#6fbf8f', '#f4ead8', 1]
+  ];
+  /* 每个阶段树下摆几件：越往后越热闹 */
+  var TREE_GIFT_N = [0, 3, 6, 9];
+
+  /* 挂饰数量：每层几个（下密上疏），三个阶段明显不同 */
+  var ORN_N = {
+    1: [2, 2, 2, 1, 1],
+    2: [4, 3, 3, 2, 1],
+    3: [5, 5, 4, 3, 2]
+  };
+  /* 每个阶段只用一套配色：暖金打底，越往后才慢慢掺进红蓝绿 */
+  var ORN_PALETTE = {
+    1: ['#e3c07a', '#f2e2a8', '#c9905a'],
+    2: ['#dc4f3c', '#e3c07a', '#4f86d6', '#f2e2a8', '#58b368'],
+    3: ['#f2c869', '#dc4f3c', '#f9efcd', '#e3c07a', '#4f86d6', '#58b368', '#c86bb1']
+  };
+
+  /* back=true 画「树后那半圈」，false 画「树前那半圈」，中间隔着一整棵树。
+     同侧再按 dy 从远到近排，靠前的礼物压住靠后的，才有堆叠感。 */
+  function drawTreeGifts(ctx, x, y, stage, back) {
+    var n = TREE_GIFT_N[Math.min(stage, 3)] || 0;
+    var list = [];
+    for (var i = 0; i < n && i < TREE_GIFTS.length; i++) {
+      var gf = TREE_GIFTS[i];
+      if (!!gf[6] !== !!back) continue;
+      list.push(gf);
+    }
+    list.sort(function (a, b) { return a[1] - b[1]; });
+    for (var k = 0; k < list.length; k++) {
+      var g2 = list[k];
+      giftBox(ctx, x + g2[0], y + g2[1], g2[2], g2[3], g2[4], g2[5]);
+    }
+  }
+
   function drawBigTree(ctx, tree, stage, t) {
     var x = tree.x, y = tree.y;
     var lit = stage >= 2, full = stage >= 3;
 
-    // ---- 地面光影 ----
+    // ---- 地面光池（点亮后才有）----
     if (lit) {
       var pool = ctx.createRadialGradient(x, y + 8, 10, x, y + 8, 190);
       pool.addColorStop(0, 'rgba(255,214,132,' + (full ? 0.34 : 0.22) + ')');
@@ -1072,7 +1180,7 @@ window.World = (function () {
       return;
     }
 
-    // ---- 树后的暖晕（点亮后才有）----
+    // ---- 树后的暖晕 ----
     if (lit) {
       var halo = ctx.createRadialGradient(x, y - 190, 20, x, y - 190, 250);
       halo.addColorStop(0, 'rgba(255,206,120,' + (full ? 0.26 : 0.14) + ')');
@@ -1082,7 +1190,23 @@ window.World = (function () {
       ctx.beginPath(); ctx.arc(x, y - 190, 250, 0, 7); ctx.fill();
     }
 
-    // ---- 基座：雪堆 + 石圈 + 树干 ----
+    // ---- 最终阶段：雪地上慢慢荡开的两圈光 ----
+    if (full) {
+      for (var rp = 0; rp < 2; rp++) {
+        var ph = ((t / 2600) + rp * 0.5) % 1;
+        ctx.save();
+        ctx.translate(x, y + 8);
+        ctx.scale(1, 0.34);
+        ctx.beginPath();
+        ctx.arc(0, 0, 92 + ph * 104, 0, 7);
+        ctx.strokeStyle = 'rgba(255,228,160,' + (0.26 * (1 - ph)).toFixed(3) + ')';
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // ---- 基座：雪堆 ----
     ctx.beginPath();
     ctx.ellipse(x, y + 6, 92, 24, 0, 0, 7);
     ctx.fillStyle = 'rgba(120,150,190,.22)';
@@ -1095,7 +1219,10 @@ window.World = (function () {
     ctx.fillStyle = sgm;
     ctx.fill();
 
-    // 树干
+    // ---- 树后那圈礼物：先画，等下被最低一层枝叶压住一点 ----
+    drawTreeGifts(ctx, x, y, stage, true);
+
+    // ---- 树干 ----
     var tg = ctx.createLinearGradient(x - 9, 0, x + 9, 0);
     tg.addColorStop(0, '#8a5a38'); tg.addColorStop(0.4, '#6d4426'); tg.addColorStop(1, '#4d2f1a');
     ctx.beginPath();
@@ -1118,39 +1245,63 @@ window.World = (function () {
       ctx.stroke();
     }
 
-    // ---- 五层枝扇 ----
-    var tops = ['#3f9060', '#437f57', '#3a8358', '#457f57', '#3f8d5f'];
+    // ---- 最终阶段：从星落下来的光柱 ----
+    /* v4.1：光柱改画在树「后面」。以前画在树身上，用 lighter 叠一层，
+       整棵树会被冲成惨白的一团，层次全丢了。 */
+    if (full) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var beam = ctx.createLinearGradient(x, y - 320, x, y + 10);
+      beam.addColorStop(0, 'rgba(255,226,150,.30)');
+      beam.addColorStop(0.5, 'rgba(255,226,150,.08)');
+      beam.addColorStop(1, 'rgba(255,226,150,0)');
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(x - 12, y - 330);
+      ctx.lineTo(x + 12, y - 330);
+      ctx.lineTo(x + 132, y + 14);
+      ctx.lineTo(x - 132, y + 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ---- 五层枝扇（seed 让每层的枝尖略微参差）----
+    var tops = ['#3a8a5c', '#3d7a52', '#35804f', '#3c7a52', '#3a875a'];
     for (var i = 0; i < TREE_TIERS.length; i++) {
       var L = TREE_TIERS[i];
       firTier(ctx, x, y + L.apex, y + L.bot, L.half, L.tips,
-        tops[i], i % 2 ? '#2a6b46' : '#2f744c', 0.62 + i * 0.09, lit);
+        tops[i], i % 2 ? '#245f3e' : '#286843', 0.62 + i * 0.09, lit, 3.7 + i * 1.9, full);
     }
 
-    // ---- 彩球（stage>=1） ----
+    // ---- 树前那圈礼物：画在枝叶之后，完整露出来 ----
+    drawTreeGifts(ctx, x, y, stage, false);
+
+    // ---- 彩球（stage>=1）----
     if (stage >= 1) {
-      var cols = ['#dc4f3c', '#f0a83c', '#4f86d6', '#c86bb1', '#f2e2a8', '#58b368'];
-      var plan = [
-        [0, [-0.62, -0.16, 0.30, 0.68]],
-        [1, [-0.70, -0.22, 0.26, 0.72]],
-        [2, [-0.62, 0.10, 0.66]],
-        [3, [-0.58, 0.34]],
-        [4, [-0.30, 0.34]]
-      ];
+      var pal = ORN_PALETTE[Math.min(stage, 3)] || ORN_PALETTE[1];
+      var nTier = ORN_N[Math.min(stage, 3)] || ORN_N[1];
       var cIdx = 0;
-      plan.forEach(function (row) {
-        var Lr = TREE_TIERS[row[0]];
-        row[1].forEach(function (u) {
-          var pt = tierPt(x, y + Lr.apex, y + Lr.bot, Lr.half, u);
-          var r = 5.4 - row[0] * 0.5 + (Math.abs(u) > 0.55 ? 0.6 : 0);
-          var flick = full ? (0.6 + 0.4 * Math.sin(t / 520 + cIdx * 1.7)) : 1;
-          if (stage >= 2) drawGlow(ctx, pt.x, pt.y, 'rgba(255,232,168,' + (0.34 * flick + 0.1) + ')', 13, 0.8);
-          ornament(ctx, pt.x, pt.y, r, cols[cIdx % cols.length]);
+      for (var oi = 0; oi < TREE_TIERS.length; oi++) {
+        var Lr = TREE_TIERS[oi];
+        var nO = nTier[oi] || 0;
+        for (var k = 0; k < nO; k++) {
+          /* 横向等分 + 固定抖动，纵向 0.46~0.90 错落 —— 挂满但不成排 */
+          var jr = jag(4.1 + oi * 3.3, k);
+          var u = -0.72 + 1.44 * ((k + 0.5) / nO) + (jr - 0.5) * 0.26;
+          var vv = 0.46 + 0.44 * jag(9.7 + oi * 2.7, k);
+          var pt = surfPt(x, y + Lr.apex, y + Lr.bot, Lr.half, u, vv);
+          var r = 6.0 - oi * 0.45 + (Math.abs(u) > 0.55 ? 0.4 : 0) + jr * 0.5;
+          if (stage >= 3 && cIdx % 7 === 3) r += 1.3;   // 少数大球当视觉重点
+          var flick = full ? (0.62 + 0.38 * Math.sin(t / 560 + cIdx * 1.7)) : 1;
+          if (lit && r > 5.2) drawGlow(ctx, pt.x, pt.y, 'rgba(255,232,168,' + (0.30 * flick + 0.10).toFixed(3) + ')', 12 + r, 0.8);
+          ornament(ctx, pt.x, pt.y, r, pal[cIdx % pal.length]);
           cIdx++;
-        });
-      });
+        }
+      }
     }
 
-    // ---- 灯串（stage>=2） ----
+    // ---- 灯串（stage>=2）----
     if (lit) {
       for (var gi = 0; gi < TREE_TIERS.length - 1; gi++) {
         var Lg = TREE_TIERS[gi];
@@ -1160,9 +1311,9 @@ window.World = (function () {
 
     // ---- 顶星 ----
     if (stage >= 2) {
-      treeStar(ctx, x, y - 336, full ? 18 : 13, t, full ? 1 : 0);
+      treeStar(ctx, x, y - 336, full ? 19 : 14, t, 1);
     } else {
-      // 未点亮的阶段：只插一根尖枝
+      // 还没通电：只插一根尖枝
       ctx.beginPath();
       ctx.moveTo(x - 3, y - 316);
       ctx.lineTo(x, y - 336);
@@ -1172,44 +1323,29 @@ window.World = (function () {
       ctx.fill();
     }
 
-    // ---- 礼物（stage 3） ----
+    // ---- 星屑 + 飘雪（stage 3；光柱已经在树后面画过了）----
     if (full) {
-      var gifts = [
-        [x - 116, y + 4, 34, 26, '#d94c3a', '#f4ead8'],
-        [x - 74, y + 16, 26, 20, '#4f86d6', '#eef4ff'],
-        [x + 62, y + 12, 30, 23, '#58b368', '#f4ead8'],
-        [x + 98, y + 2, 24, 19, '#f0a83c', '#7a3f2a'],
-        [x + 12, y + 20, 22, 17, '#c86bb1', '#fff0f8']
-      ];
-      gifts.forEach(function (gf) { giftBox(ctx, gf[0], gf[1], gf[2], gf[3], gf[4], gf[5]); });
-    }
-
-    // ---- 光柱 + 星屑（stage 3） ----
-    if (full) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      var beam = ctx.createLinearGradient(x, y - 320, x, y + 10);
-      beam.addColorStop(0, 'rgba(255,226,150,.20)');
-      beam.addColorStop(1, 'rgba(255,226,150,0)');
-      ctx.fillStyle = beam;
-      ctx.beginPath();
-      ctx.moveTo(x - 14, y - 326);
-      ctx.lineTo(x + 14, y - 326);
-      ctx.lineTo(x + 120, y + 12);
-      ctx.lineTo(x - 120, y + 12);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      for (var sp = 0; sp < 14; sp++) {
+      for (var sp = 0; sp < 9; sp++) {
         var a2 = (sp * 2.399) % (Math.PI * 2);
-        var rr2 = 40 + ((sp * 37) % 120);
-        var sx2 = x + Math.cos(a2) * rr2 * 0.85;
-        var sy2 = y - 160 + Math.sin(a2) * rr2 * 1.25;
-        var tw = 0.35 + 0.65 * Math.abs(Math.sin(t / 620 + sp * 1.1));
+        var rr2 = 60 + ((sp * 53) % 110);
+        var sx2 = x + Math.cos(a2) * rr2 * 1.15;
+        var sy2 = y - 150 + Math.sin(a2) * rr2 * 1.45;
+        var tw = 0.30 + 0.70 * Math.abs(Math.sin(t / 700 + sp * 1.7));
         ctx.beginPath();
-        ctx.arc(sx2, sy2, 1.1 + tw * 1.5, 0, 7);
-        ctx.fillStyle = 'rgba(255,246,205,' + (tw * 0.9) + ')';
+        ctx.arc(sx2, sy2, 0.9 + tw * 1.1, 0, 7);
+        ctx.fillStyle = 'rgba(255,246,205,' + (tw * 0.55).toFixed(3) + ')';
+        ctx.fill();
+      }
+
+      /* 柔和的暖雪花：只在树周围一小圈，下落很慢，不抢灯 */
+      for (var fl = 0; fl < 16; fl++) {
+        var fx0 = jag(31.7, fl), fy0 = jag(57.1, fl);
+        var fy = y - 340 + ((fy0 * 400 + t * (0.012 + fx0 * 0.010)) % 400);
+        var fx = x - 165 + fx0 * 330 + Math.sin(t / 950 + fl * 1.3) * 11;
+        var fa = 0.16 + 0.30 * (0.5 + 0.5 * Math.sin(t / 520 + fl * 2.1));
+        ctx.beginPath();
+        ctx.arc(fx, fy, 1.0 + fx0 * 1.5, 0, 7);
+        ctx.fillStyle = 'rgba(255,250,236,' + fa.toFixed(3) + ')';
         ctx.fill();
       }
     }
@@ -1557,6 +1693,10 @@ window.World = (function () {
       { id: 'frame', x: 720, y: 200, r: 80, name: '🖼️ Omo 相框', lines: [
         '相框已经挂好了，里面暂时是一张空白的全家福。',
         '（你们旅行的照片，以后会一张张贴进来。）'
+      ] },
+      { id: 'photos', x: 706, y: 112, r: 92, name: '🖼️ 照片墙', lines: [
+        '三张小相框并排挂着：一湖、一桥、一片海。',
+        '都是在路上拍的。等照片再多几张，这面墙就挂满了。'
       ] }
     ],
     draw: function (ctx, t) {
@@ -1673,6 +1813,7 @@ window.World = (function () {
       ctx.beginPath(); ctx.ellipse(410, 360, 112, 46, 0, 0, 7); ctx.stroke();
       ctx.fillStyle = 'rgba(245,250,255,.22)';
       ctx.beginPath(); ctx.ellipse(410, 360, 95, 38, 0, 0, 7); ctx.fill();
+      if (ROOM_PROPS.cabin) ROOM_PROPS.cabin(ctx, t);   // v4.1 房间装饰
 
       ctx.fillStyle = 'rgba(245,250,255,.5)';
       ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
@@ -1711,6 +1852,10 @@ window.World = (function () {
       { id: 'gramophone', x: 665, y: 287, r: 80, name: '🎵 老唱机', lines: [
         '唱机放着很慢很慢的爵士，唱针转一圈，雪就落一层。',
         '「圣诞歌单，」老板娘说，「十一月就开始排了。」'
+      ] },
+      { id: 'table2', x: 646, y: 382, r: 84, name: '🕯️ 角落的小桌', lines: [
+        '角落的小桌，桌上一支红蜡烛，火苗很稳。',
+        '两个位置，刚好够把手放在一起。'
       ] }
     ],
     draw: function (ctx, t) {
@@ -1812,6 +1957,7 @@ window.World = (function () {
         var fx2 = 60 + fi * 74, fy2 = 4 + (fi % 2) * 3;
         ctx.beginPath(); ctx.moveTo(fx2 - 6, fy2); ctx.lineTo(fx2 + 6, fy2); ctx.lineTo(fx2, fy2 + 9); ctx.closePath(); ctx.fill();
       }
+      if (ROOM_PROPS.cafe) ROOM_PROPS.cafe(ctx, t);   // v4.1 房间装饰
       // 出门垫
       ctx.fillStyle = 'rgba(245,250,255,.5)';
       ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
@@ -1836,7 +1982,12 @@ window.World = (function () {
       { x: 40, y: 60, w: 110, h: 120 },
       { x: 670, y: 60, w: 110, h: 120 }
     ],
-    interactables: [],
+    interactables: [
+      { id: 'bench', x: 92, y: 492, r: 80, name: '🪑 温室长椅', lines: [
+        '长椅上落了一层薄土，坐下去能闻到泥土和青草的味道。',
+        '从这里看过去，六块地里的东西都在慢慢长。'
+      ] }
+    ],
     draw: function (ctx, t, plots) {
       var w = this.w, h = this.h;
       // 陶土地面
@@ -1945,6 +2096,7 @@ window.World = (function () {
         ctx.fillText('地 ' + (i + 1), p.x, p.y + 27);
       });
       // 出门垫
+      if (ROOM_PROPS.greenhouse) ROOM_PROPS.greenhouse(ctx, t);   // v4.1 房间装饰
       ctx.fillStyle = 'rgba(245,250,255,.5)';
       ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
       box(ctx, this.exit.x - 26, this.exit.y, 52, 24, '#5b3d29', { r: 3 });
@@ -1981,6 +2133,10 @@ window.World = (function () {
       { id: 'shelf', x: 695, y: 270, r: 90, name: '📦 材料架', lines: [
         '木头、松果、彩带、铃铛——分门别类码得整整齐齐。',
         '（材料不够的时候，去温室和镇子里就能收集到。）'
+      ] },
+      { id: 'stove', x: 92, y: 430, r: 86, name: '🔥 小暖炉', lines: [
+        '铁炉子烧得暖暖的，手放上去一会儿就不冷了。',
+        '「做东西之前先烤烤手，」这是你们俩定下的规矩。'
       ] }
     ],
     draw: function (ctx, t) {
@@ -2063,12 +2219,365 @@ window.World = (function () {
       }
       // 落地灯暖光
       drawGlow(ctx, 700, 120, 'rgba(255,214,130,.5)', 80, 0.9);
+      if (ROOM_PROPS.workshop) ROOM_PROPS.workshop(ctx, t);   // v4.1 房间装饰
       // 出门垫
       ctx.fillStyle = 'rgba(245,250,255,.5)';
       ctx.beginPath(); ctx.ellipse(this.exit.x, this.exit.y + 14, 46, 12, 0, 0, 7); ctx.fill();
       box(ctx, this.exit.x - 26, this.exit.y, 52, 24, '#5b3d29', { r: 3 });
       ctx.fillStyle = '#f4ead8'; ctx.font = '10px "PingFang SC", sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('出门 ▸ 小镇', this.exit.x, this.exit.y + 15);
+    }
+  };
+
+  /* ============================================================
+   * v4.1 室内装饰
+   *   每个房间按用途补一批家具，全部画在原有 draw 的末尾：
+   *   原有家具、互动台、出口、碰撞一律不动，新家具只补空着的角落。
+   *   颜色沿用各房间原有的木色 / 暖光，不引入新色系。
+   * ============================================================ */
+  /* 靠垫：圆角 + 上沿高光 + 下沿压暗，别再画成一块纯色方块 */
+  function propCushion(ctx, x, y, w, h, col) {
+    box(ctx, x, y, w, h, col, { r: Math.min(8, h * 0.42), shade: true });
+    box(ctx, x + 3, y + 2.5, w - 6, Math.max(2, h * 0.26), 'rgba(255,255,255,.22)', { r: 3, outline: false });
+    ctx.strokeStyle = 'rgba(60,30,16,.26)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 4, y + h - 3.5); ctx.lineTo(x + w - 4, y + h - 3.5); ctx.stroke();
+  }
+  /* 马克杯：杯身 + 杯口 + 把手 + 落影 */
+  function propMug(ctx, x, y, s, col) {
+    box(ctx, x, y, s, s * 1.02, col, { r: Math.max(2, s * 0.28), hi: true });
+    ctx.fillStyle = 'rgba(60,36,20,.30)';
+    ctx.beginPath(); ctx.ellipse(x + s / 2, y + 1.2, s * 0.40, s * 0.16, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, s * 0.16); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(x + s + s * 0.06, y + s * 0.48, s * 0.26, -1.15, 1.15); ctx.stroke();
+  }
+
+  var ROOM_PROPS = {
+    /* ---------- 小屋：客厅 ---------- */
+    cabin: function (ctx, t) {
+      /* 茶几（地毯中央，压在地毯上但看得见腿） */
+      shadow(ctx, 410, 414, 58, 8);
+      box(ctx, 366, 372, 88, 13, '#7a5236', { r: 4 });
+      ctx.fillStyle = 'rgba(255,235,200,.16)'; ctx.fillRect(366, 372, 88, 4);
+      [[372, 385], [444, 385]].forEach(function (lg) { box(ctx, lg[0], lg[1], 8, 26, '#5b3d29', { r: 2 }); });
+      // 桌上：两只杯子 + 小蜡烛
+      [[390, 360], [420, 360]].forEach(function (m) {
+        box(ctx, m[0], m[1], 16, 13, '#f4ead8', { r: 3 });
+        ctx.fillStyle = '#6b4226'; ctx.fillRect(m[0] + 2, m[1] + 2, 12, 4);
+        ctx.strokeStyle = '#f4ead8'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(m[0] + 16, m[1] + 4); ctx.lineTo(m[0] + 20, m[1] + 4); ctx.stroke();
+      });
+      ball(ctx, 440, 358, 6, '#c0392b', { outline: false });
+      drawGlow(ctx, 440, 348, 'rgba(255,190,110,.55)', 22, 0.9 + 0.1 * Math.sin(t / 400));
+
+      /* 落地灯（右下角，暖光落在沙发边） */
+      ctx.fillStyle = '#5b3d29'; ctx.fillRect(700, 350, 5, 96);
+      ctx.fillStyle = '#4a3020';
+      ctx.beginPath(); ctx.ellipse(702, 448, 18, 5, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#e8c98a';
+      ctx.beginPath();
+      ctx.moveTo(680, 350); ctx.lineTo(724, 350); ctx.lineTo(716, 316); ctx.lineTo(688, 316);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(90,60,35,.55)'; ctx.lineWidth = 1.4; ctx.stroke();
+      drawGlow(ctx, 702, 344, 'rgba(255,206,130,.46)', 96, 0.9);
+
+      /* 树下的礼物盒（大小三只，错开摆） */
+      box(ctx, 566, 196, 30, 24, '#c0392b', { r: 3 });
+      ctx.fillStyle = '#f0c040'; ctx.fillRect(579, 196, 5, 24); ctx.fillRect(566, 206, 30, 4);
+      box(ctx, 602, 202, 22, 18, '#35845a', { r: 3 });
+      ctx.fillStyle = '#f4ead8'; ctx.fillRect(611, 202, 4, 18);
+      box(ctx, 578, 214, 18, 14, '#4f86d6', { r: 3 });
+      ctx.fillStyle = '#f4ead8'; ctx.fillRect(585, 214, 4, 14);
+
+      /* 唱片柜（左下，靠书架） */
+      box(ctx, 48, 384, 66, 56, '#7a5236', { r: 4 });
+      ctx.fillStyle = '#5b3d29'; ctx.fillRect(54, 392, 54, 18);
+      for (var rc = 0; rc < 4; rc++) {
+        ctx.fillStyle = ['#c0392b', '#4f86d6', '#f0a83c', '#c86bb1'][rc];
+        ctx.fillRect(56 + rc * 13, 396, 10, 10);
+      }
+      ctx.fillStyle = '#2b2119'; ctx.fillRect(54, 416, 54, 18);
+      ball(ctx, 78, 425, 7, '#1a1512', { outline: false });
+      ball(ctx, 78, 425, 2, '#f0c040', { outline: false });
+
+      /* 墙上的钟（放在相框左边的空墙上） */
+      ball(ctx, 612, 46, 17, '#f4ead8', { hi: true });
+      ctx.strokeStyle = '#5b3d29'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(612, 46, 17, 0, 7); ctx.stroke();
+      ctx.strokeStyle = 'rgba(90,60,35,.5)'; ctx.lineWidth = 1;
+      for (var tic = 0; tic < 12; tic++) {
+        var ta = tic * Math.PI / 6;
+        ctx.beginPath();
+        ctx.moveTo(612 + Math.cos(ta) * 13, 46 + Math.sin(ta) * 13);
+        ctx.lineTo(612 + Math.cos(ta) * 15.5, 46 + Math.sin(ta) * 15.5);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#5b3d29'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(612, 46); ctx.lineTo(612, 35); ctx.moveTo(612, 46); ctx.lineTo(620, 50); ctx.stroke();
+      ball(ctx, 612, 46, 2, '#c0392b', { outline: false });
+
+      /* 照片墙：三张小相框（挂着你们去过的地方） */
+      var frames = [[694, 22, 34, 26, '#4f86d6'], [734, 18, 40, 30, '#2f7fb8'], [782, 26, 30, 24, '#b07a3c']];
+      frames.forEach(function (f) {
+        ctx.fillStyle = '#f0c040';
+        ctx.fillRect(f[0], f[1], f[2], f[3]);
+        ctx.fillStyle = f[4];
+        ctx.fillRect(f[0] + 3, f[1] + 3, f[2] - 6, f[3] - 6);
+        ctx.fillStyle = 'rgba(255,255,255,.35)';
+        ctx.fillRect(f[0] + 4, f[1] + f[3] - 8, f[2] - 8, 2);
+      });
+    },
+
+    /* ---------- 咖啡店 ---------- */
+    cafe: function (ctx, t) {
+      /* 角落第二张小桌（右下）：圆桌面 + 木纹 + 柱脚 + 底盘 */
+      var tcx = 646, tcy = 356;
+      shadow(ctx, tcx, 402, 42, 10);
+      ctx.fillStyle = '#4a3020';
+      ctx.beginPath(); ctx.ellipse(tcx, 400, 20, 5.5, 0, 0, 7); ctx.fill();
+      box(ctx, tcx - 5, tcy + 2, 10, 42, '#6b4a2f', { r: 2, outline: false });
+      /* 桌面：椭圆 + 上下两段，才有厚度 */
+      ctx.beginPath(); ctx.ellipse(tcx, tcy + 4, 37, 12.5, 0, 0, 7);
+      ctx.fillStyle = '#7a4f32'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(tcx, tcy, 37, 12.5, 0, 0, 7);
+      var tg = ctx.createLinearGradient(tcx - 37, tcy - 13, tcx + 37, tcy + 13);
+      tg.addColorStop(0, '#c08f63'); tg.addColorStop(0.55, '#a87a52'); tg.addColorStop(1, '#8a5c3a');
+      ctx.fillStyle = tg; ctx.fill();
+      ctx.strokeStyle = 'rgba(58,36,20,.55)'; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,235,200,.22)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(tcx, tcy - 1, 30, 9, 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+      for (var gr = 0; gr < 3; gr++) {
+        ctx.strokeStyle = 'rgba(90,58,35,.20)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(tcx, tcy, 26 - gr * 8, 8.5 - gr * 2.6, 0, 0.25, Math.PI - 0.25); ctx.stroke();
+      }
+      /* 桌上：两杯热可可 + 一支蜡烛 */
+      propMug(ctx, tcx - 24, tcy - 15, 9, '#e0563f');
+      propMug(ctx, tcx + 2, tcy - 16, 8, '#f4ead8');
+      box(ctx, tcx + 17, tcy - 13, 5, 12, '#f2e2c0', { r: 1, outline: false });
+      ball(ctx, tcx + 19.5, tcy - 16, 2.6, '#ffd06a', { outline: false });
+      drawGlow(ctx, tcx + 19, tcy - 21, 'rgba(255,190,110,.5)', 24, 0.85 + 0.15 * Math.sin(t / 430 + 1));
+
+      /* 两把椅子（左右各一，面向桌子） */
+      [[tcx - 54, 1], [tcx + 54, -1]].forEach(function (c) {
+        var cxx = c[0], side = c[1];
+        shadow(ctx, cxx, 404, 15, 4);
+        box(ctx, cxx - 13, 382, 26, 9, '#a0684a', { r: 3, shade: true, hi: true });
+        box(ctx, cxx - 13, 352, 26, 9, '#96604a', { r: 3 });
+        box(ctx, cxx - 11 + (side > 0 ? 0 : 0), 359, 5, 25, '#8a5c3a', { r: 2, outline: false });
+        box(ctx, cxx + 6, 359, 5, 25, '#8a5c3a', { r: 2, outline: false });
+        box(ctx, cxx - 10, 390, 4, 15, '#6b4a2f', { r: 1, outline: false });
+        box(ctx, cxx + 6, 390, 4, 15, '#6b4a2f', { r: 1, outline: false });
+      });
+
+      /* 靠墙长椅（左下）：座 + 靠背 + 两只靠垫 + 一条毯子 */
+      shadow(ctx, 99, 418, 70, 8);
+      box(ctx, 34, 340, 130, 36, '#96604a', { r: 6, shade: true });
+      ctx.fillStyle = 'rgba(255,235,200,.16)'; ctx.fillRect(38, 343, 122, 4);
+      box(ctx, 30, 386, 138, 13, '#a0684a', { r: 4, hi: true });
+      box(ctx, 38, 399, 116, 9, '#7a4f32', { r: 2, outline: false });
+      box(ctx, 40, 408, 9, 12, '#6b4a2f', { r: 1, outline: false });
+      box(ctx, 128, 408, 9, 12, '#6b4a2f', { r: 1, outline: false });
+      propCushion(ctx, 50, 350, 32, 26, '#c0392b');
+      propCushion(ctx, 118, 350, 32, 26, '#35845a');
+      /* 搭在靠背上的毯子 */
+      ctx.fillStyle = 'rgba(240,206,150,.55)';
+      ctx.beginPath();
+      ctx.moveTo(88, 340); ctx.lineTo(112, 340); ctx.lineTo(110, 372);
+      ctx.quadraticCurveTo(104, 378, 96, 372); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,80,45,.35)'; ctx.lineWidth = 1; ctx.stroke();
+
+      /* 吧台后的杯子架：两层木板 + 三只马克杯 + 一个糖罐 */
+      box(ctx, 244, 118, 100, 5, '#8a6244', { r: 1, outline: false });
+      box(ctx, 244, 118, 100, 2, 'rgba(255,235,200,.28)', { r: 1, outline: false });
+      propMug(ctx, 252, 100, 9, '#f4ead8');
+      propMug(ctx, 272, 102, 8, '#8fd0e8');
+      propMug(ctx, 292, 100, 9, '#e0563f');
+      box(ctx, 314, 100, 16, 18, '#cfe3f0', { r: 4, hi: true });
+      ctx.fillStyle = '#e8c98a'; ctx.fillRect(317, 96, 10, 5);
+      box(ctx, 246, 138, 96, 4, '#8a6244', { r: 1, outline: false });
+      [0, 1, 2, 3].forEach(function (j) {   /* 下层：一叠杯垫和罐子 */
+        box(ctx, 250 + j * 24, 126, 12, 12, ['#c9a06a', '#8fd0e8', '#c9a06a', '#e0563f'][j], { r: 3, outline: false });
+      });
+
+      /* 角落的小圣诞树 */
+      var tx = 762, ty = 196;
+      shadow(ctx, tx, ty + 14, 20, 5);
+      ctx.fillStyle = '#7a4a2b'; ctx.fillRect(tx - 3, ty, 6, 13);
+      ctx.fillStyle = '#2b7047';
+      ctx.beginPath(); ctx.moveTo(tx, ty - 42); ctx.lineTo(tx - 21, ty + 2); ctx.lineTo(tx + 21, ty + 2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#35845a';
+      ctx.beginPath(); ctx.moveTo(tx, ty - 24); ctx.lineTo(tx - 16, ty + 4); ctx.lineTo(tx + 16, ty + 4); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(240,246,255,.55)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(tx - 19, ty + 1); ctx.lineTo(tx + 19, ty + 1); ctx.stroke();
+      [[-6, -24, '#e0563f'], [7, -15, '#f0a83c'], [-3, -7, '#4f86d6']].forEach(function (b) {
+        ball(ctx, tx + b[0], ty + b[1], 3, b[2], { hi: true, ol: 1 });
+      });
+      ball(ctx, tx, ty - 44, 3.4, '#f0c040', { hi: true, ol: 1 });
+      drawGlow(ctx, tx, ty - 20, 'rgba(255,220,140,.30)', 44, 0.7);
+
+      /* 门口地毯（椭圆 + 内圈，压在地板上） */
+      ctx.fillStyle = 'rgba(150,74,56,.42)';
+      ctx.beginPath(); ctx.ellipse(410, 476, 98, 27, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(240,192,64,.40)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(410, 476, 84, 21, 0, 0, 7); ctx.stroke();
+
+      /* 墙上的两幅小画（挂在墙面上，有框和挂线） */
+      [[470, 18, 34, 26, '#2f7fb8'], [516, 24, 28, 22, '#b07a3c']].forEach(function (f) {
+        ctx.strokeStyle = 'rgba(90,60,35,.45)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(f[0] + f[2] / 2, 4); ctx.lineTo(f[0] + f[2] / 2, f[1] - 2); ctx.stroke();
+        ctx.fillStyle = '#8a5c3a'; ctx.fillRect(f[0] - 3, f[1] - 3, f[2] + 6, f[3] + 6);
+        ctx.fillStyle = f[4]; ctx.fillRect(f[0], f[1], f[2], f[3]);
+        ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.fillRect(f[0] + 2, f[1] + f[3] - 6, f[2] - 4, 2);
+      });
+    },
+    /* ---------- 温室 ---------- */
+    greenhouse: function (ctx, t) {
+      /* 石板小路：门口先横向挪到左侧空道，再顺着苗床之间的缝往上。
+         苗床在 x=175/375/575，缝在 x≈275 —— 石头只铺在缝里，不压任何一块地。 */
+      var pathPts = [
+        [398, 508], [352, 510], [306, 508],
+        [275, 474], [275, 434], [275, 394], [275, 354], [275, 314], [275, 274]
+      ];
+      pathPts.forEach(function (pt, pi) {
+        var sx = pt[0], sy = pt[1];
+        shadow(ctx, sx, sy + 1.5, 19, 5.5);
+        ctx.beginPath(); ctx.ellipse(sx, sy, 19, 8, 0, 0, 7);
+        var sg = ctx.createLinearGradient(sx - 19, sy - 8, sx + 19, sy + 8);
+        sg.addColorStop(0, '#c6b69d'); sg.addColorStop(1, '#9a8972');
+        ctx.fillStyle = sg; ctx.fill();
+        ctx.strokeStyle = 'rgba(104,82,60,.45)'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,250,240,.26)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(sx, sy - 0.8, 14, 5.4, 0, Math.PI * 1.06, Math.PI * 1.9); ctx.stroke();
+      });
+
+      /* 右下工作台 */
+      shadow(ctx, 720, 468, 52, 8);
+      box(ctx, 676, 430, 92, 12, '#8a5c3a', { r: 3 });
+      [[684, 442], [752, 442]].forEach(function (lg) { box(ctx, lg[0], lg[1], 8, 30, '#6b4a2f', { r: 2 }); });
+      // 台上：花盆 + 铲子 + 种子袋
+      box(ctx, 686, 414, 20, 16, '#8a5a3a', { r: 3 });
+      ctx.fillStyle = '#2b7047';
+      ctx.beginPath(); ctx.arc(696, 410, 8, 0, 7); ctx.fill();
+      ball(ctx, 692, 405, 2.4, '#e0563f', { outline: false });
+      ball(ctx, 701, 404, 2.4, '#f0a83c', { outline: false });
+      ctx.fillStyle = '#9aa8be';
+      ctx.fillRect(716, 412, 3, 20);
+      ctx.beginPath(); ctx.moveTo(716, 412); ctx.lineTo(722, 406); ctx.lineTo(726, 412); ctx.closePath(); ctx.fill();
+      box(ctx, 736, 416, 22, 16, '#c9a06a', { r: 2 });
+      ctx.fillStyle = '#5b3d29'; ctx.font = '7px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('种子', 747, 427);
+
+      /* 水桶 + 洒水壶（左侧空处） */
+      shadow(ctx, 100, 470, 24, 6);
+      ctx.fillStyle = '#7f8f96';
+      ctx.beginPath(); ctx.moveTo(86, 436); ctx.lineTo(114, 436); ctx.lineTo(110, 468); ctx.lineTo(90, 468); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#6a7a82';
+      ctx.beginPath(); ctx.ellipse(100, 436, 14, 5, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#9aa8be'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(100, 432, 11, Math.PI, 0); ctx.stroke();
+      /* 洒水壶 */
+      box(ctx, 128, 444, 26, 22, '#5f8a6a', { r: 3 });
+      ctx.strokeStyle = '#5f8a6a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(154, 448); ctx.quadraticCurveTo(166, 440, 168, 430); ctx.stroke();
+
+      /* 长椅（左下，能坐） */
+      box(ctx, 40, 496, 104, 12, '#8a5c3a', { r: 3 });
+      box(ctx, 46, 508, 10, 20, '#6b4a2f', { r: 2 });
+      box(ctx, 128, 508, 10, 20, '#6b4a2f', { r: 2 });
+      box(ctx, 40, 476, 104, 20, '#a0684a', { r: 4 });
+
+      /* 麻袋（角落） */
+      ctx.fillStyle = '#c9a06a';
+      ctx.beginPath();
+      ctx.moveTo(756, 500); ctx.quadraticCurveTo(744, 470, 758, 464);
+      ctx.quadraticCurveTo(772, 460, 776, 476); ctx.quadraticCurveTo(782, 494, 776, 500);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,90,60,.5)'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = '#8a6244'; ctx.fillRect(752, 470, 24, 5);
+
+      /* 墙上的小暖灯（比原来多两盏，画面更亮） */
+      drawGlow(ctx, 410, 60, 'rgba(255,214,150,.22)', 120, 0.8);
+    },
+
+    /* ---------- 工坊 ---------- */
+    workshop: function (ctx, t) {
+      /* 小暖炉（左侧，能烤火） */
+      shadow(ctx, 90, 448, 40, 8);
+      box(ctx, 56, 392, 68, 56, '#4a4a52', { r: 5 });
+      ctx.fillStyle = '#2b2b31'; ctx.fillRect(64, 404, 52, 30);
+      for (var fl = 0; fl < 4; fl++) {
+        var fh = 10 + Math.sin(t / 160 + fl * 2) * 4;
+        ctx.fillStyle = fl % 2 ? '#f0a83c' : '#e0563f';
+        ctx.beginPath();
+        ctx.moveTo(72 + fl * 12, 432);
+        ctx.quadraticCurveTo(66 + fl * 12, 432 - fh, 78 + fl * 12, 432 - fh * 0.6);
+        ctx.quadraticCurveTo(84 + fl * 12, 430, 84 + fl * 12, 432);
+        ctx.fill();
+      }
+      drawGlow(ctx, 90, 420, 'rgba(255,160,80,.34)', 80, 0.85);
+      ctx.fillStyle = '#5b3d29'; ctx.fillRect(52, 384, 76, 8);
+
+      /* 木料堆（右下） */
+      for (var wd = 0; wd < 3; wd++) {
+        box(ctx, 690 + (wd % 2) * 6, 452 - wd * 14, 66, 12, wd % 2 ? '#c9a06a' : '#b8906a', { r: 3 });
+        ball(ctx, 756, 458 - wd * 14, 5.5, '#a8825c', { outline: false });
+      }
+
+      /* 包装台（右中，摆着彩带和半成品礼物） */
+      box(ctx, 674, 330, 96, 12, '#8a5c3a', { r: 3 });
+      box(ctx, 682, 342, 8, 34, '#6b4a2f', { r: 2 });
+      box(ctx, 754, 342, 8, 34, '#6b4a2f', { r: 2 });
+      box(ctx, 690, 312, 30, 18, '#c0392b', { r: 2 });
+      ctx.fillStyle = '#f0c040'; ctx.fillRect(703, 312, 4, 18);
+      // 彩带卷
+      ball(ctx, 736, 320, 7, '#58b368', { outline: false });
+      ball(ctx, 750, 320, 6, '#f0a83c', { outline: false });
+
+      /* 墙上挂的成品（木鸟 / 星星 / 小铃铛） */
+      [[470, 26], [510, 20], [552, 30]].forEach(function (h, i) {
+        ctx.fillStyle = 'rgba(90,60,35,.45)'; ctx.fillRect(h[0], h[1], 2, 14);
+        if (i === 0) {
+          ball(ctx, h[0] + 1, h[1] + 22, 8, '#c9a06a', { hi: false });
+          ctx.fillStyle = '#f0c040';
+          ctx.beginPath();
+          ctx.moveTo(h[0] + 9, h[1] + 20); ctx.lineTo(h[0] + 15, h[1] + 18); ctx.lineTo(h[0] + 9, h[1] + 24);
+          ctx.closePath(); ctx.fill();
+        } else if (i === 1) {
+          ctx.fillStyle = '#f0c040';
+          ctx.beginPath();
+          for (var k = 0; k < 10; k++) {
+            var ang = -Math.PI / 2 + k * Math.PI / 5;
+            var rr = k % 2 ? 4 : 10;
+            ctx.lineTo(h[0] + 1 + Math.cos(ang) * rr, h[1] + 24 + Math.sin(ang) * rr);
+          }
+          ctx.closePath(); ctx.fill();
+        } else {
+          ctx.fillStyle = '#c9a06a';
+          ctx.beginPath(); ctx.arc(h[0] + 1, h[1] + 24, 6, Math.PI, 0); ctx.fill();
+          ctx.fillRect(h[0] - 5, h[1] + 24, 12, 3);
+          ball(ctx, h[0] + 1, h[1] + 30, 2, '#8a6244', { outline: false });
+        }
+      });
+
+      /* 门口地毯 */
+      ctx.fillStyle = 'rgba(120,90,60,.4)';
+      ctx.beginPath(); ctx.ellipse(410, 478, 90, 24, 0, 0, 7); ctx.fill();
+
+      /* 落地灯：靠右墙立着（那里没有别的家具），灯杆落地 + 底座 */
+      var lampX = 800;
+      shadow(ctx, lampX, 470, 17, 5);
+      ctx.fillStyle = '#4a3020';
+      ctx.beginPath(); ctx.ellipse(lampX, 468, 16, 4.6, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#5b3d29'; ctx.fillRect(lampX - 2.2, 156, 4.4, 312);
+      ctx.fillStyle = 'rgba(255,235,200,.20)'; ctx.fillRect(lampX - 2.2, 156, 1.6, 312);
+      ctx.fillStyle = '#e8c98a';
+      ctx.beginPath();
+      ctx.moveTo(lampX - 18, 156); ctx.lineTo(lampX + 18, 156);
+      ctx.lineTo(lampX + 12, 122); ctx.lineTo(lampX - 12, 122);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(90,60,35,.5)'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,245,220,.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lampX - 12, 154); ctx.lineTo(lampX - 6, 124); ctx.stroke();
+      drawGlow(ctx, lampX, 158, 'rgba(255,214,150,.34)', 78, 0.9);
     }
   };
 
