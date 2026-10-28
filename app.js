@@ -77,12 +77,21 @@
     db.ref('.info/connected').on('value', function (snap) {
       var on = !!snap.val();
       onConn && onConn(on);
-      if (on && mySlot && roomRef) {
+      if (on) registerPresence();
+    });
+
+    /* 主动登记「我在线」。
+       只靠 .info/connected 的第一次回调不够：那一刻 mySlot 可能还是 null
+       （房间还没建/还没坐进槽位），于是对方永远看到「离线」，直到某次断线重连。
+       所以坐进槽位的每一步都自己调一次，并把 onDisconnect 挂好。 */
+    function registerPresence() {
+      if (!roomRef || !mySlot || !auth.currentUser) return;
+      try {
         var p = roomRef.child('presence/' + mySlot);
         p.onDisconnect().remove();
         p.set(true);
-      }
-    });
+      } catch (e) { }
+    }
 
     // 匿名登录：无需注册，设备获得一个固定 UID（同一浏览器保持不变）。
     // 安全规则用它做访问控制：只有已登录 UID 且绑定了槽位的客户端才能写数据。
@@ -133,6 +142,7 @@
           if (res.committed) {
             mySlot = target;
             bindRoomListeners();
+            registerPresence();
             return true;
           }
           if (depth >= 3) { onFull && onFull(); return false; }
@@ -157,11 +167,23 @@
           mySlot = slot;
           roomRef = db.ref('rooms/' + code);
           bindRoomListeners();
+          registerPresence();
           return code;
         });
       },
       joinRoom: function (code, prefer) {
-        return ensureAuth().then(function () { return claimSlot(code, 0, prefer); });
+        return ensureAuth().then(function () {
+          /* 先确认这个房间存在：以前直接写槽位，房间码打错一个字母就会「凭空
+             建出一个新房间」，看起来像是自己的存档没了。现在明确报错。 */
+          return db.ref('rooms/' + code).once('value');
+        }).then(function (snap) {
+          if (!snap || !snap.exists()) {
+            var e = new Error('房间不存在，检查一下房间码');
+            e.code = 'ROOM_NOT_FOUND';
+            throw e;
+          }
+          return claimSlot(code, 0, prefer);
+        });
       },
       // 接管模式：拿着链接的人可以选择占用某个角色进入（保留该角色原有服装）
       takeoverSlot: function (slot) {
@@ -178,6 +200,7 @@
         }).then(function () {
           mySlot = slot;
           bindRoomListeners();
+          registerPresence();
           return true;
         });
       },
@@ -324,6 +347,9 @@
     dot.className = 'dot ' + (on ? 'on' : 'off');
     txt.textContent = on ? '已连接云端' : '连接中断';
     banner.classList.toggle('hidden', !!on);
+    /* 把真实连接状态同步给游戏层：断网时管理员写入只是「排进待同步队列」，
+       界面不能拿它当「已经写进云端」报成功。 */
+    try { if (window.Game && window.Game.setOnline) window.Game.setOnline(on); } catch (e) { }
   }
 
   // ---------- 流程 ----------
@@ -371,8 +397,19 @@
   }
 
   function afterJoined(code) {
+    /* 记住这台设备上次进的是哪个房间：iPhone 加到主屏幕后是拿 manifest 的
+       start_url 打开的（没有 ?room=），没有这一条就只能在大厅里干瞪眼。
+       只存房间码，不存任何进度；进度永远只在 Firebase 里。 */
+    try { localStorage.setItem('omo_last_room_v1', code); } catch (e) { }
     setRoomHash(code);
     enterGame(code);
+  }
+
+  function lastRoom() {
+    try {
+      var c = localStorage.getItem('omo_last_room_v1');
+      return (/^[a-z0-9]{6,32}$/.test(c || '') && c !== 'demo') ? c : '';
+    } catch (e) { return ''; }
   }
 
   function startBackend() {
@@ -458,8 +495,8 @@
         afterJoined(code);
       }).catch(function (e) { lobbyError('创建失败：' + e.message); });
     });
-    $('#btn-join').addEventListener('click', function () {
-      var code = ($('#input-code').value || '').trim().toLowerCase();
+    function joinByCode(code) {
+      code = String(code || '').trim().toLowerCase();
       if (!/^[a-z0-9]{6,32}$/.test(code)) {
         lobbyError('房间码格式不对，应为 6-32 位小写字母或数字');
         return;
@@ -469,8 +506,29 @@
       pendingRoom = code;
       backend.joinRoom(code, preferSlot).then(function (ok) {
         if (ok) afterJoined(code);
-      }).catch(function (e) { lobbyError('加入失败：' + e.message); });
+      }).catch(function (e) { lobbyError('加入失败：' + ((e && e.message) || e)); });
+    }
+
+    $('#btn-join').addEventListener('click', function () {
+      joinByCode($('#input-code').value);
     });
+
+    /* 「回到上次的房间」：只在大厅里出现，点了才进，不会自己偷偷跳进去——
+       否则想开个新房间的人会被一直弹回旧房间。 */
+    var lr = /[?&]demo=1/.test(location.search) ? '' : lastRoom();
+    var lrBtn = $('#btn-last-room'), lrCode = $('#last-room-code'), lrInput = $('#input-code');
+    if (lr) {
+      if (lrCode) lrCode.textContent = lr;
+      if (lrBtn) lrBtn.classList.remove('hidden');
+      if (lrInput && !lrInput.value) lrInput.value = lr;
+    }
+    if (lrBtn && lr) {
+      lrBtn.addEventListener('click', function () {
+        if (pendingRoom) { return; }        // 已经在连了，别叠第二次
+        joinByCode(lr);
+      });
+    }
+
     // 房间满员时的接管入口（只属于拿链接的人）
     function takeover(slot) {
       if (!pendingRoom || !backend) return;

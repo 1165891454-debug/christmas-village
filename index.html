@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.4.0d" />
+  <link rel="stylesheet" href="style.css?v=4.4.0f" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -158,6 +158,8 @@
               <span class="role-desc">长发 · 白色毛线帽</span>
             </button>
           </div>
+
+          <button id="btn-last-room" class="btn ghost big hidden">🏠 回到上次的房间 · <span id="last-room-code"></span></button>
 
           <button id="btn-create" class="btn primary big">🏡 创建我们的房间</button>
 
@@ -335,7 +337,19 @@
               <button class="btn primary small" data-admin="ending">开启最终结局</button>
               <button class="btn ghost small" data-admin="restore">恢复上次备份</button>
             </div>
-            <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。</p>
+            <!-- v4.4.0 Final：礼品图鉴 + 素材补充（素材行由 game.js 按真实注册表生成） -->
+            <div class="admin-block">
+              <div class="admin-block-head">🎁 礼品与收藏</div>
+              <div class="admin-actions one">
+                <button class="btn primary small" data-admin="gifts">🎁 解锁全部礼品</button>
+              </div>
+              <p class="muted small-note">只补「图鉴」：车票 / 回忆 / 地址 / 特产。不发放实物，不重复领奖，不推进剧情。</p>
+            </div>
+            <div class="admin-block">
+              <div class="admin-block-head">🧺 补充素材 <span class="admin-block-sub">点一次 +5，写进共享背包</span></div>
+              <div id="admin-mats" class="admin-mats"></div>
+            </div>
+            <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。<br />素材 +5 每 60 秒最多存一次完整备份，避免连点把存档撑大；每次操作都会记进本机日志。</p>
           </div>
         </div>
         <div class="panel-actions"><button id="admin-close" class="btn ghost small">关闭</button></div>
@@ -518,15 +532,15 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js?v=4.4.0d"></script>
-  <script src="memories.js?v=4.4.0d"></script>
-  <script src="chars.js?v=4.4.0d"></script>
-  <script src="sprites.js?v=4.4.0d"></script>
-  <script src="world.js?v=4.4.0d"></script>
-  <script src="maps.js?v=4.4.0d"></script>
-  <script src="specialties.js?v=4.4.0d"></script>
-  <script src="game.js?v=4.4.0d"></script>
-  <script src="app.js?v=4.4.0d"></script>
+  <script src="firebase-config.js?v=4.4.0f"></script>
+  <script src="memories.js?v=4.4.0f"></script>
+  <script src="chars.js?v=4.4.0f"></script>
+  <script src="sprites.js?v=4.4.0f"></script>
+  <script src="world.js?v=4.4.0f"></script>
+  <script src="maps.js?v=4.4.0f"></script>
+  <script src="specialties.js?v=4.4.0f"></script>
+  <script src="game.js?v=4.4.0f"></script>
+  <script src="app.js?v=4.4.0f"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

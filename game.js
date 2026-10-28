@@ -30,6 +30,7 @@ window.Game = (function () {
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
     world: null, localWorld: null, worldFallback: false, worldErrShown: false,
+    online: null,   // null=未知；true/false 由 app.js 的 .info/connected 推过来（管理员提示用）
     ending: null, ended: false, photo: false, lastQuestText: '',
     endHintShown: false, plotIdx: 0,
     dev: (typeof location !== 'undefined') && /[?&#]dev=1/.test(location.search + location.hash)
@@ -172,10 +173,14 @@ window.Game = (function () {
     var today = dayStr();
     var st = ranchEntry(a.id);
     var gd = RANCH_GOODS[a.goods] || { icon: '🎁', name: '产物' };
-    /* 昨天喂过 → 今天就能收 */
+    /* 昨天喂过 → 今天就能收。
+       收成的事务里再判一次 ready：两台设备同时点「收」，只有先到的真的加产物，
+       后到的那次读到 ready 已经被清掉，直接放弃（否则会重复收一份）。 */
     if (st.ready && st.ready <= today) {
       mutate(function (w) {
         w.ranch = w.ranch || {};
+        var e = w.ranch[a.id] || {};
+        if (!(e.ready && e.ready <= today)) return w;
         w.ranch[a.id] = {};
         w.ranch.ever = w.ranch.ever || {};
         w.ranch.ever[a.goods] = Date.now();
@@ -183,6 +188,7 @@ window.Game = (function () {
         w.res[a.goods] = (w.res[a.goods] || 0) + 1;
         return w;
       }).then(function () {
+        if (ranchEntry(a.id).ready) return;      // 没抢到（对方刚收走），不报成功
         Snd.sfx('harvest');
         burst(a.x, a.y - 26, 'spark', 5);
         toast(gd.icon + ' 收到了 1 份' + gd.name + '！明天再来喂一次', 3200);
@@ -200,11 +206,15 @@ window.Game = (function () {
     }
     mutate(function (w) {
       w.ranch = w.ranch || {};
+      var e = w.ranch[a.id] || {};
+      if (e.fed === today) return w;             // 对方刚喂过 → 这次不再扣干草
       w.res = w.res || {};
+      if ((w.res.hay || 0) < 1) return w;
       w.res.hay = Math.max(0, (w.res.hay || 0) - 1);
       w.ranch[a.id] = { fed: today, ready: dayShift(1) };
       return w;
     }).then(function () {
+      if (ranchEntry(a.id).fed !== today) return;
       Snd.sfx('plant');
       burst(a.x, a.y - 20, 'heart', 3);
       toast('🌾 ' + a.name + ' 吃得很香 · 明天来收' + gd.name, 3000);
@@ -219,12 +229,15 @@ window.Game = (function () {
     }
     mutate(function (w2) {
       w2.ranch = w2.ranch || {};
+      if (w2.ranch.hayDay === today) return w2;  // 对方刚拿过 → 不再给第二份
       w2.ranch.hayDay = today;
       w2.ranch.gotHay = w2.ranch.gotHay || Date.now();
       w2.res = w2.res || {};
       w2.res.hay = (w2.res.hay || 0) + 3;
       return w2;
     }).then(function () {
+      var w3 = curWorld() || {};
+      if (!(w3.ranch && w3.ranch.hayDay === today)) return;
       Snd.sfx('ding');
       toast('🌾 抱了三捆干草（够喂三只）', 2800);
     });
@@ -377,6 +390,7 @@ window.Game = (function () {
     var pl = pool[ds % pool.length];
     mutate(function (w) {
       w.addr = w.addr || {};
+      if (w.addrDay === dayStr()) return w;      // 对方刚领过 → 不再多给一张信纸
       w.addr[pl.id] = w.addr[pl.id] || Date.now();
       w.addrDay = dayStr();
       w.res = w.res || {};
@@ -404,6 +418,7 @@ window.Game = (function () {
     var pl = pool[(ds + 13) % pool.length];
     mutate(function (w2) {
       w2.res = w2.res || {};
+      if (w2.addrTradeDay === dayStr()) return w2;   // 对方刚换过 → 今天不再换第二次
       if ((w2.res.paper || 0) < 3 || (w2.res.materials || 0) < 1) return w2;
       w2.res.paper -= 3;
       w2.res.materials -= 1;
@@ -946,6 +961,9 @@ window.Game = (function () {
         S.self.x = rd0.spawn.x; S.self.y = rd0.spawn.y;
         TravelMaps.bg(sp0.indoor);
       }
+      /* 进房间后先把「我在哪」告诉对方一次：不然刷新 / 刚进来时，
+         对方屏幕上自己会一直停在出生点，直到自己走两步才对齐。 */
+      setTimeout(publishPos, 120);
     }
     var w = d.world;
     if (w && !S.worldFallback) {
@@ -955,6 +973,7 @@ window.Game = (function () {
     }
     syncTickets();      // 条件达成 / 老存档里去过的地方 → 自动补票并同步给另一台设备
     refreshHUD();
+    syncAdminLive();    // 对方改了共享进度时，开着的管理员面板数字跟着走
     var o = d.slots && d.slots[S.otherSlot];
     if (o) {
       if (o.pos && typeof o.pos.x === 'number') {
@@ -1365,7 +1384,7 @@ window.Game = (function () {
     }
     S.self.moving = moving;
 
-    if (S.backend.mode !== 'demo') {
+    if (S.backend && S.backend.mode !== 'demo') {
       var now = ts;
       var dirChanged = S.self.dir !== S.lastSentDir;
       if ((moving || dirChanged) && now - S.lastSent > 150) {
@@ -2449,7 +2468,7 @@ window.Game = (function () {
     if (hint) hint.textContent = '轻触跳过 ▸';
     finBGCache = {};
     Snd.sfx('ding');
-    if (S.backend.mode !== 'demo') {
+    if (S.backend && S.backend.mode !== 'demo') {
       S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
     }
   }
@@ -3095,14 +3114,13 @@ window.Game = (function () {
       cx0 += ctx.measureText(ch).width + spacing;
     });
 
+    /* v4.4.0 Final：这张「保存下来的照片」只留三行——
+       标题 / 年份 / 一句祝福。对白里那句「下一站，冰岛。」属于剧情，
+       仍然在结局台词里（FIN_BEATS），只是不再烙进照片。 */
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#fff2cf';
-    ctx.font = 'bold 27px "PingFang SC", Georgia, serif';
-    ctx.fillText('下一站，冰岛。', W / 2, by + 141);
-
     ctx.fillStyle = 'rgba(246,238,222,.92)';
     ctx.font = '17.5px "PingFang SC", Georgia, serif';
-    ctx.fillText('愿我们一路顺利，也一直一起走下去。', W / 2, by + 174);
+    ctx.fillText('愿我们一路顺利，也一直一起走下去。', W / 2, by + 146);
   }
 
   function renderPhoto(ctx, W, H, opt) {
@@ -3573,6 +3591,77 @@ window.Game = (function () {
     return h;
   }
 
+  /* ---------- 恢复备份：只回滚「这一版代码认识」的字段 ----------
+   * 备份里没有的字段分两种：
+   *   a) 备份之后才加进来的新字段（老代码不认识）→ 必须原样留着，不能清空；
+   *   b) 备份时还不存在、但现在已经是「认识」的进度字段（比如当时树还没有 treeStage）
+   *      → 这是要被回滚的进度，不能当成新字段护着，否则「恢复」根本恢复不回去。
+   * 所以用一张已知字段白名单来区分，而不是「备份里没有就留着」。 */
+  var WORLD_KEYS = ['res', 'quest', 'garden', 'cocoa', 'daily', 'crafted', 'ranch',
+    'tickets', 'travel', 'spots', 'addr', 'spec', 'parcels', 'mail', 'sent',
+    'addrDay', 'addrTradeDay', 'commDone', 'chapter', 'chapterDay', 'treeStage', 'ended'];
+
+  /* ---------- 素材注册表（管理员「+5」用）----------
+   * 不另开一套库存：直接读 RES_NAME（游戏里所有会写进 world.res 的可计数素材）。
+   * MAT_ORDER 只决定显示顺序；RES_NAME 里将来新增的 key 会自动追加到末尾，
+   * 所以以后加材料不用改这里。
+   * 归属：world.res 是「这个房间共享的背包」（双人共用一桶木头条），
+   * 所以写入走同一个 world 事务，两台设备会同时看到。
+   */
+  var MAT_ORDER = ['wood', 'flowers', 'seeds', 'materials', 'paper', 'giftbox', 'hay', 'milk', 'wool', 'egg'];
+  function matList() {
+    var out = [], seen = {};
+    MAT_ORDER.forEach(function (k) {
+      if (RES_NAME[k]) { seen[k] = 1; out.push({ key: k, label: RES_NAME[k] }); }
+    });
+    for (var k in RES_NAME) {
+      if (RES_NAME.hasOwnProperty(k) && !seen[k]) out.push({ key: k, label: RES_NAME[k] });
+    }
+    return out;
+  }
+  /* 数量一律当非负整数看：NaN / 负数 / 小数 / 超大值都不会被放大或传染 */
+  function resNum(key) {
+    var r = worldRes() || {};
+    var n = Math.floor(Number(r[key]));
+    if (!isFinite(n) || n < 0) n = 0;
+    return n;
+  }
+  var MAT_MAX = 99999;          // 上限，防止溢出（正常玩不可能到）
+  var MAT_STEP = 5;             // 每次点一下加 5 个
+  var matPending = {};          // 每个素材各自的「写入中」锁，挡住连点重复提交
+
+  /* ---------- 管理员操作日志（本机，别写云端）----------
+   * 只记操作类型 / 目标 / 前后数量 / 是否写成功；不记口令、不记任何敏感信息。
+   * 上限 200 条，超出丢最旧的。 */
+  function logAdmin(kind, target, before, after, ok) {
+    try {
+      var arr = [];
+      try { arr = JSON.parse(localStorage.getItem('omo_admin_log') || '[]') || []; } catch (e) { arr = []; }
+      if (!Array.isArray(arr)) arr = [];
+      arr.push({ at: Date.now(), kind: kind, target: target || '', before: before, after: after, ok: !!ok });
+      if (arr.length > 200) arr = arr.slice(arr.length - 200);
+      localStorage.setItem('omo_admin_log', JSON.stringify(arr));
+    } catch (e) { }
+  }
+  function adminLog() {
+    try {
+      var arr = JSON.parse(localStorage.getItem('omo_admin_log') || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+
+  /* 连点「+5」时不要每次都写一份整份备份（存档会膨胀），
+     改成最多每 60 秒一份；大操作（车票/回忆/树/结局/礼品/恢复）仍然每次都备份。 */
+  function backupWorldThrottled(minMs) {
+    var last = 0;
+    try {
+      var b = JSON.parse(localStorage.getItem('omo_admin_backup') || 'null');
+      last = (b && b.at) || 0;
+    } catch (e) { }
+    if (Date.now() - last < (minMs || 60000)) return true;
+    return backupWorld();
+  }
+
   function openAdminGate() {
     var p = $('#admin-panel');
     if (!p) return;
@@ -3624,7 +3713,168 @@ window.Game = (function () {
       (bak && bak.at ? ('上次备份：' + new Date(bak.at).toLocaleString()) : '还没有备份（第一次操作会自动建一个）') +
       '</span></div>');
 
+    /* 礼品图鉴的真实口径：车票 / 回忆 / 地址 / 特产，四本册子都是 world 里现成的字段 */
+    lines.push('<div class="admin-sec"><b>礼品图鉴</b><span id="admin-gift-line">' + giftLineText() + '</span></div>');
+
+    var lg = adminLog();
+    if (lg.length) {
+      var last = lg[lg.length - 1];
+      lines.push('<div class="admin-sec"><b>上次操作</b><span>' +
+        esc(new Date(last.at).toLocaleTimeString() + ' · ' + last.kind + (last.target ? ' ' + last.target : '') +
+          (last.before !== undefined && last.before !== null ? ('　' + last.before + ' → ' + last.after) : '') +
+          (last.ok ? '　✓ 已写入' : '　✗ 未写入')) +
+        '</span></div>');
+    }
+
     el.innerHTML = lines.join('');
+    renderAdminMats();
+  }
+
+  /* 礼品图鉴的真实口径：车票 / 回忆 / 地址 / 特产，四本册子都是 world 里现成的字段 */
+  function giftLineText() {
+    var tl = (window.Travels && Travels.list) ? Travels.list.length : 0;
+    return '车票 ' + (window.TravelMaps ? ticketOwnedCount() : 0) + '/' + ticketTotal() +
+      ' · 回忆 ' + foundCount() + '/' + (World.allMemories || []).length +
+      ' · 地址 ' + addrCount() + '/' + tl +
+      ' · 特产 ' + specCount() + '/' + tl;
+  }
+
+  /* 另一台设备改了共享进度时，正开着的管理员面板也要跟着动——
+     不能「数据已经变了，面板上还写着旧数字」。只改文字，不重建 DOM（不然滚动位置会跳）。 */
+  function syncAdminLive() {
+    var panel = $('#admin-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    var body = $('#admin-body');
+    if (!body || body.classList.contains('hidden')) return;
+    var nums = document.querySelectorAll('#admin-mats [data-mat-num]');
+    for (var i = 0; i < nums.length; i++) {
+      var k = nums[i].getAttribute('data-mat-num');
+      var t = '当前 ' + resNum(k);
+      if (nums[i].textContent !== t) nums[i].textContent = t;
+    }
+    var gl = $('#admin-gift-line');
+    if (gl && gl.textContent !== giftLineText()) gl.textContent = giftLineText();
+  }
+
+  /* ---------- 素材 +5 行（按真实注册表生成，不写死四种）---------- */
+  function renderAdminMats() {
+    var box = $('#admin-mats');
+    if (!box) return;
+    var r = worldRes() || {};
+    var html = matList().map(function (m) {
+      var sp = String(m.label).split(' ');
+      var icon = sp.length > 1 ? sp[0] : '';
+      var name = sp.length > 1 ? sp.slice(1).join(' ') : m.label;
+      var n = resNum(m.key);
+      return '<div class="admin-mat" data-mat-row="' + m.key + '">' +
+        '<span class="admin-mat-name">' + esc(icon ? icon + ' ' + name : name) + '</span>' +
+        '<span class="admin-mat-num" data-mat-num="' + m.key + '">当前 ' + n + '</span>' +
+        '<button class="btn ghost small" type="button" data-mat-add="' + m.key + '">+5</button>' +
+        '</div>';
+    }).join('');
+    box.innerHTML = html;
+    var btns = box.querySelectorAll('[data-mat-add]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', onMatAdd);
+    }
+  }
+
+  function onMatAdd(ev) {
+    var btn = ev.currentTarget;
+    var key = btn && btn.getAttribute('data-mat-add');
+    addMat(key, btn);
+  }
+
+  function addMat(key, btn) {
+    if (!key || !RES_NAME[key]) return false;
+    if (matPending[key]) return false;   // 同一种素材的重复提交直接吞掉
+    var before = resNum(key);
+    if (before >= MAT_MAX) { toast('已经到上限了（' + MAT_MAX + '）', 2200); return false; }
+    matPending[key] = true;
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    backupWorldThrottled(60000);
+
+    mutate(function (w) {
+      w.res = w.res || {};
+      var cur = Math.floor(Number(w.res[key]));
+      if (!isFinite(cur) || cur < 0) cur = 0;
+      if (cur >= MAT_MAX) return w;       // 已经到顶，不再涨
+      w.res[key] = Math.min(MAT_MAX, cur + MAT_STEP);
+      return w;
+    }).then(function (ok) {
+      matPending[key] = false;
+      var after = resNum(key);
+      var wrote = !!ok && after === Math.min(MAT_MAX, before + MAT_STEP);
+      var local = S.worldFallback;
+      logAdmin('素材+5', key, before, after, wrote && !local);
+      if (!wrote) {
+        toast('⚠️ 没有写进存档，再试一次', 3000);
+      } else if (local) {
+        /* 云端没放行时 mutate 会降级成本机保存——别让它看起来像同步成功 */
+        toast('⚠️ 只加到了本机：云端进度还没放行（见 README「v2 规则更新」）', 5200);
+      } else {
+        toast('＋' + MAT_STEP + ' ' + (RES_NAME[key] || key) + '　现在 ' + after, 1600);
+      }
+      refreshHUD();
+      renderAdminStatus();   // 里面会重画素材行
+    });
+    return true;
+  }
+
+  /* ---------- 解锁全部礼品 ----------
+   * 「礼品」在这个项目里就是四本册子（都是 world 里现成的字段）：
+   *   world.tickets  车票      world.quest.found  回忆
+   *   world.addr     地址      world.spec         特产
+   * 全部按「没有才补」写，所以点几次都只有一份，不会复制、不会重复发奖。
+   * 明确不动的东西：world.res（实物）、world.parcels（在途包裹）、
+   * world.chapter / quest.step / treeStage / ended（剧情与树）。
+   */
+  function adminGifts() {
+    var rows = [];
+    var ownedT = [], lockedT = [];
+    if (window.TravelMaps) TravelMaps.list().forEach(function (d) { (hasTicket(d.id) ? ownedT : lockedT).push(d.name); });
+    var all = World.allMemories || [];
+    var lockedM = all.filter(function (m) { return !S.quest.found[m.id]; }).length;
+    var tl = (window.Travels && Travels.list) ? Travels.list : [];
+    var lockedA = 0, lockedS = 0;
+    tl.forEach(function (p) { if (!hasAddr(p.id)) lockedA++; if (!hasSpec(p.id)) lockedS++; });
+
+    rows.push('车票 ' + (lockedT.length ? ('还差 ' + lockedT.length + ' 张') : '已经齐了'));
+    rows.push('回忆 ' + (lockedM ? ('还差 ' + lockedM + ' 段') : '已经齐了'));
+    rows.push('地址 ' + (lockedA ? ('还差 ' + lockedA + ' 个') : '已经齐了'));
+    rows.push('特产 ' + (lockedS ? ('还差 ' + lockedS + ' 件') : '已经齐了'));
+    if (!lockedT.length && !lockedM && !lockedA && !lockedS) { toast('🎁 图鉴本来就是全的'); return; }
+    if (!window.confirm('确定要「解锁全部礼品（图鉴）」吗？\n\n' + rows.join('\n') +
+      '\n\n只补图鉴，不发实物、不重复领奖、不推进剧情。操作前会先备份。')) return;
+
+    if (!backupWorld()) toast('⚠️ 备份没写进本机，仍然继续。');
+    var before = { t: ownedT.length, m: all.length - lockedM, a: addrCount(), s: specCount() };
+
+    mutate(function (w) {
+      if (window.TravelMaps) {
+        w.tickets = w.tickets || {};
+        TravelMaps.list().forEach(function (d) { if (!w.tickets[d.id]) w.tickets[d.id] = Date.now(); });
+      }
+      w.quest = w.quest || {};
+      w.quest.found = w.quest.found || {};
+      all.forEach(function (m) { if (!w.quest.found[m.id]) w.quest.found[m.id] = Date.now(); });
+      w.addr = w.addr || {};
+      w.spec = w.spec || {};
+      tl.forEach(function (p) {
+        if (!w.addr[p.id]) w.addr[p.id] = Date.now();
+        if (!w.spec[p.id]) w.spec[p.id] = Date.now();
+      });
+      return w;   // 故意不碰 res / parcels / chapter / quest.step / treeStage / ended
+    }).then(function (ok) {
+      var after = { t: Object.keys((curWorld() || {}).tickets || {}).length, m: foundCount(), a: addrCount(), s: specCount() };
+      var good = !!ok && after.m >= all.length && after.a >= tl.length && after.s >= tl.length;
+      logAdmin('解锁全部礼品', '图鉴', before.t + '/' + before.m + '/' + before.a + '/' + before.s,
+        after.t + '/' + after.m + '/' + after.a + '/' + after.s, good && !S.worldFallback);
+      renderAdminStatus();
+      if (!good) toast('⚠️ 没解锁成功，再试一次', 3000);
+      else if (S.worldFallback) toast('⚠️ 只解锁在本机：云端进度还没放行', 5200);
+      else toast('🎁 礼品图鉴补齐了 · 车票 ' + after.t + ' · 回忆 ' + after.m + ' · 地址 ' + after.a + ' · 特产 ' + after.s, 4200);
+    });
   }
 
   function backupWorld() {
@@ -3640,31 +3890,51 @@ window.Game = (function () {
     memories: '补齐全部回忆',
     tree: '直接把树点亮到最终阶段',
     ending: '立刻开启最终结局',
+    gifts: '解锁全部礼品（图鉴）',
     restore: '恢复上次备份'
   };
 
   function adminDo(kind) {
+    if (kind === 'gifts') { adminGifts(); return; }   // 带自己的确认文案与前后计数
+    if (kind && kind.indexOf('mat:') === 0) { addMat(kind.slice(4), null); return; }
+    /* 恢复备份必须最先分出去：以前它跟着「先备份再操作」的通用流程走，
+       结果「恢复」第一步就把备份覆盖成了当前状态，恢复完等于什么都没变。
+       现在恢复不动 omo_admin_backup，只把「恢复前」另存一份当后悔药。 */
+    if (kind === 'restore') { adminRestore(); return; }
     var label = ADMIN_LABEL[kind] || kind;
     if (!window.confirm('确定要「' + label + '」吗？\n\n操作前会先备份当前进度，出问题可以从这里恢复。')) return;
     if (!backupWorld()) toast('⚠️ 备份没写进本机，仍然继续。');
 
     if (kind === 'tickets') {
+      var t0 = Object.keys((curWorld() || {}).tickets || {}).length;
       mutate(function (w) {
         w.tickets = w.tickets || {};
         TravelMaps.list().forEach(function (d) { if (!w.tickets[d.id]) w.tickets[d.id] = Date.now(); });
         return w;
-      }).then(function () { renderAdminStatus(); toast('🎫 车票全补上了 · ' + ticketTotal() + ' 张'); });
+      }).then(function (ok) {
+        var t1 = Object.keys((curWorld() || {}).tickets || {}).length;
+        logAdmin('补齐车票', 'tickets', t0, t1, !!ok);
+        renderAdminStatus(); toast(adminWriteMsg(ok, '🎫 车票全补上了 · ' + ticketTotal() + ' 张', '车票没补上'), 3600);
+      });
     } else if (kind === 'memories') {
+      var m0 = foundCount();
       mutate(function (w) {
         w.quest = w.quest || {};
         w.quest.found = w.quest.found || {};
         (World.allMemories || []).forEach(function (m) { if (!w.quest.found[m.id]) w.quest.found[m.id] = Date.now(); });
         if ((w.quest.step || 0) < 4) w.quest.step = 4;
         return w;
-      }).then(function () { renderAdminStatus(); toast('💭 回忆册补齐了'); });
+      }).then(function (ok) {
+        logAdmin('补齐回忆', 'memories', m0, foundCount(), !!ok);
+        renderAdminStatus(); toast(adminWriteMsg(ok, '💭 回忆册补齐了', '回忆没补齐'), 3600);
+      });
     } else if (kind === 'tree') {
+      var s0 = treeStage();
       mutate(function (w) { w.treeStage = 3; return w; })
-        .then(function () { renderAdminStatus(); toast('🎄 树已经点亮到最后阶段'); });
+        .then(function (ok) {
+          logAdmin('点亮圣诞树', 'treeStage', s0, treeStage(), !!ok);
+          renderAdminStatus(); toast(adminWriteMsg(ok, '🎄 树已经点亮到最后阶段', '树没点亮'), 3600);
+        });
     } else if (kind === 'ending') {
       S.adminEnding = true;
       mutate(function (w) {
@@ -3673,7 +3943,8 @@ window.Game = (function () {
         if ((w.quest.step || 0) < 6) w.quest.step = 6;
         w.ended = false;
         return w;
-      }).then(function () {
+      }).then(function (ok) {
+        logAdmin('开启最终结局', 'ending', null, null, !!ok);
         renderAdminStatus();
         closeAllPanelsSilent();
         S.paused = false;
@@ -3682,15 +3953,73 @@ window.Game = (function () {
         toast('🎁 结局开始了');
       });
     } else if (kind === 'restore') {
-      var raw = null;
-      try { raw = JSON.parse(localStorage.getItem('omo_admin_backup') || 'null'); } catch (e) { }
-      if (!raw || !raw.world) { toast('还没有可恢复的备份'); return; }
-      if (!window.confirm('恢复会覆盖当前进度（' + new Date(raw.at).toLocaleString() + ' 的备份）。确定？')) return;
-      mutate(function () { return raw.world; }).then(function () {
-        renderAdminStatus();
-        toast('已恢复备份');
-      });
+      /* 这里已经不会走到：restore 在 adminDo 开头就分流到 adminRestore()。 */
     }
+  }
+
+  function readBackup() {
+    try { return JSON.parse(localStorage.getItem('omo_admin_backup') || 'null'); } catch (e) { return null; }
+  }
+
+  /* 管理员写完之后到底写进哪儿了？界面必须说实话：
+   *   ok=false            → 连事务都没提交
+   *   S.worldFallback     → 云端拒绝（规则/权限），mutate 把改动存到本机了
+   *   S.online === false  → 断网：改动排进了 Firebase 待同步队列，联网才会真正落盘
+   * 只有三种都不是，才算「真的写进云端了」。 */
+  function netDown() {
+    if (S.online === false) return true;                     // Firebase .info/connected 说断了（权威）
+    try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return true; } catch (e) { }
+    return false;                                            // 立刻生效的兜底（.info/connected 有 ~1s 延迟）
+  }
+
+  function adminWriteMsg(ok, good, bad) {
+    if (!ok) return '⚠️ ' + bad + '：没有写进存档，再试一次';
+    if (S.worldFallback) return '⚠️ ' + bad + '：云端没放行，只写进了本机（换设备看不到）';
+    if (netDown()) return '⚠️ ' + bad + '：当前连接中断，只排进了待同步队列，联网后才会真正写进云端';
+    return good;
+  }
+
+  function adminRestore() {
+    var raw = readBackup();
+    if (!raw || !raw.world) { toast('还没有可恢复的备份'); return; }
+    if (!window.confirm('恢复会覆盖当前进度（' + new Date(raw.at).toLocaleString() + ' 的备份）。确定？')) return;
+    /* 后悔药：把「恢复前」的状态另存一份，恢复错了还能从这个键再拿回来 */
+    try {
+      localStorage.setItem('omo_admin_pre_restore', JSON.stringify({ at: Date.now(), world: curWorld() || {} }));
+    } catch (e) { }
+    /* 只回写备份里「认得」的字段：备份之后新加的、这一版代码还不认识的字段
+       原样保留，所以恢复不会把未知字段抹掉；认识的老字段一律以备份为准。 */
+    var keepUnknown = [];
+    var settled = false;
+    /* 断网时 Firebase 事务会先在本地应用，然后一直等云端确认——
+       不给提示的话，玩家会以为「点完就已经写进云端了」。6 秒没回音就直说。 */
+    var watchdog = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      logAdmin('恢复备份', 'restore', null, new Date(raw.at).toLocaleString(), false);
+      toast(netDown()
+        ? '⏳ 还没等到云端确认：当前连接中断，恢复只排进了待同步队列，联网后才会真正写进云端'
+        : '⏳ 还没等到云端确认：请检查网络；恢复可能没有写进去，可以再点一次', 6200);
+    }, 6000);
+
+    mutate(function (w) {
+      var cur = w || {};
+      var next = clone(raw.world) || {};
+      for (var k in cur) {
+        if (!cur.hasOwnProperty(k)) continue;
+        if (WORLD_KEYS.indexOf(k) >= 0) continue;   // 认识的进度字段：交给备份回滚
+        if (!(k in next)) { next[k] = cur[k]; keepUnknown.push(k); }
+      }
+      return next;
+    }).then(function (ok) {
+      var late = settled;          // 看门狗已经先报过「还没确认」
+      settled = true; clearTimeout(watchdog);
+      logAdmin('恢复备份', 'restore', null, new Date(raw.at).toLocaleString(), !!ok && !S.worldFallback && !netDown());
+      renderAdminStatus();
+      toast(adminWriteMsg(ok,
+        (late ? '✅ 云端已经确认：' : '') + '已恢复备份' + (keepUnknown.length ? '（保留了 ' + keepUnknown.length + ' 个备份里没有的字段）' : ''),
+        '恢复没写进去'), 4600);
+    });
   }
 
   /* 管理员入口：菜单 → 设置 → 最底部的「小镇维护」一行小字 → 4 位口令。
@@ -3910,7 +4239,7 @@ window.Game = (function () {
     var names = { cabin: '🏠 你们回到了自己的圣诞小屋', cafe: '☕ 推门进了暖冬咖啡——好暖和', greenhouse: '🌿 进了星星温室，玻璃上都是雾气', workshop: '🛠️ 进了礼物工坊，木屑香香的' };
     toast(names[id] || '进来了');
     if (id === 'greenhouse') grantDaily();
-    if (S.backend.mode !== 'demo') {
+    if (S.backend && S.backend.mode !== 'demo') {
       S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, id).catch(function () { });
     }
   }
@@ -3921,7 +4250,7 @@ window.Game = (function () {
     S.remote.seen = !!(S.data && S.data.slots && S.data.slots[S.otherSlot]) && S.remote.inter === 0;
     Snd.sfx('door');
     toast('⛄ 回到了雪夜的小镇');
-    if (S.backend.mode !== 'demo') {
+    if (S.backend && S.backend.mode !== 'demo') {
       S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
     }
   }
@@ -3981,6 +4310,7 @@ window.Game = (function () {
     pause();
   }
   function dlgNext() {
+    if (!dlgLines || !dlgLines.length) { closeAllPanels(); return; }  // 没有对话时点「继续」不该炸
     dlgIdx++;
     if (dlgIdx < dlgLines.length) {
       $('#dlg-text').textContent = dlgLines[dlgIdx];
@@ -4712,7 +5042,20 @@ window.Game = (function () {
   function devPlace(x, y) {
     if (!S.dev) return false;
     S.self.x = x; S.self.y = y;
+    /* 瞬移也要让对方看见：正常走路时位置是边走边发的，
+       直接改坐标不发的话，对方屏幕上会一直停在旧位置。 */
+    publishPos();
     return true;
+  }
+
+  /* 主动把当前位置发给对方一次（进门 / 瞬移 / 刷新后第一次拿到存档时用）。
+     正常走路仍然走主循环里那套 150ms 节流，不额外增加写入。 */
+  function publishPos() {
+    if (!S.backend || !S.backend.setPos) return;
+    try {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, hereKey())
+        .catch(function () { });
+    } catch (e) { }
   }
   function devWave(ms) {
     if (!S.dev) return false;
@@ -4733,6 +5076,8 @@ window.Game = (function () {
       cam: { x: S.cam.x, y: S.cam.y }, slot: S.mySlot,
       outfit: getOutfit(S.mySlot, 'winter'), otherOutfit: getOutfit(S.otherSlot, 'winter'),
       res: Object.assign({}, worldRes()),
+      remote: { x: Math.round(S.remote.x), y: Math.round(S.remote.y), tx: Math.round(S.remote.tx),
+                ty: Math.round(S.remote.ty), seen: !!S.remote.seen, inter: S.remote.inter || 0 },
       chapter: chapterNo(), chapterDay: chapterDayStr(),
       ranch: Object.assign({}, (curWorld() && curWorld().ranch) || {}),
       indoors: !!S.interId, memoryCount: foundCount()
@@ -4782,9 +5127,38 @@ window.Game = (function () {
     /* v4.1 给验收脚本用的口子（只在 ?dev=1 时有意义，但本身不改变游戏行为） */
     devTicketBook: function () { openTicketBook(); },
     devBook: function () { openBook(); },
-    devAdmin: function () { openAdminGate(); },
+    devAdmin: function () { if (!S.dev && !adminOk) return false; openAdminGate(); return true; },
+    /* app.js 的连接监听推过来的真实在线状态（只读给 UI 用，不改任何进度） */
+    setOnline: function (on) { S.online = !!on; return S.online; },
     devAdminUnlock: function (pin) { return djb2('omo' + (pin || '')) === ADMIN_HASH; },
-    devAdminAct: function (k) { adminDo(k); },
+    /* 写入口加一道闸：只有 ?dev=1 的验收页面，或者已经在上界面里输对过口令，
+       才肯执行——控制台里喊一句 devAdminAct('tickets') 不再直接生效。 */
+    devAdminAct: function (k) { if (!S.dev && !adminOk) return false; adminDo(k); return true; },
+    /* 只读：素材注册表 / 管理员日志 / 礼品图鉴计数（验收脚本用来对账） */
+    devAdminMats: function () {
+      return matList().map(function (m) { return { key: m.key, label: m.label, n: resNum(m.key) }; });
+    },
+    devAdminLog: function () { return adminLog(); },
+    /* 只读：整份共享存档 + 房间/槽位。验收脚本对账用，不写任何东西。 */
+    devWorldRaw: function () { return S.dev ? JSON.parse(JSON.stringify(curWorld() || {})) : null; },
+    devRoom: function () {
+      if (!S.dev) return null;
+      return { code: S.code || null, slot: S.mySlot, other: S.otherSlot, fallback: !!S.worldFallback,
+               online: (S.online === null ? null : !!S.online), navOnline: (typeof navigator !== 'undefined' ? !!navigator.onLine : null),
+               mode: (S.backend && S.backend.mode) || null };
+    },
+    devGifts: function () {
+      var all = World.allMemories || [];
+      var tl = (window.Travels && Travels.list) ? Travels.list : [];
+      return {
+        tickets: (window.TravelMaps ? ticketOwnedCount() : 0), ticketTotal: ticketTotal(),
+        mem: foundCount(), memTotal: all.length,
+        addr: addrCount(), spec: specCount(), places: tl.length,
+        res: Object.assign({}, worldRes()),
+        parcels: Object.keys((curWorld() || {}).parcels || {}).length,
+        chapter: chapterNo(), treeStage: treeStage(), ended: !!((curWorld() || {}).ended)
+      };
+    },
     devPhoto: function (opt) { openPhoto(opt); },
     /* 最终结局的验收入口：只在 ?dev=1 下有效，不改变玩家看到的任何东西 */
     devFinale: function (act, arg) {
