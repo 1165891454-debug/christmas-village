@@ -318,6 +318,14 @@ window.Game = (function () {
     return out;
   }
 
+  /* 「拆过的信」是一串流水（w.mail = []）。老存档或手改存档里万一是对象，
+     push 会当场抛错 —— 在点击回调里抛错＝玩家看到的「点了没反应」。
+     所以三处写入统一走这里，先把它收成数组。 */
+  function mailArr(w) {
+    if (!Array.isArray(w.mail)) w.mail = [];
+    return w.mail;
+  }
+
   /* ---------------- 包裹 ---------------- */
   function parcels() { var w = curWorld() || {}; return w.parcels || {}; }
   function parcelOf(id) { return parcels()[id] || null; }
@@ -349,14 +357,24 @@ window.Game = (function () {
     mutate(function (w) {
       w.res = w.res || {};
       if ((w.res.giftbox || 0) < 1) return w;
-      w.res.giftbox -= 1;
+      /* 先判重、再扣礼盒。旧顺序是「先扣再判重」：两台设备同时点同一张卡时，
+         后到的那次事务会先扣掉一个礼盒，然后发现已经有包裹就直接返回 ——
+         礼盒白扣了。顺序换过来，重复点击不会多扣一分钱。 */
       w.parcels = w.parcels || {};
-      if (w.parcels[placeId]) return w;
+      if (w.parcels[placeId]) return undefined;
+      w.res.giftbox -= 1;
       w.parcels[placeId] = { at: Date.now(), readyAt: Date.now() + PACK_MS };
       w.sent = (w.sent || 0) + 1;
       return w;
     }).then(function (ok) {
-      if (!ok) { toast('没寄出去，再试一次', 2400); return; }
+      if (!ok) {
+        /* 事务被拒：要么对方先寄了同一件，要么礼盒刚好被用掉——都不是"没反应"，
+           按真实原因说一句。 */
+        if (parcelOf(placeId)) toast('📮 已经有一件寄往' + pl.name + '了，先等它回来', 3200);
+        else toast('没寄出去：礼盒不够了，再做一个（纸×1 + 木材×2 + 鲜花×2）', 4200);
+        refreshHUD();
+        return;
+      }
       Snd.sfx('craft');
       toast('📮 包裹寄往' + pl.name + '了 · 大概 ' + fmtRemain(PACK_MS) + '后回来', 4200);
       refreshHUD();
@@ -375,9 +393,9 @@ window.Game = (function () {
       delete w.parcels[placeId];
       w.spec = w.spec || {};
       w.spec[placeId] = w.spec[placeId] || Date.now();
-      w.mail = w.mail || [];
-      w.mail.push({ place: placeId, at: Date.now() });
-      if (w.mail.length > 240) w.mail = w.mail.slice(-240);
+      var ml0 = mailArr(w);
+      ml0.push({ place: placeId, at: Date.now() });
+      if (ml0.length > 240) w.mail = ml0.slice(-240);
       // 回信里总会夹一点心意：两朵干花
       w.res = w.res || {};
       w.res.flowers = (w.res.flowers || 0) + 2;
@@ -509,9 +527,9 @@ window.Game = (function () {
       w.expressDay = dayStr();
       w.spec = w.spec || {};
       w.spec[pl.id] = w.spec[pl.id] || Date.now();
-      w.mail = w.mail || [];
-      w.mail.push({ place: pl.id, at: Date.now(), fast: 1 });
-      if (w.mail.length > 240) w.mail = w.mail.slice(-240);
+      var ml1 = mailArr(w);
+      ml1.push({ place: pl.id, at: Date.now(), fast: 1 });
+      if (ml1.length > 240) w.mail = ml1.slice(-240);
       w.res.flowers = (w.res.flowers || 0) + 1;                // 顺手带回一朵干花
       return w;
     }).then(function (ok) {
@@ -605,10 +623,19 @@ window.Game = (function () {
     }
     return out;
   }
-  function commKey(idx) { return dayStr() + '#' + idx; }
+  /* ★ v4.5.1 修复（阿信的「今天托付的事」交不了）：
+     这里原来是 dayStr() + '#' + idx，写成云端字段名就是 "2026-10-28#1"。
+     Firebase Realtime Database 的 key **不允许包含 # . $ / [ ]**，
+     于是 rooms/{code}/world/commDone 这一次事务直接被云端拒掉、抛异常，
+     而在面板里的点击回调里抛异常＝玩家看到的「点了没反应」。
+     改成只含字母数字下划线的 d<yyyymmdd>_<idx>。
+     旧 key 只在本地 demo 存档里可能存在（云端从来写不进去），读取时一并认。 */
+  function commKey(idx) { return 'd' + commSeed() + '_' + idx; }
+  function commLegacyKey(idx) { return dayStr() + '#' + idx; }
   function commDone(idx) {
     var w = curWorld() || {};
-    return !!(w.commDone && w.commDone[commKey(idx)]);
+    var d = w.commDone || {};
+    return !!(d[commKey(idx)] || d[commLegacyKey(idx)]);
   }
   function commFor(npcId) {
     var list = commsToday();
@@ -643,19 +670,20 @@ window.Game = (function () {
     }
     mutate(function (w) {
       w.commDone = w.commDone || {};
-      if (w.commDone[commKey(c.idx)]) return w;
+      /* 已经交过（含本地老 key / 另一台设备刚交）→ 放弃这次写入，一分奖励都不发 */
+      if (w.commDone[commKey(c.idx)] || w.commDone[commLegacyKey(c.idx)]) return undefined;
       w.res = w.res || {};
       if (c.want.kind === 'res') {
-        if ((w.res[c.want.key] || 0) < c.want.n) return w;
+        if ((w.res[c.want.key] || 0) < c.want.n) return undefined;
         w.res[c.want.key] -= c.want.n;
       } else if (!(w.spec && w.spec[c.want.key])) {
-        return w;
+        return undefined;
       }
       for (var k in c.give) if (c.give.hasOwnProperty(k)) w.res[k] = (w.res[k] || 0) + c.give[k];
       w.commDone[commKey(c.idx)] = Date.now();
       return w;
     }).then(function (ok) {
-      if (!ok) return;
+      if (!ok) { refreshHUD(); return; }
       Snd.sfx('ding');
       toast('🤝 委托完成：' + commGiveText(c), 3600);
       refreshHUD();
@@ -1289,16 +1317,25 @@ window.Game = (function () {
       });
     });
     /* v4.3 寄件台 / 信袋里的按钮用事件委托：
-       列表是动态生成的，委托式绑定在手机上也不会有几百个监听器。 */
-    document.addEventListener('click', function (e) {
+       列表是动态生成的，委托式绑定在手机上也不会有几百个监听器。
+
+       ★ v4.5.1 修复（寄件台点了没反应 / 阿信托付的事交不了）：
+       下面那个「点面板内部不关闭面板」的循环里有一句 e.stopPropagation()，
+       它挂在 #pack-panel / #mail-panel 自己身上 —— 冒泡到面板就被掐断了，
+       于是挂在 document 上的这份委托**一次也收不到**面板里的点击。
+       所以这里必须用**捕获阶段**（第三个参数 true）：捕获从 document 往目标走，
+       先于面板上的 stopPropagation 执行完，事件被拦掉也不影响我们。
+       不改成「面板里别 stopPropagation」，是因为那句挡的是「点面板内部漏到画布」。 */
+    function panelActionClick(e) {
       var t = e.target;
       if (!t || !t.closest) return;
       var sd = t.closest('[data-send]');
       if (sd) {
         e.preventDefault();
         var pid = sd.getAttribute('data-send');
-        if (parcelState(pid) === 'ready') claimParcel(pid);
-        else if (parcelState(pid) === 'fly') toast('这件还在路上，再等等', 2400);
+        var st = parcelState(pid);
+        if (st === 'ready') claimParcel(pid);
+        else if (st === 'fly') toast('这件还在路上，再等等', 2400);
         else if (hasSpec(pid)) toast('这个地址的特产已经收过了，可以寄去别的地方', 3000);
         else sendParcel(pid);
         return;
@@ -1310,10 +1347,22 @@ window.Game = (function () {
         e.preventDefault();
         var who = cm.getAttribute('data-comm');
         var line = talkComm(who);
+        /* talkComm 返回 null = 这条委托已经不在了（另一台设备先交了 / 跨天了）。
+           以前这里什么都不做，玩家看到的就是「点了没反应」，现在明确说一句。 */
         if (line) { toast(line.replace(/[（(].*?[）)]/g, ''), 3600); openMailPanel(); }
+        else { toast('这件事今天已经交过了，明天再来看看 ✉️', 3200); openMailPanel(); }
         return;
       }
-    });
+    }
+    document.addEventListener('click', function (e) {
+      /* 任何一步抛错都不能变成「点了没反应」：打日志 + 给一句人话。 */
+      try { panelActionClick(e); }
+      catch (err) {
+        if (window.console && console.error) console.error('[panel-click]', err);
+        toast('这一步没走通，再试一次 ✦', 2600);
+      }
+    }, true);
+
     var mAddr = $('#mail-addr');
     if (mAddr) mAddr.addEventListener('click', function () { takeAddrToday(); });
     var mTrade = $('#mail-trade');
@@ -3949,8 +3998,7 @@ window.Game = (function () {
         w.spec = w.spec || {};
         w.spec[pl.id] = w.spec[pl.id] || Date.now();
         w.res.flowers = (w.res.flowers || 0) + 1;
-        w.mail = w.mail || [];
-        w.mail.push({ place: pl.id, at: Date.now() });
+        mailArr(w).push({ place: pl.id, at: Date.now() });
       }
       /* 回忆本身就是「去过」的证明 → 那个地方的地址就到手了 */
       w.addr = w.addr || {};

@@ -1,8 +1,12 @@
 /* sw.js — Omo's Christmas Village Service Worker
  * 策略：导航与配置走网络优先（保证更新可达），静态资源缓存优先。
  * 版本号变更（CACHE 名）即可强制刷新全部缓存。
+ *
+ * 2026-10-28 紧急修复（寄件台点了没反应 / 阿信托付的事交不了）：
+ *   版本号仍然是 v4.5.0（index.html 里的 ?v=4.5.0 未动），但缓存名必须换一个，
+ *   否则已经打开过 v4.5.0 的手机还会用旧缓存的 game.js，修复等于没上传。
  */
-var CACHE = 'omo-v4.5.0';
+var CACHE = 'omo-v4.5.0b';
 var CORE = [
   './',
   './index.html',
