@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.4.0b" />
+  <link rel="stylesheet" href="style.css?v=4.4.0d" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -208,6 +208,19 @@
       <!-- 面板遮罩：点击它才关闭面板（面板内部点击不会关闭） -->
       <div id="panel-scrim" class="hidden"></div>
 
+      <!-- 最终结局（v4.4.0 Final）：一块独立的 16:9 舞台，
+           不复用小镇画布，所以镜头怎么摆都不会碰到世界坐标。 -->
+      <div id="finale" class="hidden">
+        <div id="finale-stage">
+          <canvas id="finale-canvas" width="1920" height="1080"></canvas>
+        </div>
+        <div id="finale-cap">
+          <div id="finale-who"></div>
+          <div id="finale-say"></div>
+          <div id="finale-hint">轻触继续 ▸</div>
+        </div>
+      </div>
+
       <!-- 对话框 -->
       <div id="dlg" class="panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
@@ -306,7 +319,7 @@
         </div>
         <div class="panel-body">
           <div id="admin-pin-wrap">
-            <p class="muted small-note">输入 4 位口令。默认是圣诞节的日子。</p>
+            <p class="muted small-note">输入 4 位口令。</p>
             <div class="admin-pin-row">
               <input id="admin-pin" class="admin-pin" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off" />
               <button id="admin-pin-ok" class="btn primary small">进入</button>
@@ -472,12 +485,6 @@
         <div class="panel-actions"><button id="menu-close" class="btn ghost small">关闭</button></div>
       </div>
 
-      <!-- 结局文字 -->
-      <div id="end-overlay" class="hidden">
-        <div id="end-text"></div>
-        <div id="end-hint">轻触继续 ▸</div>
-      </div>
-
       <!-- 拍照模式 -->
       <div id="photo-modal" class="hidden">
         <div id="photo-card">
@@ -511,15 +518,15 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js?v=4.4.0"></script>
-  <script src="memories.js?v=4.4.0"></script>
-  <script src="chars.js?v=4.4.0"></script>
-  <script src="sprites.js?v=4.4.0"></script>
-  <script src="world.js?v=4.4.0"></script>
-  <script src="maps.js?v=4.4.0"></script>
-  <script src="specialties.js?v=4.4.0"></script>
-  <script src="game.js?v=4.4.0b"></script>
-  <script src="app.js?v=4.4.0"></script>
+  <script src="firebase-config.js?v=4.4.0d"></script>
+  <script src="memories.js?v=4.4.0d"></script>
+  <script src="chars.js?v=4.4.0d"></script>
+  <script src="sprites.js?v=4.4.0d"></script>
+  <script src="world.js?v=4.4.0d"></script>
+  <script src="maps.js?v=4.4.0d"></script>
+  <script src="specialties.js?v=4.4.0d"></script>
+  <script src="game.js?v=4.4.0d"></script>
+  <script src="app.js?v=4.4.0d"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

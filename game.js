@@ -1211,7 +1211,12 @@ window.Game = (function () {
     if (bpt) bpt.addEventListener('click', function () { plantSeed(S.plotIdx, 'tree'); });
     if (bhv) bhv.addEventListener('click', function () { harvest(S.plotIdx); });
     /* 合成按钮由 openCraftPanel() 动态生成（配方从 3 个变成 5 个），这里不再逐个绑定 */
-    $('#end-overlay').addEventListener('click', function () { endNext(); });
+    /* 最终结局：点画面任何地方推进台词（只绑定一次） */
+    var finBox = $('#finale');
+    if (finBox && !finBox.dataset.bound) {
+      finBox.dataset.bound = '1';
+      finBox.addEventListener('click', function () { finNextBeat(); });
+    }
     $('#photo-close').addEventListener('click', function () { closePhoto(); });
     var px2 = $('#photo-x');
     if (px2) px2.addEventListener('click', function (e) { e.stopPropagation(); closePhoto(); });
@@ -1299,6 +1304,7 @@ window.Game = (function () {
     S.simT += dt;                             // 累计模拟时间（调试口用来算"每模拟秒位移"）
     perfTick(dt);
     if (!S.paused) update(dt, ts);
+    if (S.ending) finTick(dt, ts);
     draw(ts);
     rafId = requestAnimationFrame(loop);
   }
@@ -1313,7 +1319,7 @@ window.Game = (function () {
   }
 
   function update(dt, ts) {
-    if (S.ending) { updateEnding(dt, ts); return; }
+    if (S.ending) return;   // 最终结局有自己的舞台，世界这一层完全停下
 
     /* 输入合成：键盘给满速，摇杆给 0~1 的模拟量；两者取较大者，不叠加。
      * 旧的写法把任意输入都归一化成 1.0，轻推摇杆也等于全速跑。 */
@@ -1621,63 +1627,935 @@ window.Game = (function () {
     });
   }
 
-  /* ---------- 结局序列：Omo's Christmas Night ---------- */
-  var END_LINES = [
-    '平安夜。小镇的每一盏灯，都亮了起来。',
-    '这棵圣诞树，是你们两个人一起、一天一天养出来的。',
-    '从乌海的沙丘，到赛里木湖的湖水——这一路捡回来的回忆，都收在册子里了。',
-    '现在，站到树下去吧。这是属于你们的夜晚。'
+  /* ============================================================
+   * v4.4.0 Final · 最终结局（Finale）
+   * ------------------------------------------------------------
+   * 不是「在小镇画布上把镜头推到树前」，而是切到一块独立的舞台：
+   *   天空（星 / 月 / 云）→ 远山 → 整个小镇 → 雪地 → 全亮的树 →
+   *   全镇的人 → 烟花 → 圣诞老人雪橇。
+   * 同一份 paintFinale() 既画游戏里的最后一幕，也画最后那张照片，
+   * 所以「玩到的最后一幕」和「存下来的那张」是同一个画面。
+   *
+   * 坐标全部写成比例（xf / yf），人物大小乘 K = H / 1080，
+   * 所以同一段代码可以画 1920×1080（游戏里）和 1920×900（照片画面区）。
+   *
+   * 性能：不动的部分（天空 / 小镇 / 雪地 / 树 / 礼物 / 两个人）烘到一张
+   * 离屏画布上，每帧只做 1 次 drawImage + 几个人物 + 雪花 + 烟花。
+   * ============================================================ */
+  var FIN_W = 1920, FIN_H = 1080;
+
+  var FIN = {
+    horizon: 0.720,
+    /* 树：整个画面的中心。星顶在 0.12H 附近，树裙压到 0.86H。 */
+    tree: { xf: 0.500, yf: 0.848, sf: 2.12 },
+    /* 两个人永远站在最前面、最大 */
+    couple: [
+      { g: 'm', xf: 0.454, yf: 0.964, sf: 3.55, dir: 0 },
+      { g: 'f', xf: 0.545, yf: 0.970, sf: 3.46, dir: 0 }
+    ],
+    /* 居民：左右分开、高低错落、朝向不同，y 越小越远 */
+    cast: [
+      { id: 'carpenter', xf: 0.166, yf: 0.938, sf: 2.54, dir: 0 },
+      { id: 'postman', xf: 0.248, yf: 0.866, sf: 2.24, dir: 0 },
+      { id: 'baker', xf: 0.334, yf: 0.922, sf: 2.46, dir: 3 },
+      { id: 'barista', xf: 0.666, yf: 0.870, sf: 2.22, dir: 0 },
+      { id: 'shepherd', xf: 0.746, yf: 0.930, sf: 2.50, dir: 2 },
+      { id: 'elf', xf: 0.822, yf: 0.906, sf: 2.40, dir: 0 },
+      { id: 'snowman', xf: 0.896, yf: 0.952, sf: 2.62, dir: 0 }
+    ]
+  };
+
+  function finK(H) { return H / 1080; }
+  function finTreeY(H) { return H * FIN.tree.yf; }
+
+  var FIN_CAST_DELAY = 420;
+  var FIN_GATHER_AT = 2100;
+  var FIN_TALK_AT = FIN_GATHER_AT + FIN_CAST_DELAY * 7 + 520;
+  /* 从这一句开始，天上就该有雪橇了。跳着看（管理员/调试）也不会漏。 */
+  var FIN_SANTA_BEAT = 6;
+
+  var FIN_BEATS = [
+    { who: '', text: '平安夜。小镇的灯，一盏一盏亮了起来。' },
+    { who: '', text: '这棵树，是你们两个人一起、一天一天养出来的。' },
+    { who: '邮差 · 阿信', text: '这一年，你们把许多远方的故事寄到了这里。', fire: 1 },
+    { who: '面包师 · 麦香', text: '以后每一次回来，炉子里都会有刚出炉的面包等着你们。' },
+    { who: '牧羊女 · 小禾', text: '不管走到多远，都别忘了——这儿还有一群羊在等你们。' },
+    { who: '老木匠 · 老鲁', text: '慢慢走，慢慢看。下一段路，也会是好木头。' },
+    { who: '咖啡店老板娘', text: '两杯热可可，加双份棉花糖。窗边的位置永远给你们留着。' },
+    { who: '小精灵', text: '今晚我画进本子里了。明年翻开，还是这么亮。' },
+    { who: '雪人先生', text: '这么亮的天……我可能得化一点。但为了今晚，值。' },
+    { who: 'Charles', text: '原来我们已经一起走了这么远。', fire: 2 },
+    { who: 'Julie', text: '以后也一起去看看更多地方吧。', fire: 2, santa: true },
+    { who: '', text: '愿我们的下一站，也一路顺利。', fire: 3 },
+    { who: '', text: '愿我们在冰岛，看见极光。', fire: 3 },
+    { who: '', text: '下一站，冰岛。', big: true, fire: 3 },
+    { who: '', text: '愿我们一路顺利，\n也一直一起走下去。', big: true, fire: 3 }
   ];
+
+  /* 烟花位置（1920×1080 基准）：全部在树冠以上或树的两侧，
+     不会盖住树顶的星，也不会盖住任何一张脸。 */
+  var FIN_FW_SLOTS = [
+    [286, 196], [520, 128], [742, 86], [1188, 98], [1444, 150], [1712, 214],
+    [216, 306], [1656, 322], [402, 240], [1520, 274], [966, 68], [660, 168]
+  ];
+  var FIN_FW_COLORS = ['255,214,140', '255,158,150', '168,240,206', '176,208,255', '222,186,255'];
+
+  var finState = null;
+  var finBGCache = {};
+
+  /* ---------- 舞台：静态层 ---------- */
+  function finSky(ctx, W, H) {
+    var g = ctx.createLinearGradient(0, 0, 0, H * 0.80);
+    g.addColorStop(0, '#04060e');
+    g.addColorStop(0.32, '#070c1c');
+    g.addColorStop(0.58, '#0e1a34');
+    g.addColorStop(0.82, '#182c4e');
+    g.addColorStop(1, '#264568');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    var hz = ctx.createRadialGradient(W * 0.5, H * FIN.horizon, 30, W * 0.5, H * FIN.horizon, W * 0.60);
+    hz.addColorStop(0, 'rgba(126,138,212,.17)');
+    hz.addColorStop(0.55, 'rgba(88,100,166,.07)');
+    hz.addColorStop(1, 'rgba(60,70,130,0)');
+    ctx.fillStyle = hz; ctx.fillRect(0, 0, W, H);
+
+    var rnd = seeded(4021);
+    for (var i = 0; i < 300; i++) {
+      var sx = rnd() * W, sy = Math.pow(rnd(), 0.86) * H * 0.70;
+      var pick = rnd();
+      var r = pick > 0.965 ? 2.7 : (pick > 0.86 ? 1.85 : 1.15);
+      var a = 0.16 + rnd() * 0.74;
+      var tint = pick > 0.9 ? '255,242,216' : '222,236,255';
+      ctx.fillStyle = 'rgba(' + tint + ',' + a.toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, 7); ctx.fill();
+      if (pick > 0.965) {
+        ctx.strokeStyle = 'rgba(' + tint + ',' + (a * 0.42).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx - 9, sy); ctx.lineTo(sx + 9, sy);
+        ctx.moveTo(sx, sy - 9); ctx.lineTo(sx, sy + 9);
+        ctx.stroke();
+      }
+    }
+
+    ctx.save();
+    ctx.translate(W * 0.44, H * 0.23); ctx.rotate(-0.40);
+    var mw = ctx.createLinearGradient(0, -96, 0, 96);
+    mw.addColorStop(0, 'rgba(150,170,230,0)');
+    mw.addColorStop(0.5, 'rgba(150,170,230,.05)');
+    mw.addColorStop(1, 'rgba(150,170,230,0)');
+    ctx.fillStyle = mw; ctx.fillRect(-W, -96, W * 2, 192);
+    ctx.restore();
+
+    var mx = W * 0.826, my = H * 0.120, mr = 42 * finK(H);
+    var halo = ctx.createRadialGradient(mx, my, mr * 0.6, mx, my, mr * 5.6);
+    halo.addColorStop(0, 'rgba(228,234,255,.24)');
+    halo.addColorStop(0.42, 'rgba(198,212,255,.07)');
+    halo.addColorStop(1, 'rgba(180,196,255,0)');
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(mx, my, mr * 5.6, 0, 7); ctx.fill();
+    var mg = ctx.createRadialGradient(mx - 13, my - 13, 5, mx, my, mr);
+    mg.addColorStop(0, '#fffdf3'); mg.addColorStop(1, '#e3e1d3');
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(mx, my, mr, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(208,206,192,.46)';
+    ctx.beginPath(); ctx.arc(mx - mr * 0.28, my - mr * 0.18, mr * 0.22, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + mr * 0.26, my + mr * 0.28, mr * 0.15, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + mr * 0.12, my - mr * 0.44, mr * 0.11, 0, 7); ctx.fill();
+  }
+
+  function finClouds(ctx, W, H) {
+    var rnd = seeded(7717);
+    for (var i = 0; i < 5; i++) {
+      var cx = rnd() * W, cy = H * (0.07 + rnd() * 0.28);
+      var cw = 260 + rnd() * 400, ch = 24 + rnd() * 20;
+      var cg = ctx.createLinearGradient(cx - cw / 2, cy, cx + cw / 2, cy);
+      cg.addColorStop(0, 'rgba(96,112,168,0)');
+      cg.addColorStop(0.5, 'rgba(122,138,198,' + (0.045 + rnd() * 0.05).toFixed(3) + ')');
+      cg.addColorStop(1, 'rgba(96,112,168,0)');
+      ctx.fillStyle = cg;
+      ctx.beginPath(); ctx.ellipse(cx, cy, cw / 2, ch, 0, 0, 7); ctx.fill();
+    }
+  }
+
+  function finMountains(ctx, W, H) {
+    var base = H * FIN.horizon;
+    var K = finK(H);
+    var layers = [
+      { y: base - 4 * K, amt: 150 * K, col: '#16253d', snow: 'rgba(198,216,240,.15)', seed: 91 },
+      { y: base + 12 * K, amt: 94 * K, col: '#0f1b2c', snow: 'rgba(190,208,232,.09)', seed: 37 }
+    ];
+    layers.forEach(function (L) {
+      var rnd = seeded(L.seed);
+      ctx.beginPath();
+      ctx.moveTo(-20, base + 70);
+      var x = -60;
+      while (x < W + 40) {
+        var w = 170 + rnd() * 250;
+        var hh = L.amt * (0.42 + rnd() * 0.78);
+        ctx.lineTo(x + w * 0.5, L.y - hh);
+        ctx.lineTo(x + w * 0.78, L.y - hh * 0.42);
+        ctx.lineTo(x + w, L.y - hh * 0.12);
+        x += w;
+      }
+      ctx.lineTo(W + 40, base + 70);
+      ctx.closePath();
+      ctx.fillStyle = L.col; ctx.fill();
+      ctx.save(); ctx.clip();
+      ctx.fillStyle = L.snow;
+      ctx.fillRect(0, L.y - L.amt, W, L.amt * 0.34);
+      ctx.restore();
+    });
+  }
+
+  function finBuilding(ctx, id, cx, baseY, s, t) {
+    var src = null;
+    for (var i = 0; i < World.buildings.length; i++) {
+      if (World.buildings[i].id === id) { src = World.buildings[i]; break; }
+    }
+    if (!src) return;
+    ctx.save();
+    ctx.translate(cx - (src.x + src.w / 2) * s, baseY - (src.y + src.h) * s);
+    ctx.scale(s, s);
+    World.drawBuilding(ctx, src, t);
+    ctx.restore();
+  }
+
+  function finTown(ctx, W, H, t) {
+    var base = H * FIN.horizon;
+    var K = finK(H);
+
+    var rnd = seeded(5150);
+    for (var i = 0; i < 26; i++) {
+      var bw = 46 + rnd() * 60, bh = 32 + rnd() * 56;
+      var bx = -40 + i * (W + 80) / 26 + rnd() * 14;
+      var by = base - bh * K + 14 * K;
+      ctx.fillStyle = 'rgba(8,13,23,.9)';
+      ctx.fillRect(bx, by, bw * K, bh * K);
+      ctx.beginPath();
+      ctx.moveTo(bx - 6 * K, by + 3 * K);
+      ctx.lineTo(bx + bw * K / 2, by - (14 + rnd() * 12) * K);
+      ctx.lineTo(bx + bw * K + 6 * K, by + 3 * K);
+      ctx.closePath(); ctx.fill();
+      for (var wq = 0; wq < 3; wq++) {
+        if (rnd() > 0.42) {
+          ctx.fillStyle = 'rgba(255,198,112,' + (0.32 + rnd() * 0.5).toFixed(3) + ')';
+          ctx.fillRect(bx + (7 + wq * 16) * K, by + (11 + (wq % 2) * 13) * K, 7 * K, 8 * K);
+        }
+      }
+    }
+
+    finBuilding(ctx, 'cabin', 152, base + 92 * K, 0.9 * K, t);
+    finBuilding(ctx, 'workshop', 430, base + 80 * K, 0.76 * K, t);
+    finBuilding(ctx, 'stall', 606, base + 70 * K, 0.64 * K, t);
+    finBuilding(ctx, 'station', 1116, base + 84 * K, 0.74 * K, t);
+    finBuilding(ctx, 'cafe', 1338, base + 92 * K, 0.84 * K, t);
+    finBuilding(ctx, 'shop', 1588, base + 84 * K, 0.8 * K, t);
+    finBuilding(ctx, 'greenhouse', 1816, base + 72 * K, 0.64 * K, t);
+  }
+
+  function finGround(ctx, W, H) {
+    var base = H * FIN.horizon;
+    var g = ctx.createLinearGradient(0, base, 0, H);
+    g.addColorStop(0, '#b9c9e3');
+    g.addColorStop(0.18, '#c3d2e9');
+    g.addColorStop(0.62, '#a8bcd9');
+    g.addColorStop(1, '#8ba0c4');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, base + 14);
+    ctx.bezierCurveTo(W * 0.22, base - 14, W * 0.42, base + 16, W * 0.56, base + 2);
+    ctx.bezierCurveTo(W * 0.72, base - 12, W * 0.86, base + 14, W, base - 4);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fill();
+
+    /* 地平线上的一层薄雾：让小镇和雪地不是硬切 */
+    var fog = ctx.createLinearGradient(0, base - 30, 0, base + 80);
+    fog.addColorStop(0, 'rgba(206,222,244,.42)');
+    fog.addColorStop(1, 'rgba(206,222,244,0)');
+    ctx.fillStyle = fog; ctx.fillRect(0, base - 30, W, 110);
+
+    var rnd = seeded(883);
+    for (var i = 0; i < 42; i++) {
+      var x = rnd() * W, y = base + 26 + Math.pow(rnd(), 0.72) * (H - base - 16);
+      var rx = 46 + rnd() * 170, ry = 7 + rnd() * 19;
+      ctx.fillStyle = rnd() > 0.44
+        ? 'rgba(255,255,255,' + (0.09 + rnd() * 0.19).toFixed(3) + ')'
+        : 'rgba(122,150,192,' + (0.05 + rnd() * 0.10).toFixed(3) + ')';
+      ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 7); ctx.fill();
+    }
+
+    var warm = ctx.createRadialGradient(W * 0.5, base + (H - base) * 0.46, 40, W * 0.5, base + (H - base) * 0.46, 560);
+    warm.addColorStop(0, 'rgba(255,206,132,.16)');
+    warm.addColorStop(1, 'rgba(255,206,132,0)');
+    ctx.fillStyle = warm; ctx.fillRect(0, base, W, H - base);
+  }
+
+  function finTree(ctx, H, t) {
+    var ty = finTreeY(H);
+    var tx = FIN.tree.xf * FIN_W;
+    var ts = FIN.tree.sf * finK(H);
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.scale(ts, ts);
+    ctx.translate(-tx, -ty);
+    World.drawBigTree(ctx, { x: tx, y: ty }, 3, t);
+    ctx.restore();
+  }
+
+  /* ---------- 树上那层「比小镇里更华丽」的装饰 ----------
+   * 小镇里的树是给白天看的，挂在世界坐标里、尺寸固定；
+   * 结局这棵要当成整张画的主角，所以在 drawBigTree 之上再叠：
+   *   60 颗暖灯泡（沿每一层枝扇的表面挂） + 冰晶垂饰 + 三层蝴蝶结。
+   * 位置用固定种子算，只跟画布高度有关，所以实时画面和最后那张照片
+   * 挂的是同一批位置，不会一个样一个样。
+   * ------------------------------------------------------------ */
+  var finBulbCache = {};
+
+  function finBulbPts(H) {
+    var key = H | 0;
+    if (finBulbCache[key]) return finBulbCache[key];
+    var T = (window.World && World.tiers) || [];
+    var ty = finTreeY(H), tx = FIN.tree.xf * FIN_W, ts = FIN.tree.sf * finK(H);
+    var out = [], s = 20261225;
+    function rr() { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }
+    for (var ti = 0; ti < T.length; ti++) {
+      var L = T[ti], n = [13, 11, 9, 8, 6][ti] || 8;
+      for (var k = 0; k < n; k++) {
+        /* u 横向 -1~1（留 10% 余量不挂到枝尖外），v 纵向往下 */
+        var u = -0.94 + 1.88 * ((k + 0.5) / n) + (rr() - 0.5) * 0.14;
+        var v = 0.18 + 0.70 * rr();
+        var r = L.half * (0.13 + 0.87 * v);
+        out.push({
+          x: tx + r * u * 0.88 * ts,
+          y: ty + (L.apex + (L.bot - L.apex) * v) * ts,
+          r: (1.45 + rr() * 0.8) * ts,
+          ph: rr() * 6.283,
+          sp: 0.55 + rr() * 0.95
+        });
+      }
+    }
+    finBulbCache[key] = out;
+    return out;
+  }
+
+  /* 蝴蝶结：两片环 + 中间结 + 两条飘带（小尺寸下也要能看出是结） */
+  function finBow(ctx, x, y, s, col) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    /* 两条垂下来的飘带 */
+    ctx.fillStyle = col;
+    [-1, 1].forEach(function (sg) {
+      ctx.beginPath();
+      ctx.moveTo(sg * s * 0.10, s * 0.18);
+      ctx.quadraticCurveTo(sg * s * 0.86, s * 0.86, sg * s * 1.06, s * 1.42);
+      ctx.lineTo(sg * s * 0.62, s * 1.30);
+      ctx.quadraticCurveTo(sg * s * 0.44, s * 0.76, -sg * s * 0.06, s * 0.40);
+      ctx.closePath(); ctx.fill();
+    });
+
+    /* 两片环：先满色，再压一层暗心，看出是"环"而不是色块 */
+    [-1, 1].forEach(function (sg) {
+      ctx.save();
+      ctx.translate(sg * s * 0.62, -s * 0.16);
+      ctx.rotate(sg * 0.38);
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.ellipse(0, 0, s * 0.72, s * 0.44, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(30,10,6,.30)';
+      ctx.beginPath(); ctx.ellipse(sg * s * 0.10, 0, s * 0.30, s * 0.17, 0, 0, 7); ctx.fill();
+      ctx.restore();
+    });
+
+    /* 中间那个结 */
+    ctx.fillStyle = 'rgba(255,238,198,.94)';
+    ctx.beginPath(); ctx.arc(0, s * 0.06, s * 0.28, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  function finTreeDecor(ctx, H) {
+    var T = (window.World && World.tiers) || [];
+    if (!T.length) return;
+    var K = finK(H);
+    var ty = finTreeY(H), tx = FIN.tree.xf * FIN_W, ts = FIN.tree.sf * K;
+    /* 树局部坐标（相对树根）→ 画布坐标：y 是负数往上 */
+    function P(localX, localY) { return { x: tx + localX * ts, y: ty + localY * ts }; }
+
+    /* 灯泡：先一层暖晕，再一颗实心（坐标已经是画布坐标） */
+    var pts = finBulbPts(H);
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      var gl = ctx.createRadialGradient(p.x, p.y, 0.4, p.x, p.y, p.r * 3.0);
+      gl.addColorStop(0, 'rgba(255,230,172,.26)');
+      gl.addColorStop(0.45, 'rgba(255,198,112,.10)');
+      gl.addColorStop(1, 'rgba(255,180,96,0)');
+      ctx.fillStyle = gl;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3.0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#fffdf4';
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 0.86, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,226,160,.34)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 1.35, 0, 7); ctx.fill();
+    }
+
+    /* 冰晶垂饰：挂每一层下沿，越往下越大 */
+    var cs = seeded(9911);
+    for (var ti = 0; ti < T.length; ti++) {
+      var L = T[ti];
+      var nC = ti < 3 ? 2 : 3;
+      for (var c = 0; c < nC; c++) {
+        var u = -0.78 + 1.56 * ((c + 0.5) / nC);
+        var lx = L.half * (0.55 + 0.3 * cs()) * u * 0.9;
+        var ly = L.bot - 2 + cs() * 6;
+        var pt0 = P(lx, ly);
+        var len = (9 + cs() * 22) * (1 - ti * 0.10) * ts;
+        var gg = ctx.createLinearGradient(pt0.x, pt0.y, pt0.x, pt0.y + len);
+        gg.addColorStop(0, 'rgba(198,232,255,.92)');
+        gg.addColorStop(0.7, 'rgba(146,206,244,.62)');
+        gg.addColorStop(1, 'rgba(120,180,230,0)');
+        ctx.fillStyle = gg;
+        ctx.beginPath();
+        ctx.moveTo(pt0.x - 1.5 * ts, pt0.y);
+        ctx.lineTo(pt0.x + 1.5 * ts, pt0.y);
+        ctx.lineTo(pt0.x + 0.25 * ts, pt0.y + len);
+        ctx.lineTo(pt0.x - 0.25 * ts, pt0.y + len * 0.94);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(240,250,255,.92)';
+        ctx.beginPath(); ctx.arc(pt0.x, pt0.y - 0.5 * ts, 1.5 * ts, 0, 7); ctx.fill();
+      }
+    }
+
+    /* 蝴蝶结：每层交界各挂两个红结 */
+    [[0, '#c8402f', -0.52], [0, '#c8402f', 0.60], [2, '#b83a2a', -0.58],
+     [2, '#b83a2a', 0.50], [4, '#c8402f', -0.44]].forEach(function (B) {
+      var L = T[B[0]];
+      if (!L) return;
+      var ptb = P(L.half * B[2], L.bot - 4);
+      finBow(ctx, ptb.x, ptb.y, 4.6 * ts, B[1]);
+    });
+  }
+
+  function finGift(ctx, x, y, w, h, body, ribbon) {
+    ctx.fillStyle = 'rgba(40,58,88,.18)';
+    ctx.beginPath(); ctx.ellipse(x, y + 2, w * 0.62, h * 0.22, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = body;
+    ctx.fillRect(x - w / 2, y - h, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,.18)';
+    ctx.fillRect(x - w / 2, y - h, w, Math.max(2, h * 0.14));
+    ctx.fillStyle = ribbon;
+    ctx.fillRect(x - w * 0.08, y - h, w * 0.16, h);
+    ctx.beginPath(); ctx.ellipse(x - w * 0.16, y - h - 2, w * 0.13, h * 0.13, 0.4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + w * 0.16, y - h - 2, w * 0.13, h * 0.13, -0.4, 0, 7); ctx.fill();
+  }
+
+  function finProps(ctx, W, H, t) {
+    var base = H * FIN.horizon;
+    var K = finK(H);
+    var tx = FIN.tree.xf * FIN_W, ty = finTreeY(H);
+
+    var boxes = [
+      [-292, 18, 76, 58, '#b3432f', '#f3e3c2'], [-232, 12, 54, 44, '#2f6b52', '#f3e3c2'],
+      [-352, 10, 48, 40, '#8a5a3a', '#e8c86a'], [-176, 20, 42, 34, '#c98a3a', '#f3e3c2'],
+      [286, 20, 80, 60, '#2f5f8a', '#f3e3c2'], [352, 12, 52, 46, '#b3432f', '#e8c86a'],
+      [220, 14, 46, 38, '#8a5a3a', '#f3e3c2'], [402, 8, 40, 32, '#c98a3a', '#f3e3c2']
+    ];
+    boxes.forEach(function (b) {
+      finGift(ctx, tx + b[0] * K, ty + b[1] * K, b[2] * K, b[3] * K, b[4], b[5]);
+    });
+
+    [[128, 0.95], [616, 0.82], [1300, 0.84], [1806, 0.92]].forEach(function (L) {
+      World.drawLamp(ctx, { x: L[0] * K + (1 - K) * 0, y: base + 150 * L[1] * K }, t);
+    });
+
+    /* 三棵小冷杉当画框 */
+    [[64, 0.95], [1858, 0.9], [1010, 0.5]].forEach(function (F) {
+      var x = F[0] * K, s = F[1] * K, y = base + 150 * K;
+      ctx.fillStyle = 'rgba(40,60,90,.16)';
+      ctx.beginPath(); ctx.ellipse(x, y + 2, 44 * s, 9 * s, 0, 0, 7); ctx.fill();
+      for (var i = 0; i < 3; i++) {
+        var hh = (110 - i * 26) * s, ww = (46 - i * 11) * s;
+        ctx.fillStyle = i === 0 ? '#20563a' : (i === 1 ? '#256341' : '#2b7049');
+        ctx.beginPath();
+        ctx.moveTo(x, y - hh);
+        ctx.lineTo(x + ww, y - i * 34 * s);
+        ctx.lineTo(x - ww, y - i * 34 * s);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(240,248,255,.62)';
+      ctx.beginPath();
+      ctx.moveTo(x, y - 110 * s);
+      ctx.lineTo(x + 16 * s, y - 84 * s);
+      ctx.lineTo(x - 16 * s, y - 84 * s);
+      ctx.closePath(); ctx.fill();
+    });
+
+    /* 树两侧的灯串 */
+    ctx.save();
+    var gy1 = base + 92 * K, gy2 = base + 170 * K;
+    ctx.strokeStyle = 'rgba(60,44,28,.5)'; ctx.lineWidth = 1.6 * K;
+    ctx.beginPath();
+    ctx.moveTo(128 * K, gy1);
+    ctx.quadraticCurveTo(520 * K, gy2, tx - 240 * K, gy1);
+    ctx.moveTo(1806 * K, gy1);
+    ctx.quadraticCurveTo(1420 * K, gy2, tx + 240 * K, gy1);
+    ctx.stroke();
+    for (var i = 1; i < 16; i++) {
+      var u = i / 16;
+      [[128, 520, (tx - 240 * K) / K], [1806, 1420, (tx + 240 * K) / K]].forEach(function (P) {
+        var x2 = ((1 - u) * (1 - u) * P[0] + 2 * (1 - u) * u * P[1] + u * u * P[2]) * K;
+        var y2 = ((1 - u) * (1 - u) * (gy1 / K) + 2 * (1 - u) * u * (gy2 / K) + u * u * (gy1 / K)) * K;
+        var tw = 0.45 + 0.55 * Math.abs(Math.sin(i * 1.7 + P[0]));
+        ctx.fillStyle = 'rgba(255,' + (206 + i * 3) + ',140,' + (0.55 * tw + 0.25).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(x2, y2, (2.4 + tw * 1.2) * K, 0, 7); ctx.fill();
+      });
+    }
+    ctx.restore();
+
+    /* 雪地上零星的脚印 */
+    ctx.fillStyle = 'rgba(120,148,190,.28)';
+    var rnd2 = seeded(6621);
+    for (var f = 0; f < 18; f++) {
+      var fxp = (300 + rnd2() * 1320) * K;
+      var fyp = base + (140 + rnd2() * 240) * K;
+      ctx.beginPath(); ctx.ellipse(fxp, fyp, 4.2 * K, 2.4 * K, 0.2, 0, 7); ctx.fill();
+    }
+  }
+
+  function finCouple(ctx, H, t) {
+    var K = finK(H);
+    FIN.couple.forEach(function (c) {
+      var slot = c.g === 'm' ? 'a' : 'b';
+      var opt = Object.assign({}, CHAROPT[slot], { outfit: getOutfit(slot, 'winter') });
+      ctx.save();
+      ctx.translate(c.xf * FIN_W, c.yf * H);
+      ctx.scale(c.sf * K, c.sf * K);
+      Sprites.drawCharacter(ctx, 0, 0, c.dir, 0, opt, false, 780);
+      ctx.restore();
+    });
+    var cx = (FIN.couple[0].xf + FIN.couple[1].xf) / 2 * FIN_W;
+    var ly = FIN.couple[0].yf * H;
+    var gl = ctx.createRadialGradient(cx, ly, 10, cx, ly, 320 * K);
+    gl.addColorStop(0, 'rgba(255,214,150,.15)');
+    gl.addColorStop(1, 'rgba(255,214,150,0)');
+    ctx.fillStyle = gl;
+    ctx.beginPath(); ctx.ellipse(cx, ly + 6, 320 * K, 96 * K, 0, 0, 7); ctx.fill();
+  }
+
+  function finVignette(ctx, W, H) {
+    var vg = ctx.createRadialGradient(W / 2, H * 0.48, H * 0.30, W / 2, H * 0.50, H * 0.94);
+    vg.addColorStop(0, 'rgba(4,8,18,0)');
+    vg.addColorStop(1, 'rgba(4,8,18,.60)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+
+  function finBG(W, H) {
+    var key = W + 'x' + H + '|' + getOutfit('a', 'winter') + getOutfit('b', 'winter');
+    if (finBGCache[key]) return finBGCache[key];
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var g = cv.getContext('2d');
+    finSky(g, W, H);
+    finClouds(g, W, H);
+    finMountains(g, W, H);
+    finTown(g, W, H, 0);
+    finGround(g, W, H);
+    finTree(g, H, 0);
+    finTreeDecor(g, H);
+    finProps(g, W, H, 0);
+    finCouple(g, H, 0);
+    finBGCache[key] = cv;
+    return cv;
+  }
+
+  /* ---------- 舞台：动态层 ---------- */
+  function finDrawNpc(ctx, id, x, y, s, dir, t) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    if (id === 'snowman') Sprites.drawSnowman(ctx, 0, 0, t);
+    else if (id === 'elf') Sprites.drawElf(ctx, 0, 0, t, 0);
+    else if (id === 'barista') Sprites.drawBarista(ctx, 0, 0, t, 0);
+    else Sprites.drawVillager(ctx, 0, 0, t, id, 0);
+    ctx.restore();
+  }
+
+  function finDeer(ctx, x, y, t) {
+    ctx.save();
+    ctx.translate(x, y);
+    var run = Math.sin(t / 150);
+    ctx.fillStyle = '#181326';
+    ctx.strokeStyle = '#181326';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 2.6;
+    [[-9, run], [-4, -run], [7, -run], [12, run]].forEach(function (L) {
+      ctx.beginPath();
+      ctx.moveTo(L[0], 3);
+      ctx.lineTo(L[0] + L[1] * 5, 13);
+      ctx.stroke();
+    });
+    ctx.beginPath(); ctx.ellipse(0, 0, 15, 6.4, 0, 0, 7); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(11, -2); ctx.lineTo(19.5, -12); ctx.lineTo(23.5, -10); ctx.lineTo(14.5, 2);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(22.5, -13, 5.4, 3.4, -0.42, 0, 7); ctx.fill();
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(23.5, -16); ctx.lineTo(25.5, -24);
+    ctx.moveTo(25.5, -24); ctx.lineTo(29.5, -26);
+    ctx.moveTo(25.5, -24); ctx.lineTo(22.5, -28);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-14, -4); ctx.lineTo(-18.5, -8.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,214,150,.26)';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.ellipse(0, 0, 15, 6.4, 0, Math.PI * 1.04, Math.PI * 1.72); ctx.stroke();
+    ctx.restore();
+  }
+
+  function finSleigh(ctx, cx, cy, s, t) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+
+    for (var i = 1; i <= 20; i++) {
+      var tx = -48 - i * 30;
+      var ty = Math.sin(t / 700 + i * 0.55) * 4 + i * 1.5;
+      var k = 1 - i / 21;
+      ctx.fillStyle = 'rgba(255,238,196,' + (0.26 * k).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(tx, ty, 1.0 + k * 1.9, 0, 7); ctx.fill();
+    }
+
+    finDeer(ctx, -34, 1, t);
+    finDeer(ctx, -80, 7, t + 60);
+
+    ctx.strokeStyle = 'rgba(244,226,196,.35)';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(2, -8); ctx.lineTo(-36, -1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(2, -6); ctx.lineTo(-78, 6); ctx.stroke();
+
+    ctx.strokeStyle = '#8a6a3f'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-16, 12); ctx.lineTo(11, 12);
+    ctx.quadraticCurveTo(20, 12, 16, 5);
+    ctx.stroke();
+    ctx.fillStyle = '#a83226';
+    ctx.beginPath();
+    ctx.moveTo(-16, 10); ctx.lineTo(-16, -2);
+    ctx.quadraticCurveTo(-6, -7, 6, -2);
+    ctx.lineTo(14, 2); ctx.lineTo(10, 12);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,214,140,.72)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(-16, 7.5); ctx.lineTo(12, 7.5); ctx.stroke();
+
+    ctx.fillStyle = '#c0392b';
+    ctx.beginPath(); ctx.ellipse(-4, -12, 6.4, 7.4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f6d0ae';
+    ctx.beginPath(); ctx.arc(-4, -21, 4.4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f7f7f7';
+    ctx.beginPath(); ctx.ellipse(-4, -18.6, 3.3, 2.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#c0392b';
+    ctx.beginPath();
+    ctx.moveTo(-8.8, -23); ctx.lineTo(0.8, -23); ctx.lineTo(-4, -30.4);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(-4, -30.8, 1.8, 0, 7); ctx.fill();
+
+    ctx.fillStyle = '#8a6a3e';
+    ctx.beginPath(); ctx.ellipse(11, -6, 7, 8.2, 0.2, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,214,140,.55)';
+    ctx.beginPath(); ctx.arc(11, -6, 2.4, 0, 7); ctx.fill();
+
+    ctx.restore();
+  }
+
+  /* 烟花：分三层画——炸开的白心、48 根长短不一的拖尾、慢落的余烬。
+     v4.4.0 第一版只有 30 根等长的细线，远看像蒲公英；这一版加了
+     拖尾长度随机、长度随寿命衰减、下半圈被重力拉长，爆点才有"炸开"的感觉。 */
+  function finFirework(ctx, x, y, R, col, age) {
+    var p = Math.max(0, Math.min(1, age));
+    var fade = Math.pow(1 - p, 1.35);
+    if (fade <= 0.02) return;
+    var e = 1 - Math.pow(1 - p, 2.6);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    /* 炸开那一下的一点白心：小而亮，不是一大团光斑 */
+    if (p < 0.16) {
+      var cf = 1 - p / 0.16;
+      var cg = ctx.createRadialGradient(x, y, 1, x, y, R * 0.24);
+      cg.addColorStop(0, 'rgba(255,255,246,' + (0.92 * cf).toFixed(3) + ')');
+      cg.addColorStop(0.55, 'rgba(255,238,196,' + (0.32 * cf).toFixed(3) + ')');
+      cg.addColorStop(1, 'rgba(255,220,160,0)');
+      ctx.fillStyle = cg;
+      ctx.beginPath(); ctx.arc(x, y, R * 0.24, 0, 7); ctx.fill();
+    }
+
+    var N = 48;
+    ctx.lineCap = 'round';
+    for (var i = 0; i < N; i++) {
+      var a = (i / N) * Math.PI * 2 + (i % 6) * 0.087;
+      var d = R * e * (0.52 + ((i * 37) % 19) / 26);
+      var px = x + Math.cos(a) * d;
+      var py = y + Math.sin(a) * d + p * p * R * 0.34;
+      var tail = R * 0.17 * fade + 3;
+      var al = Math.min(1, (0.28 + 0.62 * fade) * (0.72 + ((i * 13) % 9) / 24));
+      ctx.strokeStyle = 'rgba(' + col + ',' + al.toFixed(3) + ')';
+      ctx.lineWidth = 2.9 * fade + 0.7;
+      ctx.beginPath();
+      ctx.moveTo(px - Math.cos(a) * tail, py - Math.sin(a) * tail);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(' + col + ',' + (0.95 * fade).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(px, py, 2.0 * fade + 0.6, 0, 7); ctx.fill();
+      }
+    }
+
+    /* 慢落的余烬：比主爆活得更久，落得更低 */
+    for (var j = 0; j < 14; j++) {
+      var a2 = (j / 14) * Math.PI * 2 + 0.4;
+      var d2 = R * e * (0.30 + ((j * 23) % 11) / 22);
+      var ex = x + Math.cos(a2) * d2;
+      var ey = y + Math.sin(a2) * d2 + p * p * R * 0.78;
+      ctx.fillStyle = 'rgba(255,246,222,' + (0.5 * fade * fade).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(ex, ey, 1.3, 0, 7); ctx.fill();
+    }
+
+    /* 一层很淡的色雾，让爆点在夜里"亮"起来 */
+    var gg = ctx.createRadialGradient(x, y, R * 0.10, x, y, R * (0.35 + e * 0.55));
+    gg.addColorStop(0, 'rgba(' + col + ',' + (0.09 * fade).toFixed(3) + ')');
+    gg.addColorStop(1, 'rgba(' + col + ',0)');
+    ctx.fillStyle = gg;
+    ctx.beginPath(); ctx.arc(x, y, R * (0.35 + e * 0.55), 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  function finSnow(ctx, W, H, t, n) {
+    for (var i = 0; i < n; i++) {
+      var s1 = ((i * 73.13) % 100) / 100;
+      var s2 = ((i * 37.71) % 100) / 100;
+      var x = (s1 * (W + 140) + t * (0.008 + s2 * 0.014) + Math.sin(t / 1400 + i) * 20) % (W + 140) - 70;
+      var y = (s2 * H + t * (0.026 + s1 * 0.030)) % H;
+      var r = 1.2 + s1 * 2.5;
+      var a = 0.26 + s2 * 0.5;
+      ctx.fillStyle = 'rgba(255,250,238,' + a.toFixed(2) + ')';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    }
+  }
+
+  /* 主绘制：o = {t, shown, appear[], santa, fx[], twinkle} */
+  function paintFinale(ctx, W, H, o) {
+    o = o || {};
+    var t = o.t || 0;
+    var K = finK(H);
+    var shown = (o.shown === undefined) ? FIN.cast.length : o.shown;
+
+    ctx.save();
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(finBG(W, H), 0, 0);
+
+    /* 开场那两秒：像有人一盏一盏把灯拧开——先压一层暗，再慢慢褪掉 */
+    var rise = Math.min(1, t / 2200);
+    if (rise < 1) {
+      ctx.fillStyle = 'rgba(3,6,12,' + (0.82 * (1 - rise)).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (o.twinkle !== false) {
+      for (var s = 0; s < 44; s++) {
+        var sx = ((s * 317.7) % 100) / 100 * W;
+        var sy = (((s * 197.3) % 100) / 100) * H * 0.52;
+        var a2 = (0.22 + 0.5 * Math.abs(Math.sin(t / 900 + s * 1.7))) * (s % 7 === 0 ? 1.5 : 1);
+        ctx.fillStyle = 'rgba(232,242,255,' + a2.toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(sx, sy, (s % 11 === 0 ? 2.1 : 1.3) * K, 0, 7); ctx.fill();
+      }
+    }
+
+    /* 树顶那圈会呼吸的暖光：树本身是烘死的，这层让它"活着" */
+    var puls = 0.09 + 0.05 * Math.sin(t / 2200);
+    var ttx = FIN.tree.xf * FIN_W, tty = finTreeY(H);
+    var tg = ctx.createRadialGradient(ttx, tty - 300 * K, 40, ttx, tty - 300 * K, 520 * K);
+    tg.addColorStop(0, 'rgba(255,214,140,' + puls.toFixed(3) + ')');
+    tg.addColorStop(1, 'rgba(255,214,140,0)');
+    ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H);
+
+    for (var b = 0; b < 18; b++) {
+      var ba = (b * 2.399) % (Math.PI * 2);
+      var br = (80 + ((b * 61) % 150)) * K;
+      var bx = ttx + Math.cos(ba) * br * 1.15;
+      var by = tty - 300 * K + Math.sin(ba) * br * 1.55;
+      var blink = 0.30 + 0.70 * Math.abs(Math.sin(t / 620 + b * 1.7));
+      ctx.fillStyle = 'rgba(255,236,178,' + (0.5 * blink).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(bx, by, (1.4 + blink * 1.6) * K, 0, 7); ctx.fill();
+    }
+
+    /* 挂满树的灯泡在呼吸：静态层里已经挂好，这里只叠会变亮的那一层 */
+    var bps = finBulbPts(H);
+    for (var q = 0; q < bps.length; q++) {
+      var bb = bps[q];
+      var tw = Math.abs(Math.sin(t / (900 * bb.sp) + bb.ph));
+      if (tw < 0.40) continue;
+      ctx.fillStyle = 'rgba(255,232,176,' + (0.34 * (tw - 0.40) / 0.60).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r * (1.5 + tw * 1.6), 0, 7); ctx.fill();
+    }
+
+    /* 全镇的人：一个个从雪地里"站起来" */
+    for (var i = 0; i < Math.min(shown, FIN.cast.length); i++) {
+      var c = FIN.cast[i];
+      var ap = (o.appear && o.appear[i] !== undefined) ? o.appear[i] : 1;
+      ap = Math.max(0, Math.min(1, ap));
+      if (ap <= 0.01) continue;
+      ctx.save();
+      ctx.globalAlpha = ap;
+      finDrawNpc(ctx, c.id, c.xf * FIN_W, c.yf * H + (1 - ap) * 26 * K, c.sf * K, c.dir, t);
+      ctx.restore();
+    }
+
+    if (o.santa) finSleigh(ctx, o.santa.x, o.santa.y, (o.santa.s || 1.15) * K, t);
+
+    if (o.fx) {
+      for (var f = 0; f < o.fx.length; f++) {
+        var F = o.fx[f];
+        var age = (t - F.t0) / F.dur;
+        if (age < 0 || age > 1) continue;
+        finFirework(ctx, F.x * K, F.y * K, F.R * K, F.col, age);
+      }
+    }
+
+    finSnow(ctx, W, H, t, o.photo ? 120 : 96);
+    finVignette(ctx, W, H);
+    ctx.restore();
+  }
+
+  /* ---------- 结局流程 ---------- */
+  var FIN_TALK_HINT = '轻触继续 ▸';
+
   function startEnding() {
-    S.ending = { t: 0, phase: 0, santaX: 858, santaY: 648, glow: 0, line: -1 };
+    closeAllPanelsSilent();
+    S.ending = { t: 0 };
+    S.photo = false;
     S.interId = null;
-    S.quest.step = 6;
-    toast('✨ 小镇的灯，一盏一盏亮起来了…', 4000);
-    burst(World.tree.x, World.tree.y - 120, 'spark', 30);
-    if (S.backend.mode !== 'demo') S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
-  }
-  function updateEnding(dt, ts) {
-    var e = S.ending;
-    e.t += dt;
-    var tx = World.tree.x - S.view.w / 2;
-    var ty = World.tree.y - 60 - S.view.h / 2;
-    S.cam.x += (Math.max(0, Math.min(World.width - S.view.w, tx)) - S.cam.x) * Math.min(1, dt * 1.6);
-    S.cam.y += (Math.max(0, Math.min(World.height - S.view.h, ty)) - S.cam.y) * Math.min(1, dt * 1.6);
-    e.glow = Math.min(1, e.glow + dt * 0.3);
-    if (Math.random() < dt * 6) burst(World.tree.x + (Math.random() - 0.5) * 200, World.tree.y - 100 - Math.random() * 120, 'spark', 1);
-    if (e.t > 3.5) {
-      e.santaX += (742 - e.santaX) * Math.min(1, dt * 0.9);
-      e.santaY += (700 - e.santaY) * Math.min(1, dt * 0.9);
+    S.paused = true;
+    if (S.quest.step < 6) S.quest.step = 6;
+    finState = {
+      t: 0, phase: 'gather', shown: 0, appear: [], beat: -1,
+      fx: [], santa: null, santaT0: 0
+    };
+    for (var i = 0; i < FIN.cast.length; i++) finState.appear.push(0);
+    var ov = $('#finale');
+    if (ov) {
+      ov.classList.remove('hidden');
+      setTimeout(function () { ov.classList.add('show'); }, 30);
     }
-    if (e.t > 7 && e.phase === 0) {
-      e.phase = 1;
-      e.line = 0;
-      S.paused = true;
-      showEndLine(0);
+    var who = $('#finale-who'), say = $('#finale-say'), hint = $('#finale-hint');
+    if (who) { who.textContent = ''; who.classList.remove('on'); }
+    if (say) { say.className = ''; say.textContent = ''; }
+    if (hint) hint.textContent = '轻触跳过 ▸';
+    finBGCache = {};
+    Snd.sfx('ding');
+    if (S.backend.mode !== 'demo') {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
     }
-    S.self.x += ((S.mySlot === 'a' ? 668 : 832) - S.self.x) * Math.min(1, dt * 0.8);
-    S.self.y += (712 - S.self.y) * Math.min(1, dt * 0.8);
-    S.self.dir = 0; S.self.moving = false; S.self.frame = 0;
   }
-  function showEndLine(i) {
-    var ov = $('#end-overlay');
-    $('#end-text').textContent = END_LINES[i];
-    $('#end-hint').textContent = (i < END_LINES.length - 1) ? '轻触继续 ▸' : '轻触开始 📸';
-    ov.classList.remove('hidden');
+
+  function finAddFire(kind) {
+    if (!finState) return;
+    var n = kind >= 3 ? 7 : (kind === 2 ? 4 : 2);
+    var pool = FIN_FW_SLOTS.slice();
+    for (var i = 0; i < n && pool.length; i++) {
+      var pick = (finState.beat * 7 + i * 3 + (kind * 5)) % pool.length;
+      var slot = pool.splice(pick, 1)[0];
+      finState.fx.push({
+        x: slot[0] + ((i * 17) % 24) - 12,
+        y: slot[1] + ((i * 11) % 18) - 9,
+        R: (kind >= 3 ? 132 : 104) + ((i * 13) % 46),
+        col: FIN_FW_COLORS[(i + finState.beat) % FIN_FW_COLORS.length],
+        t0: finState.t + i * 130,
+        dur: 1500 + ((i * 137) % 500)
+      });
+    }
   }
-  function endNext() {
-    var e = S.ending;
-    if (!e || e.phase !== 1) return;
-    e.line++;
-    if (e.line < END_LINES.length) {
-      showEndLine(e.line);
-    } else {
-      $('#end-overlay').classList.add('hidden');
-      S.paused = false;
-      S.ending = null;
-      S.ended = true;
-      mutate(function (w) { w.ended = 1; return w; });
-      openPhoto();
+
+  function finSay(i) {
+    var b = FIN_BEATS[i];
+    if (!b) return;
+    var who = $('#finale-who'), say = $('#finale-say'), hint = $('#finale-hint');
+    if (who) {
+      who.textContent = b.who || '';
+      who.classList.toggle('on', !!b.who);
+    }
+    if (say) {
+      say.classList.add('fade');
+      setTimeout(function () {
+        say.textContent = b.text;
+        say.className = b.big ? 'big' : '';
+      }, 130);
+    }
+    if (b.fire) finAddFire(b.fire);
+    if ((b.santa || i >= FIN_SANTA_BEAT) && !finState.santa) {
+      finState.santa = { x: -320, y: 96, s: 1.0 };
+      finState.santaT0 = finState.t;
+    }
+    if (hint) {
+      hint.textContent = (i >= FIN_BEATS.length - 1) ? '轻触进入合影 📸' : FIN_TALK_HINT;
+    }
+  }
+
+  function finNextBeat() {
+    var f = finState;
+    if (!f) return;
+    if (f.phase === 'gather') { f.t = Math.max(f.t, FIN_TALK_AT); return; }
+    if (f.phase !== 'talk') return;
+    if (f.beat >= FIN_BEATS.length - 1) { finFinish(); return; }
+    f.beat++;
+    finSay(f.beat);
+    Snd.sfx('ding');
+  }
+
+  function finFinish() {
+    var ov = $('#finale');
+    if (ov) {
+      ov.classList.remove('show');
+      setTimeout(function () { ov.classList.add('hidden'); }, 380);
+    }
+    finState = null;
+    S.ending = null;
+    S.ended = true;
+    mutate(function (w) { w.ended = 1; return w; });
+    setTimeout(function () { openPhoto({ finale: true }); }, 460);
+  }
+
+  function finTick(dt, ts) {
+    var f = finState;
+    if (!f) return;
+    f.t += dt * 1000;
+    var t = f.t;
+
+    for (var i = 0; i < FIN.cast.length; i++) {
+      var start = FIN_GATHER_AT + i * FIN_CAST_DELAY;
+      var ap = (t - start) / 420;
+      f.appear[i] = ap < 0 ? 0 : (ap > 1 ? 1 : ap);
+      if (f.appear[i] > 0 && f.shown < i + 1) f.shown = i + 1;
+    }
+
+    if (f.phase === 'gather' && t >= FIN_TALK_AT) {
+      f.phase = 'talk';
+      f.beat = 0;
+      finSay(0);
+    }
+
+    if (f.santa) {
+      var u = Math.min(1, Math.max(0, (t - f.santaT0) / 15000));
+      f.santa.x = -320 + u * (FIN_W + 640);
+      f.santa.y = 96 + Math.sin(u * Math.PI * 1.35) * 14 - u * 8;
+    }
+
+    if (f.fx.length) {
+      f.fx = f.fx.filter(function (b) { return (t - b.t0) < b.dur + 60; });
+    }
+
+    var cv = $('#finale-canvas');
+    if (cv) {
+      var g = cv.getContext('2d');
+      paintFinale(g, FIN_W, FIN_H, {
+        t: t, shown: f.shown, appear: f.appear, santa: f.santa, fx: f.fx
+      });
     }
   }
 
@@ -1703,7 +2581,10 @@ window.Game = (function () {
       $('#photo-note').textContent = '长按上方画布保存（1920 × 1080）';
     }
     var title = $('#photo-title');
-    if (title) title.textContent = opt.mapId ? ('📷 ' + (opt.label || '旅行打卡')) : '📷 我们的圣诞合照';
+    if (title) {
+      title.textContent = opt.finale ? '📷 我们的最终合影'
+        : (opt.mapId ? ('📷 ' + (opt.label || '旅行打卡')) : '📷 我们的圣诞合照');
+    }
     $('#photo-modal').classList.remove('hidden');
   }
   function closePhoto() {
@@ -1716,7 +2597,9 @@ window.Game = (function () {
       var img = $('#photo-img');
       var a = document.createElement('a');
       a.href = img.src;
-      a.download = 'Omos-Christmas-Village-' + (S.photoOpt && S.photoOpt.mapId ? S.photoOpt.mapId : 'town') + '-' + Date.now() + '.png';
+      var tag = S.photoOpt && S.photoOpt.finale ? 'finale'
+        : (S.photoOpt && S.photoOpt.mapId ? S.photoOpt.mapId : 'town');
+      a.download = 'Omos-Christmas-Village-' + tag + '-' + Date.now() + '.png';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1727,7 +2610,7 @@ window.Game = (function () {
   }
   /* 拍照时要把结局遮罩一起收起来（与普通关面板不同） */
   function hidePanelsForPhoto() {
-    ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#end-overlay', '#book-panel',
+    ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#finale', '#book-panel',
       '#plot-panel', '#craft-panel', '#mem-photo', '#res-panel', '#quest-panel', '#settings-panel'].forEach(function (s) {
       var el = $(s); if (el) el.classList.add('hidden');
     });
@@ -1740,118 +2623,273 @@ window.Game = (function () {
    */
   var PHOTO_W = 1920, PHOTO_H = 1080;
 
-  function photoNightSky(ctx, W, H) {
+  /* ---------- 小镇合照：按圣诞树的阶段构图 ----------
+   * 树有 4 个阶段（0 小树苗 / 1 已装饰 / 2 挂上彩灯 / 3 全树点亮），
+   * 照片跟着阶段变：星星、月亮、窗灯、路灯、礼物、居民、灯串、雪量全都不一样，
+   * 所以回头看旧照片，能一眼看出「那时候小镇还没这么亮」。
+   * 注意：最高阶段也只是「漂亮」，不能和最终结局那张比——那张另有渲染器。
+   */
+  var TOWN_STAGES = [
+    { star: 62, moon: 0.70, win: 0.16, lamps: 2, gifts: 1, snow: 62,
+      treeS: 1.16, glow: 0.10, garland: 0, heart: false, tag: '小树苗',
+      cx: 0.452, gap: 0.050, npcs: [], line: '一切才刚刚开始' },
+    { star: 104, moon: 0.84, win: 0.34, lamps: 2, gifts: 3, snow: 84,
+      treeS: 1.40, glow: 0.16, garland: 0, heart: true, tag: '已装饰',
+      cx: 0.460, gap: 0.058, npcs: ['elf'], line: '树上第一次挂满了彩球' },
+    { star: 156, moon: 0.96, win: 0.62, lamps: 4, gifts: 6, snow: 106,
+      treeS: 1.66, glow: 0.24, garland: 1, heart: true, tag: '挂上彩灯',
+      cx: 0.466, gap: 0.064, npcs: ['elf', 'snowman', 'postman'], line: '小镇开始有了圣诞节的样子' },
+    { star: 214, moon: 1.06, win: 0.94, lamps: 4, gifts: 10, snow: 138,
+      treeS: 1.92, glow: 0.34, garland: 1, heart: true, tag: '全树点亮',
+      cx: 0.470, gap: 0.068,
+      npcs: ['elf', 'snowman', 'postman', 'baker', 'shepherd', 'barista'], line: '我们把这里变成了真正的圣诞小镇' }
+  ];
+
+  /* 居民站位：都在树的两侧，不挡树干、不挡脸 */
+  /* 居民站位：都在树的两侧，不挡树干、不挡脸。单位是画面比例。 */
+  var TOWN_CAST_POS = {
+    barista:  [0.118, 0.808, 2.30],
+    postman:  [0.205, 0.824, 2.44],
+    baker:    [0.292, 0.800, 2.26],
+    elf:      [0.762, 0.818, 2.38],
+    shepherd: [0.842, 0.808, 2.26],
+    snowman:  [0.902, 0.846, 1.58]
+  };
+
+  function photoNightSky(ctx, W, H, cfg) {
+    cfg = cfg || TOWN_STAGES[3];
     var sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#08122a');
-    sky.addColorStop(0.45, '#15294a');
-    sky.addColorStop(1, '#2c4666');
+    sky.addColorStop(0, '#070e22');
+    sky.addColorStop(0.45, '#132542');
+    sky.addColorStop(1, '#2a4462');
     ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
     var rnd = seeded(77);
-    for (var i = 0; i < 150; i++) {
-      var sx = rnd() * W, sy = rnd() * H * 0.6;
-      ctx.fillStyle = 'rgba(255,255,255,' + (0.18 + rnd() * 0.55) + ')';
-      ctx.fillRect(sx, sy, 1.8 + rnd() * 1.6, 1.8 + rnd() * 1.6);
+    for (var i = 0; i < cfg.star; i++) {
+      var sx = rnd() * W, sy = rnd() * H * 0.62;
+      var r = 1.4 + rnd() * 1.9;
+      ctx.fillStyle = 'rgba(238,246,255,' + (0.12 + rnd() * 0.62).toFixed(3) + ')';
+      ctx.fillRect(sx, sy, r, r);
+      if (i % 17 === 0) {
+        ctx.strokeStyle = 'rgba(226,238,255,' + (0.16 + rnd() * 0.2).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx - 7, sy); ctx.lineTo(sx + 7, sy);
+        ctx.moveTo(sx, sy - 7); ctx.lineTo(sx, sy + 7);
+        ctx.stroke();
+      }
     }
-    /* 月亮 + 月晕 */
-    var mx = W - 250, my = 165;
-    var hg = ctx.createRadialGradient(mx, my, 20, mx, my, 220);
-    hg.addColorStop(0, 'rgba(255,247,214,.34)');
+
+    /* 月亮：阶段越靠后越大越亮 */
+    var m = cfg.moon;
+    var mx = W - 250, my = 165, mr = 42 * m;
+    var hg = ctx.createRadialGradient(mx, my, mr * 0.5, mx, my, mr * 5);
+    hg.addColorStop(0, 'rgba(255,247,214,' + (0.30 * m).toFixed(3) + ')');
     hg.addColorStop(1, 'rgba(255,247,214,0)');
     ctx.fillStyle = hg;
-    ctx.beginPath(); ctx.arc(mx, my, 220, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx, my, mr * 5, 0, 7); ctx.fill();
     ctx.fillStyle = '#fbf4d8';
-    ctx.beginPath(); ctx.arc(mx, my, 56, 0, 7); ctx.fill();
-    ctx.fillStyle = 'rgba(226,220,190,.55)';
-    ctx.beginPath(); ctx.arc(mx - 14, my - 12, 12, 0, 7); ctx.fill();
-    ctx.beginPath(); ctx.arc(mx + 16, my + 14, 8, 0, 7); ctx.fill();
-    ctx.beginPath(); ctx.arc(mx + 4, my - 24, 6, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(226,220,190,.5)';
+    ctx.beginPath(); ctx.arc(mx - mr * 0.25, my - mr * 0.22, mr * 0.22, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + mr * 0.28, my + mr * 0.26, mr * 0.15, 0, 7); ctx.fill();
   }
 
+  /* 远山：两层不等距的山脊（不是一排等边三角形），顶上压一层冷雾 */
   function photoMountains(ctx, W, H, baseY) {
-    /* 后排更淡更远，前排更实——两排就够撑起纵深 */
-    [[0.42, '#1b2c48', '#243756'], [0.52, '#22375a', '#2c4569']].forEach(function (row, ri) {
-      var y = baseY - ri * 26;
-      ctx.beginPath();
-      ctx.moveTo(-40, baseY + 60);
-      var step = W / 5;
-      for (var i = 0; i <= 5; i++) {
-        var px = i * step;
-        var peak = y - (ri === 0 ? 120 : 168) - ((i * 53 + ri * 31) % 90);
-        ctx.lineTo(px - step / 2, y - 30);
-        ctx.lineTo(px, peak);
+    var rows = [
+      { y: baseY - 8, amp: 168, col: '#1a2b47', top: '#2d4266', seed: 331, step: 250 },
+      { y: baseY + 10, amp: 112, col: '#101d31', top: '#1c2c46', seed: 877, step: 190 }
+    ];
+    rows.forEach(function (R) {
+      var rnd = seeded(R.seed);
+      var pts = [], x = -90;
+      while (x < W + 140) {
+        pts.push([x, R.y - R.amp * (0.30 + rnd() * 0.70)]);
+        x += R.step * (0.55 + rnd() * 0.85);
       }
-      ctx.lineTo(W + 40, baseY + 60);
+      ctx.beginPath();
+      ctx.moveTo(-90, R.y + 120);
+      ctx.lineTo(-90, R.y - 10);
+      pts.forEach(function (pt) { ctx.lineTo(pt[0], pt[1]); });
+      ctx.lineTo(W + 140, pts[pts.length - 1][1] * 0.5 + (R.y - 10) * 0.5);
+      ctx.lineTo(W + 140, R.y + 120);
       ctx.closePath();
-      ctx.fillStyle = row[1]; ctx.fill();
-      /* 雪线 */
-      ctx.save(); ctx.clip();
-      ctx.fillStyle = row[2];
-      ctx.fillRect(0, y - 210, W, 60);
+      ctx.fillStyle = R.col; ctx.fill();
+
+      /* 山脊上一层薄薄的反光，让它有体积 */
+      ctx.save();
+      ctx.clip();
+      var lg = ctx.createLinearGradient(0, R.y - R.amp, 0, R.y - R.amp * 0.35);
+      lg.addColorStop(0, R.top);
+      lg.addColorStop(1, 'rgba(30,48,78,0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(0, R.y - R.amp, W, R.amp * 0.8);
       ctx.restore();
     });
   }
 
-  function photoTownSilhouette(ctx, W, H, baseY) {
+  /* 小镇：一栋一栋错落排开，屋顶压雪、留出间距，窗灯按阶段亮 */
+  function photoTownSilhouette(ctx, W, H, baseY, cfg) {
+    cfg = cfg || TOWN_STAGES[3];
+
+    /* 镇的暖光：越往后越亮，让地平线不空 */
+    var glow = ctx.createLinearGradient(0, baseY - 190, 0, baseY + 20);
+    glow.addColorStop(0, 'rgba(255,188,112,0)');
+    glow.addColorStop(1, 'rgba(255,188,112,' + (0.04 + cfg.glow * 0.20).toFixed(3) + ')');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, baseY - 190, W, 210);
+
     var rnd = seeded(19);
-    for (var b = 0; b < 12; b++) {
-      var bw = 60 + rnd() * 80;
-      var bh = 70 + rnd() * 90;
-      var bx = -30 + b * (W / 11);
+    var x = -50;
+    while (x < W + 40) {
+      var bw = 84 + rnd() * 96;
+      var bh = 86 + rnd() * 104;
       var by = baseY - bh;
-      ctx.fillStyle = 'rgba(16,26,44,.92)';
-      ctx.fillRect(bx, by, bw, bh);
+
+      /* 墙 */
+      ctx.fillStyle = 'rgba(24,37,59,.96)';
+      ctx.fillRect(x, by, bw, bh + 40);
+
       /* 屋顶 */
       ctx.beginPath();
-      ctx.moveTo(bx - 8, by + 4);
-      ctx.lineTo(bx + bw / 2, by - 24 - rnd() * 14);
-      ctx.lineTo(bx + bw + 8, by + 4);
+      ctx.moveTo(x - 11, by + 7);
+      ctx.lineTo(x + bw / 2, by - 42 - rnd() * 20);
+      ctx.lineTo(x + bw + 11, by + 7);
       ctx.closePath();
+      ctx.fillStyle = 'rgba(20,31,50,.96)';
       ctx.fill();
-      /* 窗灯 */
-      for (var wq = 0; wq < 3; wq++) {
-        if (rnd() > 0.35) {
-          ctx.fillStyle = 'rgba(255,206,130,' + (0.5 + rnd() * 0.4) + ')';
-          ctx.fillRect(bx + 10 + wq * 22, by + 18 + (wq % 2) * 26, 11, 13);
+      /* 屋顶上的雪 */
+      ctx.beginPath();
+      ctx.moveTo(x - 11, by + 7);
+      ctx.lineTo(x + bw / 2, by - 42 - rnd() * 6);
+      ctx.lineTo(x + bw + 11, by + 7);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(206,224,248,.30)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(238,248,255,.50)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(x - 11, by + 7);
+      ctx.lineTo(x + bw / 2, by - 42);
+      ctx.lineTo(x + bw + 11, by + 7);
+      ctx.stroke();
+
+      /* 烟囱（有的房子有） */
+      if (rnd() > 0.55) {
+        var chx = x + bw * (0.22 + rnd() * 0.5);
+        ctx.fillStyle = 'rgba(14,22,38,.95)';
+        ctx.fillRect(chx, by - 58 - rnd() * 12, 13, 30);
+      }
+
+      /* 窗灯：阶段决定亮几成 */
+      var cols = Math.max(1, Math.floor(bw / 34));
+      for (var wi = 0; wi < cols; wi++) {
+        for (var wj = 0; wj < 2; wj++) {
+          if (rnd() < cfg.win) {
+            ctx.fillStyle = 'rgba(255,204,126,' + (0.40 + rnd() * 0.52).toFixed(3) + ')';
+            ctx.fillRect(x + 12 + wi * 34, by + 22 + wj * 34, 15, 18);
+            if (cfg.glow > 0.2) {
+              ctx.fillStyle = 'rgba(255,196,110,.13)';
+              ctx.fillRect(x + 12 + wi * 34 - 6, by + 22 + wj * 34 - 6, 27, 30);
+            }
+          }
         }
       }
-      /* 屋顶积雪 */
-      ctx.fillStyle = 'rgba(236,246,255,.35)';
-      ctx.fillRect(bx - 4, by - 2, bw + 8, 4);
+
+      x += bw + 14 + rnd() * 46;
     }
   }
 
+  /* 雪地：一层厚的雪坡 + 几道压出来的车辙/脚印 + 淡淡的雪堆 */
   function photoSnowGround(ctx, W, H, groundY) {
     var g = ctx.createLinearGradient(0, groundY, 0, H);
-    g.addColorStop(0, '#cfdcee');
-    g.addColorStop(0.35, '#bacbe4');
-    g.addColorStop(1, '#8fa5c8');
+    g.addColorStop(0, '#d3e0f1');
+    g.addColorStop(0.30, '#c2d3ea');
+    g.addColorStop(0.76, '#a6bad9');
+    g.addColorStop(1, '#8ea3c8');
     ctx.fillStyle = g;
     ctx.beginPath();
+    /* 顶边做成起伏的雪堆，而不是一条直线：
+       房子底部的"切口"被雪盖住，雪和镇子之间没有硬边 */
     ctx.moveTo(0, groundY + 30);
-    ctx.bezierCurveTo(W * 0.25, groundY - 6, W * 0.6, groundY + 16, W, groundY - 4);
+    var wob = [[0.10, -12], [0.22, 16], [0.34, -8], [0.46, 12], [0.58, -14],
+               [0.70, 10], [0.82, -6], [0.92, 13]];
+    wob.forEach(function (p2) {
+      ctx.quadraticCurveTo(W * (p2[0] - 0.06), groundY + p2[1] * 1.3, W * p2[0], groundY + p2[1]);
+    });
+    ctx.quadraticCurveTo(W * 0.97, groundY - 12, W, groundY + 2);
     ctx.lineTo(W, H); ctx.lineTo(0, H);
     ctx.closePath();
     ctx.fill();
-    /* 雪面起伏 */
+
+    /* 地平线上的一层薄雾，避免雪地和镇硬切 */
+    var fog = ctx.createLinearGradient(0, groundY - 26, 0, groundY + 60);
+    fog.addColorStop(0, 'rgba(226,238,252,.42)');
+    fog.addColorStop(1, 'rgba(226,238,252,0)');
+    ctx.fillStyle = fog; ctx.fillRect(0, groundY - 26, W, 90);
+
+    /* 雪堆：扁而软，边界不明显 */
     var rnd = seeded(451);
-    for (var i = 0; i < 26; i++) {
-      var x = rnd() * W, y = groundY + 40 + rnd() * (H - groundY - 40);
-      ctx.fillStyle = 'rgba(255,255,255,' + (0.12 + rnd() * 0.22) + ')';
-      ctx.beginPath();
-      ctx.ellipse(x, y, 40 + rnd() * 90, 8 + rnd() * 14, 0, 0, 7);
-      ctx.fill();
+    for (var i = 0; i < 22; i++) {
+      var x = rnd() * W, y = groundY + 50 + rnd() * (H - groundY - 60);
+      var rx = 70 + rnd() * 180, ry = 10 + rnd() * 20;
+      var sg = ctx.createRadialGradient(x, y, 0, x, y, rx);
+      sg.addColorStop(0, 'rgba(255,255,255,.22)');
+      sg.addColorStop(0.6, 'rgba(255,255,255,.10)');
+      sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.save();
+      ctx.translate(x, y); ctx.scale(1, ry / rx);
+      ctx.fillStyle = sg;
+      ctx.beginPath(); ctx.arc(0, 0, rx, 0, 7); ctx.fill();
+      ctx.restore();
     }
+
+    /* 压出来的小路：从画面左下往镇子那边去 */
+    ctx.strokeStyle = 'rgba(150,172,206,.34)';
+    ctx.lineWidth = 46; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(W * 0.30, H + 20);
+    ctx.quadraticCurveTo(W * 0.42, groundY + 150, W * 0.62, groundY + 46);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(190,208,234,.30)';
+    ctx.lineWidth = 22;
+    ctx.stroke();
   }
 
   function photoPerson(ctx, x, y, s, opt, isJulie, dir) {
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(s, s);
-    /* 影子 */
     ctx.fillStyle = 'rgba(40,60,90,.22)';
     ctx.beginPath(); ctx.ellipse(0, 2, 30, 7, 0, 0, 7); ctx.fill();
     Sprites.drawCharacter(ctx, 0, 0, dir === undefined ? 0 : dir, 0, opt, isJulie, 800);
     ctx.restore();
+  }
+
+  /* 居民：和小镇里用的是同一套 sprite，只是换成照片坐标 */
+  function photoNpc(ctx, id, x, y, s) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    if (id === 'snowman') Sprites.drawSnowman(ctx, 0, 0, 800);
+    else if (id === 'elf') Sprites.drawElf(ctx, 0, 0, 800, 0);
+    else if (id === 'barista') Sprites.drawBarista(ctx, 0, 0, 800, 0);
+    else Sprites.drawVillager(ctx, 0, 0, 800, id, 0);
+    ctx.restore();
+  }
+
+  function photoGift(ctx, x, y, w, h, body, ribbon) {
+    ctx.fillStyle = 'rgba(40,60,90,.18)';
+    ctx.beginPath(); ctx.ellipse(x, y + 1, w * 0.6, h * 0.2, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = body;
+    ctx.fillRect(x - w / 2, y - h, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,.16)';
+    ctx.fillRect(x - w / 2, y - h, w, Math.max(2, h * 0.13));
+    ctx.fillStyle = ribbon;
+    ctx.fillRect(x - w * 0.08, y - h, w * 0.16, h);
+    ctx.beginPath(); ctx.ellipse(x - w * 0.15, y - h - 1, w * 0.13, h * 0.13, 0.4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + w * 0.15, y - h - 1, w * 0.13, h * 0.13, -0.4, 0, 7); ctx.fill();
   }
 
   function photoSnowfall(ctx, W, H, n) {
@@ -1873,65 +2911,205 @@ window.Game = (function () {
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
-  /* 小镇里的最终合照：整棵树 + 两个人 + 小镇背景都在画面里 */
+  /* 小镇合照：整棵树 + 两个人（+ 随阶段增多的居民）+ 小镇背景。
+     构图固定成「树在右、两个人站在树前偏左、居民分列两边」，
+     阶段只改亮度、树的尺寸、礼物数量、居民数量和雪量——
+     所以翻旧照片一眼就能看出「那时候小镇还没这么亮」。 */
   function renderTownPhoto(ctx, W, H) {
-    var stage = Math.max(2, Math.min(3, treeStage()));
-    var groundY = H * 0.63;
+    var stage = Math.max(0, Math.min(3, treeStage()));
+    var cfg = TOWN_STAGES[stage];
+    var k = W / 1920;
+    var groundY = H * 0.625;
 
-    photoNightSky(ctx, W, H);
-    photoMountains(ctx, W, H, groundY - 40);
-    photoTownSilhouette(ctx, W, H, groundY + 6);
+    photoNightSky(ctx, W, H, cfg);
+    photoMountains(ctx, W, H, groundY - 30);
+    photoTownSilhouette(ctx, W, H, groundY + 24, cfg);
     photoSnowGround(ctx, W, H, groundY);
 
-    /* 树：用世界坐标套一层缩放搬到画面右侧（放大到接近满高，才有仪式感） */
-    var s = 2.05;
-    var treeScreenX = W * 0.655, treeScreenY = H * 0.825;
+    /* 路灯：只在画面最外侧，不抢人物 */
+    var lampXs = [0.048, 0.952, 0.104, 0.896];
+    for (var li = 0; li < Math.min(cfg.lamps, lampXs.length); li++) {
+      var lx = W * lampXs[li], ly = H * 0.850;
+      var lg = ctx.createRadialGradient(lx, ly - 96 * k, 4, lx, ly - 96 * k, 120 * k);
+      lg.addColorStop(0, 'rgba(255,214,130,' + (0.20 + cfg.glow * 0.7).toFixed(3) + ')');
+      lg.addColorStop(1, 'rgba(255,214,130,0)');
+      ctx.fillStyle = lg;
+      ctx.beginPath(); ctx.arc(lx, ly - 96 * k, 120 * k, 0, 7); ctx.fill();
+      ctx.fillStyle = '#3a3f4a';
+      ctx.fillRect(lx - 3 * k, ly - 100 * k, 6 * k, 100 * k);
+      ctx.fillStyle = '#ffe08a';
+      ctx.fillRect(lx - 8 * k, ly - 110 * k, 16 * k, 16 * k);
+    }
+
+    /* 树：整张照片的主角，偏右 */
+    var treeScreenX = W * 0.615, treeScreenY = H * 0.792;
+    var treeScale = cfg.treeS * k * 0.86;
     ctx.save();
     ctx.translate(treeScreenX, treeScreenY);
-    ctx.scale(s, s);
+    ctx.scale(treeScale, treeScale);
     ctx.translate(-World.tree.x, -World.tree.y);
-    World.drawBigTree(ctx, World.tree, stage, 1000);
+    World.drawBigTree(ctx, World.tree, stage, 900);
     ctx.restore();
 
-    /* 两个人的暖光 */
-    var glow = ctx.createRadialGradient(treeScreenX - 120, H * 0.82, 20, treeScreenX - 120, H * 0.82, 420);
-    glow.addColorStop(0, 'rgba(255,206,132,.22)');
+    /* 树下的礼物：阶段越多越满 */
+    var grnd = seeded(3311);
+    for (var gi = 0; gi < cfg.gifts; gi++) {
+      var gx = treeScreenX + (-0.35 + grnd()) * 430 * k;
+      var gy = treeScreenY + 8 * k + grnd() * 22 * k;
+      photoGift(ctx, gx, gy, (34 + grnd() * 32) * k, (26 + grnd() * 24) * k,
+        ['#b3432f', '#2f5f8a', '#2f6b52', '#c98a3a', '#8a5a3a'][gi % 5],
+        gi % 2 ? '#f3e3c2' : '#e8c86a');
+    }
+
+    /* 树周围那层暖光：阶段越靠后越强 */
+    var glow = ctx.createRadialGradient(treeScreenX, H * 0.70, 30 * k, treeScreenX, H * 0.70, 560 * k);
+    glow.addColorStop(0, 'rgba(255,206,132,' + (0.08 + cfg.glow).toFixed(3) + ')');
     glow.addColorStop(1, 'rgba(255,206,132,0)');
     ctx.fillStyle = glow;
-    ctx.fillRect(0, H * 0.5, W, H * 0.5);
+    ctx.fillRect(treeScreenX - 560 * k, H * 0.40, 1120 * k, H * 0.60);
 
-    photoPerson(ctx, W * 0.285, H * 0.815, 3.4,
-      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 0);
-    photoPerson(ctx, W * 0.355, H * 0.822, 3.4,
-      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, 0);
-
-    /* 心形 */
-    ctx.fillStyle = 'rgba(242,109,125,.9)';
-    [[W * 0.32, H * 0.62, 19], [W * 0.292, H * 0.675, 13], [W * 0.355, H * 0.685, 15]].forEach(function (h) {
-      var hx = h[0], hy = h[1], hs = h[2];
-      ctx.beginPath();
-      ctx.moveTo(hx, hy + hs * 0.36);
-      ctx.bezierCurveTo(hx - hs, hy - hs * 0.45, hx - hs * 0.42, hy - hs * 1.12, hx, hy - hs * 0.4);
-      ctx.bezierCurveTo(hx + hs * 0.42, hy - hs * 1.12, hx + hs, hy - hs * 0.45, hx, hy + hs * 0.36);
-      ctx.fill();
+    /* 居民（中景，站在树两侧，不挡树干） */
+    cfg.npcs.forEach(function (id) {
+      var p = TOWN_CAST_POS[id];
+      if (!p) return;
+      photoNpc(ctx, id, W * p[0], H * p[1], p[2] * k);
     });
 
-    photoSnowfall(ctx, W, H, 150);
+    /* 两个人：站在树前偏左，永远是画面里最大的。
+       树越长越大，两个人也一点点往两边让开——站位本身就是"长大了"的证据。 */
+    photoPerson(ctx, W * (cfg.cx - cfg.gap / 2), H * 0.846, 3.15 * k,
+      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 0);
+    photoPerson(ctx, W * (cfg.cx + cfg.gap / 2), H * 0.850, 3.10 * k,
+      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, 0);
+
+    if (cfg.heart) {
+      [[W * cfg.cx, H * 0.690, 17 * k], [W * (cfg.cx - 0.026), H * 0.728, 12 * k], [W * (cfg.cx + 0.028), H * 0.736, 13 * k]].forEach(function (h) {
+        var hx = h[0], hy = h[1], hs = h[2];
+        ctx.fillStyle = 'rgba(242,109,125,.88)';
+        ctx.beginPath();
+        ctx.moveTo(hx, hy + hs * 0.36);
+        ctx.bezierCurveTo(hx - hs, hy - hs * 0.45, hx - hs * 0.42, hy - hs * 1.12, hx, hy - hs * 0.4);
+        ctx.bezierCurveTo(hx + hs * 0.42, hy - hs * 1.12, hx + hs, hy - hs * 0.45, hx, hy + hs * 0.36);
+        ctx.fill();
+      });
+    }
+
+    photoSnowfall(ctx, W, H, cfg.snow);
     photoVignette(ctx, W, H);
 
-    /* 铭牌 */
-    var pw = 1000, ph = 104, px = (W - pw) / 2, py = H - ph - 14;
-    ctx.fillStyle = 'rgba(20,14,10,.72)';
-    roundRectPath(ctx, px, py, pw, ph, 22); ctx.fill();
-    ctx.strokeStyle = 'rgba(240,192,64,.85)'; ctx.lineWidth = 3;
-    roundRectPath(ctx, px + 10, py + 10, pw - 20, ph - 20, 15); ctx.stroke();
+    /* 铭牌：记下这张照片是「树到哪一步」的时候拍的 */
+    var pw = 1060 * k, ph = 120 * k, px2 = (W - pw) / 2, py = H - ph - 14 * k;
+    ctx.fillStyle = 'rgba(20,14,10,.78)';
+    roundRectPath(ctx, px2, py, pw, ph, 22 * k); ctx.fill();
+    ctx.strokeStyle = 'rgba(240,192,64,.82)'; ctx.lineWidth = 3 * k;
+    roundRectPath(ctx, px2 + 10 * k, py + 10 * k, pw - 20 * k, ph - 20 * k, 15 * k); ctx.stroke();
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffe08a';
-    ctx.font = 'bold 38px "PingFang SC", Georgia, serif';
-    ctx.fillText("Omo's Christmas Village", W / 2, py + 47);
+    ctx.font = 'bold ' + (31 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText("Omo's Christmas Village", W / 2, py + 40 * k);
     ctx.fillStyle = '#f4ead8';
-    ctx.font = '22px "PingFang SC", Georgia, serif';
-    ctx.fillText('✦ Charles ♥ Julie · 回忆 ' + foundCount() + ' 段 · ' + dayStr() + ' ✦', W / 2, py + 82);
+    ctx.font = (19 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText('✦ Charles ♥ Julie · 回忆 ' + foundCount() + ' 段 ✦', W / 2, py + 68 * k);
+    ctx.fillStyle = 'rgba(244,234,216,.66)';
+    ctx.font = (16 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
+    ctx.fillText('🌲 圣诞树 · ' + cfg.tag + '　·　' + cfg.line + '　·　' + dayStr(), W / 2, py + 95 * k);
+  }
+
+  /* ---------- 最终结局合照（独立渲染，不复用任何普通模板）----------
+   * 1920×1080、16:9 横版：全亮的树 + 全镇的人 + 烟花 + 圣诞老人雪橇 + 完整小镇，
+   * 底部一条纪念文字带。和游戏里那一幕是同一份 paintFinale()。
+   */
+  var FIN_BAND_H = 200;   /* 底部纪念文字带的高度：画面 880 + 文字 200 = 1080 */
+
+  function renderFinalePhoto(ctx, W, H) {
+    var T = 12000;
+    var bandH = FIN_BAND_H;
+    var sceneH = H - bandH;          // 880
+
+    /* 画面只在 1920×880 里画：人物和树都在这一块里完整收住，
+       下面的 200px 留给文字，所以文字不可能压到任何一张脸。 */
+    var sc = document.createElement('canvas');
+    sc.width = W; sc.height = sceneH;
+    var g = sc.getContext('2d');
+
+    /* 几发「停在这一帧」的烟花：位置全部在树冠以上或树的两侧 */
+    var fx = [
+      [300, 206, 132, '255,214,140', 0.30],
+      [706, 118, 108, '176,208,255', 0.46],
+      [1252, 136, 146, '255,158,150', 0.36],
+      [1642, 210, 118, '168,240,206', 0.52],
+      [988, 72, 96, '222,186,255', 0.62],
+      [172, 316, 92, '255,224,170', 0.44]
+    ].map(function (b) {
+      return {
+        x: b[0] * W / 1920, y: b[1] * sceneH / 1080, R: b[2] * W / 1920,
+        col: b[3], t0: T - b[4] * 1000, dur: 1000
+      };
+    });
+
+    paintFinale(g, W, sceneH, {
+      t: T, shown: FIN.cast.length,
+      appear: FIN.cast.map(function () { return 1; }),
+      santa: { x: W * 0.300, y: sceneH * 0.146, s: 1.14 },
+      fx: fx, photo: true
+    });
+    ctx.drawImage(sc, 0, 0);
+
+    /* ---------- 底部纪念文字带 ---------- */
+    var by = sceneH;
+    ctx.fillStyle = '#070b14';
+    ctx.fillRect(0, by, W, bandH);
+
+    /* 上沿压一点暗，让雪地和黑底之间不是硬切 */
+    var sh = ctx.createLinearGradient(0, by - 18, 0, by);
+    sh.addColorStop(0, 'rgba(7,11,20,0)');
+    sh.addColorStop(1, 'rgba(7,11,20,.62)');
+    ctx.fillStyle = sh; ctx.fillRect(0, by - 18, W, 18);
+
+    /* 一条细金线当分隔 */
+    var lg = ctx.createLinearGradient(W * 0.5 - 430, 0, W * 0.5 + 430, 0);
+    lg.addColorStop(0, 'rgba(240,192,64,0)');
+    lg.addColorStop(0.5, 'rgba(240,192,64,.85)');
+    lg.addColorStop(1, 'rgba(240,192,64,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(W * 0.5 - 430, by, 860, 2);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe6a8';
+    ctx.font = 'bold 38px "PingFang SC", Georgia, serif';
+    ctx.fillText("Omo's Christmas Village", W / 2, by + 56);
+
+    /* CHRISTMAS 2026：逐字排开，字距拉开 */
+    ctx.fillStyle = 'rgba(244,234,216,.74)';
+    ctx.font = '15px "PingFang SC", Georgia, serif';
+    var yr = 'CHRISTMAS ' + new Date().getFullYear();
+    var chars = yr.split('');
+    var spacing = 13;
+    var totalW = 0;
+    chars.forEach(function (ch) { totalW += ctx.measureText(ch).width + spacing; });
+    totalW -= spacing;
+    var cx0 = W / 2 - totalW / 2;
+    ctx.textAlign = 'left';
+    chars.forEach(function (ch) {
+      ctx.fillText(ch, cx0, by + 90);
+      cx0 += ctx.measureText(ch).width + spacing;
+    });
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff2cf';
+    ctx.font = 'bold 27px "PingFang SC", Georgia, serif';
+    ctx.fillText('下一站，冰岛。', W / 2, by + 141);
+
+    ctx.fillStyle = 'rgba(246,238,222,.92)';
+    ctx.font = '17.5px "PingFang SC", Georgia, serif';
+    ctx.fillText('愿我们一路顺利，也一直一起走下去。', W / 2, by + 174);
+  }
+
+  function renderPhoto(ctx, W, H, opt) {
+    opt = opt || {};
+    if (opt.finale) { renderFinalePhoto(ctx, W, H); return; }
+    if (opt.mapId) renderTravelPhoto(ctx, W, H, opt.mapId, opt.label);
+    else renderTownPhoto(ctx, W, H);
   }
 
   /* 旅行打卡照：当地风景当底，两个人站在景里 */
@@ -2002,12 +3180,6 @@ window.Game = (function () {
     ctx.fillStyle = '#f4ead8';
     ctx.font = (24 * k).toFixed(1) + 'px "PingFang SC", Georgia, serif';
     ctx.fillText('✦ Charles ♥ Julie · ' + (spotLabel || d.name) + ' · ' + dayStr() + ' ✦', W / 2, H - 64 * k);
-  }
-
-  function renderPhoto(ctx, W, H, opt) {
-    opt = opt || {};
-    if (opt.mapId) renderTravelPhoto(ctx, W, H, opt.mapId, opt.label);
-    else renderTownPhoto(ctx, W, H);
   }
 
   /* 固定种子随机：照片里的星、雪、屋顶都按同一个种子铺，
@@ -2387,12 +3559,12 @@ window.Game = (function () {
    * 应急管理（对玩家隐藏）
    *   入口：菜单 → ⚙️ 设置 → 最底部那行灰色小字「小镇维护」→ 4 位口令。
    *         （v4.4.0 之前是「长按顶部标题 5 秒」，手机上按不出来，已下线。）
-   *   口令：4 位数字（默认是圣诞节那天 1225）。前端只存哈希值，不存明文。
+   *   口令：4 位数字。前端只存哈希值，不存明文，源码里也不写出来。
    *   说明：这是「不太显眼的入口」，不是真正的安全边界——网页是公开的，
    *   任何人都能改前端代码。真正需要防人的改动，必须走 Firebase 安全规则，
    *   这里所有写操作都仍然老老实实经过原来的 world 事务与规则校验。
    * ============================================================ */
-  var ADMIN_HASH = 1786157946;   // djb2('omo1225')
+  var ADMIN_HASH = 1786157946;   // djb2('omo' + PIN)，口令本身不写进源码
   var adminOk = false;
 
   function djb2(str) {
@@ -3247,6 +4419,10 @@ window.Game = (function () {
 
   /* ---------- 绘制 ---------- */
   function draw(ts) {
+    if (S.ending) {   // 最终结局在独立舞台上播，小镇这一帧不用画
+      var b0 = $('#btn-interact'); if (b0) b0.classList.add('hidden');
+      return;
+    }
     var ctx = S.ctx;
     ctx.clearRect(0, 0, S.view.w, S.view.h);
     ctx.save();
@@ -3375,7 +4551,6 @@ window.Game = (function () {
 
       World.npcs.forEach(function (n) {
         drawables.push({ y: n.y, fn: function () {
-          if (S.ending && n.id === 'santa') return;
           if (n.id === 'santa') Sprites.drawSanta(ctx, n.x, n.y, ts);
           else if (n.id === 'snowman') Sprites.drawSnowman(ctx, n.x, n.y, ts);
           else if (n.style) Sprites.drawVillager(ctx, n.x, n.y, ts, n.style, Math.floor(ts / 320) % 4);
@@ -3385,34 +4560,21 @@ window.Game = (function () {
         } });
       });
 
-      if (S.ending) {
-        var e = S.ending;
-        drawables.push({ y: e.santaY, fn: function () {
-          Sprites.drawSanta(ctx, e.santaX, e.santaY, ts);
-          nameTag(ctx, e.santaX, e.santaY - 84, '圣诞老人', false, '#ffe08a');
-        } });
-      }
-
       drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
 
-      var snowBoost = S.ending ? 1.6 : 1;
+      var snowBoost = 1;
       ctx.fillStyle = 'rgba(255,255,255,.85)';
       S.flakes.forEach(function (f) {
         f.y += f.v * 0.016 * snowBoost; f.x += Math.sin(ts / 900 + f.ph) * 0.4 * snowBoost;
         if (f.y > World.height) { f.y = -6; f.x = Math.random() * World.width; }
         if (f.x > S.cam.x - 10 && f.x < S.cam.x + S.view.w + 10 && f.y > S.cam.y - 10 && f.y < S.cam.y + S.view.h + 10) {
-          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (S.ending ? 1.3 : 1), 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 7); ctx.fill();
         }
       });
     }
 
     drawParticles(ctx);
     ctx.restore();
-
-    if (S.ending && S.ending.glow > 0) {
-      ctx.fillStyle = 'rgba(255,190,110,' + (0.16 * S.ending.glow) + ')';
-      ctx.fillRect(0, 0, S.view.w, S.view.h);
-    }
 
     var vg = ctx.createRadialGradient(S.view.w / 2, S.view.h / 2, Math.min(S.view.w, S.view.h) * 0.42, S.view.w / 2, S.view.h / 2, Math.max(S.view.w, S.view.h) * 0.75);
     vg.addColorStop(0, 'rgba(10,20,40,0)');
@@ -3563,6 +4725,7 @@ window.Game = (function () {
       x: S.self.x, y: S.self.y, dir: S.self.dir, frame: S.self.frame,
       dt: S.dt, t: S.simT, paused: !!S.paused, inter: S.interId || 0,
       map: S.mapId || null, here: hereKey(), photo: !!S.photo, ending: !!S.ending,
+      ended: !!((curWorld() || {}).ended),
       tickets: ticketOwnedCount(), spots: Object.keys(S.spots || {}).length,
       stage: treeStage(),
       joy: { dx: S.joy.dx, dy: S.joy.dy, mag: S.joy.mag, active: S.joy.active },
@@ -3620,9 +4783,40 @@ window.Game = (function () {
     devTicketBook: function () { openTicketBook(); },
     devBook: function () { openBook(); },
     devAdmin: function () { openAdminGate(); },
-    devAdminUnlock: function (pin) { return djb2('omo' + (pin || '1225')) === ADMIN_HASH; },
+    devAdminUnlock: function (pin) { return djb2('omo' + (pin || '')) === ADMIN_HASH; },
     devAdminAct: function (k) { adminDo(k); },
     devPhoto: function (opt) { openPhoto(opt); },
+    /* 最终结局的验收入口：只在 ?dev=1 下有效，不改变玩家看到的任何东西 */
+    devFinale: function (act, arg) {
+      if (!S.dev) return null;
+      function snap() {
+        return {
+          t: finState.t, phase: finState.phase, beat: finState.beat,
+          shown: finState.shown, santa: !!finState.santa, fx: finState.fx.length
+        };
+      }
+      /* 只读：没有正在播的结局就返回 null，绝不顺手再开一场 */
+      if (act === 'state') return finState ? snap() : null;
+      if (act === 'open') {
+        if (!finState) startEnding();
+        return { t: 0, phase: 'gather' };
+      }
+      if (!finState) return null;
+      if (act === 'skip') {
+        finState.t = Math.max(finState.t, FIN_TALK_AT + 20);
+        return { t: finState.t };
+      }
+      if (act === 'beat') {
+        finState.phase = 'talk';
+        finState.beat = Math.max(0, Math.min(FIN_BEATS.length - 1, arg | 0));
+        finSay(finState.beat);
+        return { beat: finState.beat };
+      }
+      if (act === 'next') { finNextBeat(); return { beat: finState ? finState.beat : -1 }; }
+      if (act === 'photo') { openPhoto({ finale: true }); return true; }
+      return snap();
+    },
+    devStagePhoto: function () { openPhoto(); return treeStage(); },
     devPhotoSize: function () { var cv = $('#photo-canvas'); return cv ? { w: cv.width, h: cv.height } : null; },
     devTickets: function () {
       var out = {};

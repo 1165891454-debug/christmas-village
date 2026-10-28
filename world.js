@@ -3113,7 +3113,7 @@ window.World = (function () {
   return {
     width: width, height: height,
     buildings: buildings, obstacles: obstacles, npcs: npcs, doors: doors,
-    tree: tree, lamps: lamps, benches: benches, snowPiles: snowPiles, props: props,
+    tree: tree, tiers: TREE_TIERS, lamps: lamps, benches: benches, snowPiles: snowPiles, props: props,
     eggs: eggs, roomEggs: roomEggs, allMemories: (window.Memories || []), drawTrace: drawTrace,
     drawEnvelope: drawEnvelope,
     Interior: Interior, interiors: interiors, getInterior: getInterior, slotNames: slotNames,

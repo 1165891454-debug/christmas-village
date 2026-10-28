@@ -297,20 +297,85 @@ body.playing #screen-game { border-radius: 0; }
   -webkit-touch-callout: default;
 }
 
-/* 结局文字覆盖层 */
-#end-overlay {
-  position: absolute; inset: 0; z-index: 40;
-  background: radial-gradient(ellipse at center, rgba(20,16,40,.78) 0%, rgba(8,6,18,.94) 100%);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 26px; padding: 30px; text-align: center; cursor: pointer;
+/* 最终结局舞台（v4.4.0 Final）
+ * 上面是 16:9 的画面，下面是台词区——两者用 flex 上下分开，
+ * 文字永远压在画面之外，不可能挡住人物。 */
+#finale {
+  position: absolute; inset: 0; z-index: 46;
+  background:
+    radial-gradient(ellipse 78% 52% at 50% 40%, #131a2c 0%, #080c16 58%, #04060d 100%);
+  display: flex; flex-direction: column;
+  opacity: 0; transition: opacity .85s ease;
 }
-#end-text {
-  color: #f4ead8; font-size: clamp(18px, 4.6vw, 26px); font-weight: 700;
-  line-height: 1.9; max-width: 620px;
-  text-shadow: 0 2px 18px rgba(255,214,130,.35);
+#finale.show { opacity: 1; }
+#finale.hidden { display: none; }
+#finale-stage {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: calc(6px + var(--safe-t)) 0 0;
+  overflow: hidden;
 }
-#end-hint { color: rgba(255,224,138,.75); font-size: 14px; animation: end-hint-pulse 1.8s ease-in-out infinite; }
-@keyframes end-hint-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+#finale-canvas {
+  display: block; max-width: 100%; max-height: 100%;
+  width: auto; height: auto;
+  background: #04060d;
+}
+#finale-cap {
+  flex: 0 0 auto;
+  padding: 6px 24px calc(20px + var(--safe-b));
+  text-align: center; cursor: pointer;
+  min-height: 132px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 8px;
+  background: linear-gradient(180deg, rgba(4,6,13,0), rgba(4,6,13,.55) 28%, rgba(4,6,13,0) 100%);
+}
+#finale-who {
+  min-height: 18px;
+  color: #ffcf6a; font-size: 12.5px; font-weight: 700;
+  letter-spacing: .22em; text-transform: none;
+  opacity: 0; transition: opacity .3s ease;
+}
+#finale-who.on { opacity: .92; }
+#finale-say {
+  color: #f6ecda; font-size: clamp(15px, 4.3vw, 20px);
+  line-height: 1.85; font-weight: 500;
+  max-width: 640px; min-height: 2.2em;
+  text-shadow: 0 2px 16px rgba(255,206,130,.22), 0 1px 2px rgba(0,0,0,.6);
+  transition: opacity .32s ease, transform .32s ease;
+}
+#finale-say.big {
+  color: #ffe6a8; font-size: clamp(17px, 5vw, 24px); font-weight: 700; letter-spacing: .04em;
+}
+#finale-say.fade { opacity: 0; transform: translateY(4px); }
+#finale-hint {
+  color: rgba(255,224,138,.66); font-size: 12.5px;
+  animation: end-hint-pulse 1.9s ease-in-out infinite;
+}
+/* 横屏手机（高度只有 390 左右）：台词改成压在画面下沿的"字幕"，
+   画面就能吃满整个高度，看起来才是最后那一幕，而不是一张小图。 */
+/* 竖屏手机：画面只有 16:9 那么高，如果台词钉在屏幕最底，
+   中间会空出一大片。这里让「画面 + 台词」作为一个整体居中。 */
+@media (max-width: 560px) {
+  #finale { justify-content: center; }
+  #finale-stage { flex: 0 1 auto; }
+}
+
+@media (max-height: 520px) {
+  /* 横屏手机：台词区压到最扁（who / say / hint 三行紧贴），
+     把省下来的高度全给画面——但仍然是「画面在上、文字在下」，
+     文字永远不会压到任何一张脸。 */
+  #finale-stage { padding: calc(2px + var(--safe-t)) 0 0; }
+  #finale-cap {
+    min-height: 0;
+    padding: 3px 18px calc(5px + var(--safe-b));
+    gap: 1px;
+  }
+  #finale-who { font-size: 10.5px; min-height: 13px; letter-spacing: .14em; }
+  #finale-say { font-size: 14.5px; line-height: 1.45; max-width: 92vw; min-height: 1.45em; }
+  #finale-say.big { font-size: 16.5px; }
+  #finale-hint { font-size: 10px; }
+}
+@keyframes end-hint-pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
 /* 拍照模式 */
 #photo-modal {
