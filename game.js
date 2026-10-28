@@ -50,11 +50,30 @@ window.Game = (function () {
   };
   if (S.dev) { GROW.flower.ms = 6000; GROW.tree.ms = 10000; GROW.flower.need = '6 秒(dev)'; GROW.tree.need = '10 秒(dev)'; }
 
+  /* ---------- 圣诞树：六个阶段（v4.5）----------
+   * 以前只有 4 个值（0..3），而 1→3 画的是同一棵满高的树，
+   * 所以「第一次升级就直接长到最大形态」。现在改成 0..5 六个真实阶段：
+   *   0 小树苗 / 1 初生 / 2 开始装饰 / 3 节日树形 / 4 即将点亮 / 5 完全点亮
+   * 每次装饰只推进一级（decorateTree 里 stage+1），没有跳级。
+   *
+   * 成本设计（不是把老的三级复制两遍）：
+   *   总量 🪵30 / 🌸35 / 🎁6 / 🌾2 / 🥛1，摊到 5 次升级上，每一步都很小；
+   *   4 阶引入干草（牧场）、5 阶引入牛奶（牧场）——后期要你「去镇上转转」，
+   *   而不是「再去砍十根木头」。木材另有老木匠每天的边角料 +3 兜底，
+   *   鲜花 30 分钟一茬，所以卡人的不是单一稀缺资源。 */
+  var TREE_STAGES = ['小树苗', '初生', '开始装饰', '节日树形', '即将点亮', '完全点亮'];
+  var TREE_STAGE_MAX = 5;
   var TREE_COST = [
-    { wood: 3 },                              // 小树苗 → 已装饰
-    { wood: 6, flowers: 6 },                  // 已装饰 → 挂上彩灯
-    { wood: 5, flowers: 8, materials: 2 }     // 挂上彩灯 → 全树点亮（还需 2 件工坊手工礼物）
+    { wood: 2, flowers: 2 },                          // 0 → 1 初生
+    { wood: 4, flowers: 5 },                          // 1 → 2 开始装饰（第一次挂彩球）
+    { wood: 6, flowers: 8, materials: 1 },            // 2 → 3 节日树形（要一件手工礼物）
+    { wood: 8, flowers: 9, materials: 2, hay: 2 },    // 3 → 4 即将点亮（干草扎花环）
+    { wood: 10, flowers: 11, materials: 3, milk: 1 }  // 4 → 5 完全点亮（牛奶刷一遍白漆）
   ];
+  /* 一阶升完给的一点甜头：树上多挂一件手工礼物 */
+  var TREE_STAGE_GIFT = 1;
+  function treeStageName(n) { return TREE_STAGES[Math.max(0, Math.min(TREE_STAGE_MAX, n | 0))] || TREE_STAGES[0]; }
+  function treeNextName(n) { return TREE_STAGES[Math.max(0, Math.min(TREE_STAGE_MAX, (n | 0) + 1))]; }
   var RECIPES = [
     { id: 'bird', name: '木头小鸟', wood: 4, flowers: 0, out: { materials: 1 }, desc: '刻了一只圆滚滚的小鸟，翅膀还会扇。' },
     { id: 'musicbox', name: '八音盒', wood: 6, flowers: 4, out: { materials: 1 }, desc: '打开盖子，会响起你们都熟悉的那段旋律。' },
@@ -135,7 +154,10 @@ window.Game = (function () {
       quest: { step: 0, talked: {}, visited: {}, found: {} },
       cocoa: { lastDay: '' },
       daily: { day: '' },
-      crafted: {}
+      crafted: {},
+      /* v4.5：新存档直接就是六阶段刻度，不需要迁移 */
+      treeStageVer: 2,
+      treeStage: 0
     };
   }
   function curWorld() {
@@ -434,6 +456,90 @@ window.Game = (function () {
     });
   }
 
+  /* ---------------- v4.5 礼物的第二、第三条路 ----------------
+   * 以前「礼物」几乎只有一条路：寄包裹 → 等两小时 → 收特产。
+   * 现在补三条不靠重复劳动的渠道，但都不动邮差的地盘：
+   *   ① 第一次到某个地方，当地小摊塞一件手工礼物（每个地方一次）
+   *   ② 屋子里的旧物里夹一件手工礼物（每间屋子一次）
+   *   ③ 邮差「加急代寄」：一张信纸，当天就把已有地址的特产带回来（每天一次）
+   * 特产的「唯一完整来源」仍然是邮差（普通包裹 + 加急 + 地址），
+   * 所以他的价值没被架空；但玩家不必为了收集反复寄、反复等。
+   * ---------------- */
+  function grantMapGift(id) {
+    var w = curWorld() || {};
+    if (w.mapGift && w.mapGift[id]) return;
+    mutate(function (w2) {
+      w2.mapGift = w2.mapGift || {};
+      if (w2.mapGift[id]) return undefined;
+      w2.mapGift[id] = Date.now();
+      w2.res = w2.res || {};
+      w2.res.materials = (w2.res.materials || 0) + 1;
+      return w2;
+    }).then(function (ok) {
+      if (!ok) return;
+      Snd.sfx('collect');
+      toast('🎁 站台边的小摊主塞给你一件手工小礼物 +1（第一次来这里）', 3800);
+      refreshHUD();
+    }, function () { });
+  }
+
+  function expressDayDone() { var w = curWorld() || {}; return w.expressDay === dayStr(); }
+  /* 能加急的：已经有地址、还没收到特产、也不在途 */
+  function expressPool() {
+    var t = T(); if (!t) return [];
+    var w = curWorld() || {};
+    var parcels = w.parcels || {};
+    return t.list.filter(function (p) {
+      return hasAddr(p.id) && !hasSpec(p.id) && !parcels[p.id];
+    });
+  }
+  function expressClaim() {
+    if (expressDayDone()) { toast('📮 今天已经托阿信加急跑过一趟了，明天再来', 2800); return; }
+    var r = worldRes();
+    if ((r.paper || 0) < 1) { toast('📮 加急要一张信纸（📄1）——工坊里两张木头就能做三张', 3200); return; }
+    var pool = expressPool();
+    if (!pool.length) { toast('📮 手上的地址都收到特产了：寄个普通包裹，或者找阿信领个新地址', 3600); return; }
+    var ds = parseInt(dayStr().replace(/-/g, ''), 10) || 0;
+    var pl = pool[ds % pool.length];
+    mutate(function (w) {
+      if (w.expressDay === dayStr()) return undefined;         // 对方刚用过
+      w.res = w.res || {};
+      if ((w.res.paper || 0) < 1) return undefined;
+      w.res.paper -= 1;
+      w.expressDay = dayStr();
+      w.spec = w.spec || {};
+      w.spec[pl.id] = w.spec[pl.id] || Date.now();
+      w.mail = w.mail || [];
+      w.mail.push({ place: pl.id, at: Date.now(), fast: 1 });
+      if (w.mail.length > 240) w.mail = w.mail.slice(-240);
+      w.res.flowers = (w.res.flowers || 0) + 1;                // 顺手带回一朵干花
+      return w;
+    }).then(function (ok) {
+      if (!ok) { toast('没送出去，再试一次', 2400); return; }
+      Snd.sfx('harvest');
+      burst(S.self.x, S.self.y - 46, 'spark', 6);
+      toast('📮 阿信骑车跑了一趟 ' + pl.name + '：' + pl.icon + ' ' + pl.item + ' 带回来了（今天加急用掉了）', 4600);
+      openMailPanel();
+    });
+  }
+
+  /* 老木匠的边角料：每天一次 +3 木材。走的是「找 NPC 说话」这条渠道，
+     不额外花材料、不需要等，也不会把邮差的事抢走（他不管木头）。 */
+  function grantCarpenterScraps(cb) {
+    var w = curWorld() || {};
+    if (w.carpenterDay === dayStr()) { if (cb) cb(false); return; }
+    mutate(function (w2) {
+      if (w2.carpenterDay === dayStr()) return undefined;
+      w2.carpenterDay = dayStr();
+      w2.res = w2.res || {};
+      w2.res.wood = (w2.res.wood || 0) + 3;
+      return w2;
+    }).then(function (ok) {
+      if (ok) { Snd.sfx('craft'); refreshHUD(); }
+      if (cb) cb(!!ok);
+    }, function () { if (cb) cb(false); });
+  }
+
   /* ---------------- 村民委托（v4.3 替代原来的每日心愿） ----------------
    * 每天两条：一条要材料（会收走），一条要看某件特产（只是看看，不收走）。
    * 用日期做种子从池子里取，两台设备算出来完全一样，不需要同步「今天是谁」。
@@ -645,10 +751,26 @@ window.Game = (function () {
     });
   }
 
+  /* 树阶段统一从存档读，一律夹到 0..5。
+     旧存档（4 阶刻度 0/1/2/3）由 migrateWorld() 折算成新刻度：
+     老 1「已装饰」= 新 2（第一次挂彩球），老 2「挂上彩灯」= 新 4（灯已亮），
+     老 3「全树点亮」= 新 5。这样升级上来的玩家不会看到树突然缩小。 */
+  var TREE_LEGACY_MAP = [0, 2, 4, 5];
   function treeStage() {
     var w = curWorld();
-    if (w && typeof w.treeStage === 'number') return w.treeStage;
-    return (S.data && S.data.tree && typeof S.data.tree.stage === 'number') ? S.data.tree.stage : 0;
+    var n = (w && typeof w.treeStage === 'number') ? w.treeStage
+      : ((S.data && S.data.tree && typeof S.data.tree.stage === 'number') ? S.data.tree.stage : 0);
+    if (!isFinite(n) || n < 0) n = 0;
+    return Math.min(TREE_STAGE_MAX, Math.floor(n));
+  }
+  /* 老存档一次性折算（只做一次，写 treeStageVer=2 之后永不再动） */
+  function migrateWorld(w) {
+    if (!w) return false;
+    if (w.treeStageVer === 2) return false;
+    var old = (typeof w.treeStage === 'number') ? w.treeStage : 0;
+    w.treeStage = TREE_LEGACY_MAP[Math.max(0, Math.min(3, Math.floor(old)))] || 0;
+    w.treeStageVer = 2;
+    return true;
   }
 
   // ---------- 结局日期门 ----------
@@ -730,17 +852,17 @@ window.Game = (function () {
       prog: function () { return '寄出包裹 ' + Math.min(1, sentCount()) + '/1 · 已知地址 ' + addrCount(); } },
     { t: '把树种起来', tip: '温室种树收木材 → 工坊做一件手工 → 树下装饰',
       ok: function () { return treeStage() >= 1 && (worldRes().materials || 0) >= 1; },
-      prog: function () { return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + ' · 手工 ' + Math.min(1, worldRes().materials || 0) + '/1'; } },
+      prog: function () { return '树 ' + treeStageName(treeStage()) + ' · 手工 ' + Math.min(1, worldRes().materials || 0) + '/1'; } },
     { t: '凑齐三张车票', tip: '车票不会一次给全：先把小镇的日子过得再热闹一点',
       ok: function () { return ticketOwnedCount() >= 3; },
       prog: function () { return '车票 ' + Math.min(3, ticketOwnedCount()) + '/3 · 回忆 ' + foundCount(); } },
     { t: '远方的回信', tip: '寄出去的包裹会带着当地特产回来，收满三种',
       ok: function () { return mailCount() >= 3 && specCount() >= 3; },
       prog: function () { return '回信 ' + Math.min(3, mailCount()) + '/3 · 特产 ' + Math.min(3, specCount()) + '/3'; } },
-    { t: '点亮整棵树', tip: '树全亮、三种牧场产物都收过、六种远方特产摆上架',
-      ok: function () { return treeStage() >= 3 && foundCount() >= 11 && ranchGoodsCount() >= 3 && specCount() >= 6; },
+    { t: '点亮整棵树', tip: '树长到第 6 阶（完全点亮）、三种牧场产物都收过、六种远方特产摆上架',
+      ok: function () { return treeStage() >= TREE_STAGE_MAX && foundCount() >= 11 && ranchGoodsCount() >= 3 && specCount() >= 6; },
       prog: function () {
-        return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
+        return '树 ' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）' +
           ' · 回忆 ' + Math.min(11, foundCount()) + '/11 · 产物 ' + Math.min(3, ranchGoodsCount()) + '/3' +
           ' · 特产 ' + specCount() + '/' + ((T() && T().count) || 41);
       } }
@@ -877,6 +999,13 @@ window.Game = (function () {
     S.q = { lvl: 2, acc: 0, n: 0 };
     S.ending = null; S.ended = false; S.photo = false; S.lastQuestText = '';
     S.endHintShown = false; S.worldFallback = false; S.worldErrShown = false;
+    /* 加载时的庆典状态当基线：只有「此刻正在从未开始变成已开始」才自动开演，
+       刷新 / 重进房间时不会因为一次页面加载就把整段结局重放一遍。 */
+    /* null = 「还没看到过云端状态」。第一次收到存档时把当时的值当基线，
+       所以刷新 / 重进房间不会重放；之后只有真正发生「未开始 → 已开始」才自动开演。 */
+    S.partyBase = null;
+    S.partyPlayed = -1;
+    S.partyReady = false; S.adminPreview = false;
     S.world = null; S.localWorld = null;
 
     if (S.data && S.data.world) absorbQuest(S.data.world);
@@ -970,6 +1099,12 @@ window.Game = (function () {
       S.world = w;
       absorbQuest(w);
       if (w.ended && !S.ended) S.ended = true; // 另一台设备已经看过结局
+      /* 老存档（四阶段刻度）折算成六阶段。先改内存镜像让这一帧就画对，
+         再把折算结果落盘；落盘时事务里再判一次，两台设备同时开会话也只折一次。 */
+      if (migrateWorld(w)) {
+        mutate(function (w2) { migrateWorld(w2); return w2; });
+      }
+      syncPartyState(w);
     }
     syncTickets();      // 条件达成 / 老存档里去过的地方 → 自动补票并同步给另一台设备
     refreshHUD();
@@ -1183,6 +1318,8 @@ window.Game = (function () {
     if (mAddr) mAddr.addEventListener('click', function () { takeAddrToday(); });
     var mTrade = $('#mail-trade');
     if (mTrade) mTrade.addEventListener('click', function () { tradeAddr(); });
+    var mFast = $('#mail-fast');
+    if (mFast) mFast.addEventListener('click', function () { expressClaim(); });
 
     // 任务 / 资源角标：点开对应面板
     var qc = $('#quest-chip');
@@ -1212,7 +1349,16 @@ window.Game = (function () {
     $('#menu-leave').addEventListener('click', function () { S.opts.onLeave && S.opts.onLeave(); });
     $('#dlg-close').addEventListener('click', function () { closeAllPanels(); });
     $('#dlg-next').addEventListener('click', function () { dlgNext(); });
-    $('#tree-deco').addEventListener('click', function () { decorateTree(); });
+    var tdeco = $('#tree-deco');
+    if (tdeco) tdeco.addEventListener('click', function () { decorateTree(); });
+    /* 庆典面板：一个「开 Party」，一个「再准备一下」 */
+    var pgo = $('#party-go');
+    if (pgo) pgo.addEventListener('click', function () {
+      if (pgo.dataset.mode === 'live') resumeParty();
+      else startParty();
+    });
+    var pLater = $('#party-later');
+    if (pLater) pLater.addEventListener('click', function () { closeAllPanels(); });
     $('#tree-close').addEventListener('click', function () { closeAllPanels(); });
     $('#outfit-close').addEventListener('click', function () { closeAllPanels(); });
     $('#mem-close').addEventListener('click', function () { closeAllPanels(); });
@@ -1409,7 +1555,7 @@ window.Game = (function () {
       if (!S.interId && !S.mapId) {
         var nearTree = Math.sqrt(Math.pow(S.self.x - World.tree.x, 2) + Math.pow(S.self.y - World.tree.y, 2)) < 170 &&
                        Math.sqrt(Math.pow(S.remote.x - World.tree.x, 2) + Math.pow(S.remote.y - World.tree.y, 2)) < 170;
-        if (nearTree && treeStage() >= 3 && ts - S.heartT > 1000) {
+        if (nearTree && treeStage() >= TREE_STAGE_MAX && ts - S.heartT > 1000) {
           S.heartT = ts;
           burst(World.tree.x + (Math.random() - 0.5) * 90, World.tree.y - 140 - Math.random() * 60, 'spark', 2);
         }
@@ -1428,17 +1574,21 @@ window.Game = (function () {
     autoPickEggs();
     updateQuest();
 
-    // ---- 结局触发（三重门：日期 + 任务 + 树全亮；已在共享数据里标记看过则不再触发） ----
+    /* ---- v4.5：树点亮之后不再自动播结局 ----
+     * 以前这里是 startEnding()：树一满、任务一到，整段 15 句对白自己就开演了。
+     * 现在只做两件事：
+     *   1. 记下「庆典准备就绪」（S.partyReady 供 HUD / 圣诞老人用）；
+     *   2. 第一次就绪时给一句提示，并悄悄把雪橇位置记好。
+     * 真正的演出必须由两个人一起走到圣诞老人跟前、手动选「开 Party」才开始。 */
     if (!S.ended && !S.ending && !S.interId && !S.mapId) {
-      var w = curWorld();
-      if (!(w && w.ended) && treeStage() >= 3 && S.quest.step >= 6 && endingUnlocked()) {
-        startEnding();
-      } else if (treeStage() >= 3 && S.quest.step >= 6 && !S.endHintShown) {
+      var festOk = partyFestivalReady();
+      S.partyReady = festOk;
+      if (festOk && !S.endHintShown) {
         S.endHintShown = true;
-        var days = daysToChristmas();
-        toast(days > 0
-          ? '✨ 万事俱备！圣诞夜将在 2026 年 12 月 25 日到来（还有 ' + days + ' 天）'
-          : '✨ 万事俱备，圣诞夜即将开始…', 5000);
+        var daysP = daysToChristmas();
+        toast(daysP > 0
+          ? '✨ 树已经全亮了！庆典定在圣诞夜（还有 ' + daysP + ' 天）——到时候和 ' + NAME[S.otherSlot] + ' 一起去找圣诞老人。'
+          : '✨ 树已经全亮了！和 ' + NAME[S.otherSlot] + ' 一起到圣诞老人跟前，跟他说一声「开 Party 吧」。', 5600);
       }
     }
 
@@ -1621,28 +1771,62 @@ window.Game = (function () {
     });
   }
 
+  /* 一次装饰只推进一级。费用按 TREE_COST[stage] 扣，扣完再 +1 阶；
+     事务内重算一遍，所以两台手机同时点不会重复扣、也不会跳两级。 */
+  function treeCostLack(cost, r) {
+    var lack = [];
+    ['wood', 'flowers', 'materials', 'hay', 'milk'].forEach(function (k) {
+      var need = cost[k] || 0;
+      if (need > 0 && (r[k] || 0) < need) lack.push({ key: k, need: need, have: r[k] || 0 });
+    });
+    return lack;
+  }
+  function treeCostText(cost) {
+    var out = [];
+    ['wood', 'flowers', 'materials', 'hay', 'milk'].forEach(function (k) {
+      if (cost[k]) out.push((RES_NAME[k] || k) + ' ' + cost[k]);
+    });
+    return out.join(' · ');
+  }
+
   function decorateTree() {
     var stage = treeStage();
-    if (stage >= 3) return;
-    var cost = TREE_COST[stage];
+    if (stage >= TREE_STAGE_MAX) return;
+    var cost = TREE_COST[stage] || {};
+    if (treeCostLack(cost, worldRes()).length) {
+      toast('材料还不够：' + treeCostText(cost) + '（去温室种植 / 工坊制作 / 牧场收一次）', 4200);
+      return;
+    }
+    var btn = $('#tree-deco');
+    if (btn) { btn.disabled = true; btn.textContent = '正在装饰…'; }
     mutate(function (w) {
+      /* 事务里重算：如果对方已经升级成功，stage 变了 → 这次按下就作废 */
+      if (typeof w.treeStage !== 'number') w.treeStage = 0;
+      if (w.treeStage !== stage) return undefined;
       w.res = w.res || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
       var r = w.res;
-      if ((r.wood || 0) < (cost.wood || 0) || (r.flowers || 0) < (cost.flowers || 0) || (r.materials || 0) < (cost.materials || 0)) return w;
-      r.wood = (r.wood || 0) - (cost.wood || 0);
-      r.flowers = (r.flowers || 0) - (cost.flowers || 0);
-      r.materials = (r.materials || 0) - (cost.materials || 0);
+      if (treeCostLack(cost, r).length) return undefined;
+      ['wood', 'flowers', 'materials', 'hay', 'milk'].forEach(function (k) {
+        if (cost[k]) r[k] = (r[k] || 0) - cost[k];
+      });
       w.treeStage = stage + 1;
+      w.treeStageVer = 2;
+      /* 升一阶的小甜头：树上多挂一件手工礼物（不占成本，纯奖励） */
+      r.materials = (r.materials || 0) + TREE_STAGE_GIFT;
       return w;
     }).then(function (ok) {
       var newStage = treeStage();
-      if (newStage > stage) {
+      if (ok && newStage > stage) {
         Snd.sfx('ding');
         burst(World.tree.x, World.tree.y - 120, 'spark', 14);
-        closeAllPanels();
+        toast('🎄 树长到「' + treeStageName(newStage) + '」了 · 手工礼物 +' + TREE_STAGE_GIFT, 3600);
       } else {
-        toast('材料还不够：去温室种植（木材/鲜花）→ 工坊做手工礼物 🎁');
+        toast('这一步没成：可能刚好被对方先点了一下，材料也已退回，看一眼树现在的样子。', 3600);
       }
+      refreshHUD();
+      /* 面板不关：升完这一阶直接看到「下一阶要什么」，少点两次 */
+      var tp = document.getElementById('tree-panel');
+      if (tp && !tp.classList.contains('hidden')) openTreePanel();
     });
   }
 
@@ -1666,7 +1850,7 @@ window.Game = (function () {
   var FIN = {
     horizon: 0.720,
     /* 树：整个画面的中心。星顶在 0.12H 附近，树裙压到 0.86H。 */
-    tree: { xf: 0.500, yf: 0.848, sf: 2.12 },
+    tree: { xf: 0.500, yf: 0.848, sf: 2.00 },   // 2.12 ÷ 1.06：树本身长高了 6%，这里收回来，构图不变
     /* 两个人永远站在最前面、最大 */
     couple: [
       { g: 'm', xf: 0.454, yf: 0.964, sf: 3.55, dir: 0 },
@@ -1916,7 +2100,7 @@ window.Game = (function () {
     ctx.translate(tx, ty);
     ctx.scale(ts, ts);
     ctx.translate(-tx, -ty);
-    World.drawBigTree(ctx, { x: tx, y: ty }, 3, t);
+    World.drawBigTree(ctx, { x: tx, y: ty }, 5, t);
     ctx.restore();
   }
 
@@ -1932,7 +2116,9 @@ window.Game = (function () {
   function finBulbPts(H) {
     var key = H | 0;
     if (finBulbCache[key]) return finBulbCache[key];
-    var T = (window.World && World.tiers) || [];
+    /* v4.5：6 阶的树比原来高 6%，灯泡必须按「实际画出来的那套层」算，
+       否则 60 颗灯会整体缩进树里。 */
+    var T = (window.World && World.tiersFor) ? World.tiersFor(5) : ((window.World && World.tiers) || []);
     var ty = finTreeY(H), tx = FIN.tree.xf * FIN_W, ts = FIN.tree.sf * finK(H);
     var out = [], s = 20261225;
     function rr() { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }
@@ -1991,7 +2177,9 @@ window.Game = (function () {
   }
 
   function finTreeDecor(ctx, H) {
-    var T = (window.World && World.tiers) || [];
+    /* v4.5：6 阶的树比原来高 6%，灯泡必须按「实际画出来的那套层」算，
+       否则 60 颗灯会整体缩进树里。 */
+    var T = (window.World && World.tiersFor) ? World.tiersFor(5) : ((window.World && World.tiers) || []);
     if (!T.length) return;
     var K = finK(H);
     var ty = finTreeY(H), tx = FIN.tree.xf * FIN_W, ts = FIN.tree.sf * K;
@@ -2442,10 +2630,289 @@ window.Game = (function () {
     ctx.restore();
   }
 
+  /* ============================================================
+   * v4.5：双人庆典（Party）
+   * ------------------------------------------------------------
+   * 树亮到第 6 阶之后，**不再自动播结局**。要走完这条链路：
+   *
+   *   树 6 阶 + 主线就绪 + 到了圣诞夜
+   *        ↓  两个人都真的在这个房间里、在线、并且站在圣诞老人身边
+   *   圣诞老人给出邀请 → 「🎄 我们一起庆祝吧！开 Party 吧！」
+   *        ↓  经过一次 world 事务（原子，只允许一个人启动）
+   *   world.party.state = 'started' → 双方各自开演同一套完整结局
+   *
+   * 共享状态就放在 world.party 里（和树、背包同一个事务域，规则不变）：
+   *   { state: 'idle' | 'started' | 'done', by: 'a'|'b', at: 时间, seq: 第几次, tree: 启动时的树阶 }
+   * 为什么不做成独立节点：rooms/{id}/world 已经是唯一「两个人都能写、都能读」的
+   * 事务域；另开一个 rooms/{id}/party 会要求改生产安全规则，本次明确不动规则。
+   *
+   * 「到场」怎么判定（全部用云端数据，不看按钮）：
+   *   slots[x].uid 存在   （这个位置真的有人坐过、初始化过）
+   *   presence[x] === true（在线，onDisconnect 会在断开时清掉）
+   *   slots[x].pos 存在、indoor 为 0（人在小镇里，不在地图/室内）
+   *   与圣诞老人的距离 < PARTY_R
+   * 本机自己的坐标用实时位置兜底（还没发布过 pos 时不至于卡住）。
+   *
+   * 已知边界（写在报告里）：前端判定终究是前端，链接即钥匙的信任模型没变；
+   * 这里做的是「让正常玩家不可能误触发 / 单人触发 / 重复触发」，
+   * 不是防改代码的人。
+   * ============================================================ */
+  var PARTY_R = 260;
+  var PARTY_GO_TEXT = '🎄 我们一起庆祝吧！开 Party 吧！';
+
+  function partyOf() {
+    var w = curWorld() || {};
+    return (w.party && typeof w.party === 'object') ? w.party : {};
+  }
+  function partyState() {
+    var s = partyOf().state;
+    return (s === 'started' || s === 'done') ? s : 'idle';
+  }
+  /* 「庆典准备就绪」= 树到顶 + 主线走到最后（quest.step>=6，即十章全过） */
+  function partyFestivalReady() {
+    if (S.ended) return false;
+    return treeStage() >= TREE_STAGE_MAX && S.quest.step >= 6;
+  }
+  /* 圣诞夜那天才开演（和原来一样；管理员 / ?dev=1 的门照旧放开） */
+  function partyDayOk() { return endingUnlocked(); }
+
+  function santaNpc() {
+    var list = (window.World && World.npcs) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === 'santa') return list[i];
+    return null;
+  }
+
+  function attendOf(slot) {
+    var d = S.data || {};
+    var sl = d.slots && d.slots[slot];
+    var santa = santaNpc();
+    if (!sl || !sl.uid) return { ok: false, why: 'noslot' };
+    if (!(d.presence && d.presence[slot])) return { ok: false, why: 'offline' };
+    var pos = sl.pos;
+    if (!pos || typeof pos.x !== 'number') {
+      /* 刚进房间还没发布坐标：只有自己的位置可以用实时坐标兜底 */
+      if (slot === S.mySlot) pos = { x: S.self.x, y: S.self.y, indoor: S.interId || (S.mapId ? 1 : 0) };
+      else return { ok: false, why: 'nopos' };
+    }
+    if (pos.indoor) return { ok: false, why: 'elsewhere', where: pos.indoor };
+    if (!santa) return { ok: false, why: 'nosanta' };
+    var dist = Math.sqrt(Math.pow(pos.x - santa.x, 2) + Math.pow(pos.y - santa.y, 2));
+    if (dist > PARTY_R) return { ok: false, why: 'far', dist: Math.round(dist) };
+    return { ok: true, dist: Math.round(dist) };
+  }
+  function partyCrowd() {
+    var a = attendOf('a'), b = attendOf('b');
+    return { ok: !!(a.ok && b.ok), a: a, b: b };
+  }
+
+  /* 对方 / 自己分别卡在哪一步 —— 只用来拼一句人话，不参与判定 */
+  function attendWhyText(slot, st) {
+    var nm = NAME[slot] || '对方';
+    if (st.why === 'offline') return '「' + nm + '还没进小镇呢，等他/她上线。」';
+    if (st.why === 'elsewhere') return '「' + nm + '还在别的地方逛——喊一声，让' + (slot === 'b' ? '她' : '他') + '回小镇。」';
+    if (st.why === 'far') return '「' + nm + '在小镇的另一头，约个地方：圣诞老人这儿就好。」';
+    if (st.why === 'nopos' || st.why === 'noslot') return '「' + nm + '那边还没坐稳，稍等一下。」';
+    return '';
+  }
+
+  /* 和圣诞老人说话：满足条件就走庆典流程，否则交回普通对话 */
+  function talkSanta() {
+    var st = partyState();
+    var w = curWorld() || {};
+    if (st === 'started' && !S.ended) { openPartyPanel('live'); return true; }
+    if (st === 'done' || (w && w.ended)) { openPartyPanel('done'); return true; }
+    if (!partyFestivalReady()) return false;
+    if (!partyDayOk()) { openPartyPanel('soon'); return true; }
+    openPartyPanel(partyCrowd().ok ? 'ready' : 'wait');
+    return true;
+  }
+
+  function openPartyPanel(mode) {
+    var panel = $('#party-panel');
+    if (!panel) return;
+    var say = $('#party-say'), go = $('#party-go'), later = $('#party-later'), head = $('#party-head');
+    var c = partyCrowd();
+    var lines = [];
+    var goText = PARTY_GO_TEXT, goOn = false, laterText = '我们再准备一下';
+
+    if (mode === 'ready') {
+      lines = [
+        '哇！看看这棵闪闪发光的圣诞树！你们一起努力的成果真棒。',
+        '小镇的朋友们都准备好了。今天是属于你们的圣诞节！',
+        '那么……你们准备好一起庆祝了吗？'
+      ];
+      goOn = true;
+    } else if (mode === 'wait') {
+      lines = ['庆典马上就要开始啦！我们再等等另一位朋友吧。'];
+      if (c.a.ok && !c.b.ok) lines.push(attendWhyText('b', c.b));
+      else if (c.b.ok && !c.a.ok) lines.push(attendWhyText('a', c.a));
+      else { lines.push(attendWhyText('a', c.a)); lines.push(attendWhyText('b', c.b)); }
+      lines.push('两个人都站到我身边来，我这儿的花环就等着你们了。');
+      goOn = false;
+      laterText = '好，我们再等等';
+    } else if (mode === 'soon') {
+      var dleft = daysToChristmas();
+      lines = [
+        '树已经全亮啦——灯都点到最后一个了。',
+        '不过庆典要在圣诞夜那晚才开始。还有 ' + Math.max(0, dleft) + ' 天，别急。',
+        '到时候你和 ' + NAME[S.otherSlot] + ' 一起到我这儿来，跟我说一声「开 Party 吧」，我们就开始。'
+      ];
+      laterText = '好，到时候再来';
+    } else if (mode === 'live') {
+      lines = [
+        '庆典已经开始了——你们按下那个按钮的时候，雪就落下来了。',
+        '要不要接着看？'
+      ];
+      goText = '▶️ 继续刚才的庆典';
+      goOn = true;
+      laterText = '先在镇上走走';
+    } else {  // done
+      lines = [
+        '那一晚的雪，到现在还没化呢。',
+        '照片你们留着了吧？想再看一眼，随时到我这儿来坐坐。'
+      ];
+      laterText = '好';
+    }
+
+    if (head) head.textContent = '🎅 圣诞老人';
+    if (say) {
+      say.innerHTML = lines.map(function (t) { return '<p>' + esc(t) + '</p>'; }).join('');
+    }
+    if (go) {
+      go.textContent = goText;
+      go.classList.toggle('hidden', !goOn);
+      go.disabled = !goOn;
+      go.dataset.mode = mode;
+    }
+    if (later) later.textContent = laterText;
+    panel.classList.remove('hidden');
+    pause();
+  }
+
+  /* 真正按下「开 Party」：先复核一次双人到场，再用**一次云端事务**把状态从
+     idle 推到 started。两个人同时按，只有一个人能 commit 成功。
+
+     这里故意不走 mutate()：mutate 在事务失败时会降级成「只写本机」，
+     而庆典是两个人的事——让某一边在本地自己开一场，等于把双人条件绕过去了。
+     所以这里直连 worldTransact，失败就明确失败。 */
+  function startParty() {
+    var c = partyCrowd();
+    if (!partyFestivalReady()) { openPartyPanel('soon'); toast('树还没全亮，再等等 🎄', 3000); return; }
+    if (!partyDayOk()) { openPartyPanel('soon'); return; }
+    if (!c.ok) { openPartyPanel('wait'); toast('还差一个人到场，再等等', 3200); return; }
+    if (!S.backend || !S.backend.worldTransact) { toast('还没连上云端，庆典开不了', 3200); return; }
+
+    var go = $('#party-go');
+    if (go) { go.disabled = true; go.textContent = '正在点灯…'; }
+    function restore() { if (go) { go.disabled = false; go.textContent = PARTY_GO_TEXT; } }
+
+    S.backend.worldTransact(function (w) {
+      w = w || {};
+      /* 原子闸门：已经开过 / 已经结束 → 放弃这次写入（committed=false） */
+      if (w.party && (w.party.state === 'started' || w.party.state === 'done')) return undefined;
+      w.party = w.party || {};
+      w.party.state = 'started';
+      w.party.by = S.mySlot;
+      w.party.at = Date.now();
+      w.party.seq = (w.party.seq || 0) + 1;
+      w.party.tree = (typeof w.treeStage === 'number') ? w.treeStage : 0;
+      return w;
+    }).then(function (r) {
+      restore();
+      var committed = !!(r && r.committed);
+      /* 诊断用：事务到底提交没提交、云端那一次读到的发起人是谁 */
+      S.partyDbg = {
+        committed: committed, mine: S.mySlot,
+        dbBy: (r && r.value && r.value.party && r.value.party.by) || null,
+        dbSeq: (r && r.value && r.value.party && r.value.party.seq) || 0,
+        dbState: (r && r.value && r.value.party && r.value.party.state) || 'idle'
+      };
+      if (committed) {
+        var seq = (r.value && r.value.party && r.value.party.seq) || 0;
+        S.partyBase = 'started';
+        beginPartyFinale(seq);
+        return;
+      }
+      /* 对方手快一步：跟着进同一场庆典，不算失败 */
+      if (partyState() === 'started') {
+        S.partyBase = 'started';
+        beginPartyFinale(partyOf().seq || 0);
+        toast('🎉 ' + NAME[S.otherSlot] + ' 已经按下开始了——一起看吧！', 3600);
+      } else {
+        toast('这场庆典已经结束过了。', 3600);
+        openPartyPanel('done');
+      }
+    }).catch(function () {
+      restore();
+      /* 事务被云端拒绝 / 网络断开：状态没变，按钮还在，重试就行 */
+      toast('⚠️ 没能写进云端：庆典要在同一个房间里、两个人都联网才能开始，检查网络后再按一次', 5200);
+    });
+  }
+
+  /* 刷新 / 重进房间后，不自动重放；由玩家在圣诞老人那儿点「继续」 */
+  function resumeParty() {
+    if (partyState() !== 'started') { openPartyPanel('done'); return; }
+    beginPartyFinale(partyOf().seq || 0);
+  }
+
+  function beginPartyFinale(seq) {
+    closeAllPanelsSilent();
+    S.partyPlayed = seq;
+    if (S.ending || S.ended) return;
+    S.paused = false;
+    startEnding();
+  }
+
+  /* 云端状态变化：只有「没开始 → 已开始」这个跃迁会自动开演。
+     第一次拿到存档只记基线（S.partyBase === null），不触发任何演出，
+     所以刷新 / 重新进房不会把整段结局再放一遍。 */
+  function syncPartyState(w) {
+    if (!w || !S.active) return;
+    var p = w.party || {};
+    var st = (p.state === 'started' || p.state === 'done') ? p.state : 'idle';
+    var seq = p.seq || 0;
+    if (S.partyBase === null || S.partyBase === undefined) {
+      S.partyBase = st;
+      S.partyPlayed = seq;
+      return;
+    }
+    if (st === 'started' && !S.ending && !S.ended && S.partyBase !== 'started' && seq !== S.partyPlayed) {
+      S.partyBase = 'started';
+      S.partyPlayed = seq;
+      toast('🎉 庆典开始了！', 3200);
+      beginPartyFinale(seq);
+      return;
+    }
+    if (st !== S.partyBase) S.partyBase = st;
+  }
+
+  /* 只读快照：验收脚本用它判断「到底卡在哪一步」 */
+  function partySnapshot() {
+    var c = partyCrowd();
+    var p = document.getElementById('party-panel');
+    var go = document.getElementById('party-go');
+    return {
+      ready: partyFestivalReady(), dayOk: partyDayOk(), state: partyState(),
+      crowdOk: !!c.ok, a: c.a, b: c.b,
+      tree: treeStage(), step: S.quest.step,
+      ending: !!S.ending, ended: !!S.ended,
+      seq: partyOf().seq || 0, by: partyOf().by || null,
+      dbg: S.partyDbg || null,
+      base: S.partyBase, played: S.partyPlayed,
+      panelOpen: !!(p && !p.classList.contains('hidden')),
+      say: (document.getElementById('party-say') || {}).textContent || '',
+      goText: (go && go.textContent) || '',
+      goHidden: !!(go && go.classList.contains('hidden')),
+      goDisabled: !!(go && go.disabled),
+      adminPreview: !!S.adminPreview
+    };
+  }
+
   /* ---------- 结局流程 ---------- */
   var FIN_TALK_HINT = '轻触继续 ▸';
 
   function startEnding() {
+    if (S.ending || S.ended) return;   // 只允许启动一次：重复点击 / 双端同时触发都不会来第二遍
     closeAllPanelsSilent();
     S.ending = { t: 0 };
     S.photo = false;
@@ -2536,7 +3003,16 @@ window.Game = (function () {
     finState = null;
     S.ending = null;
     S.ended = true;
-    mutate(function (w) { w.ended = 1; return w; });
+    /* 结局看过之后，共享状态一起收尾：ended 记「看过」，party.state 记「这场庆典结束了」。
+       两个字段一起写，所以刷新 / 换设备都不会再开一场。
+       管理员「本机预览」不写云端——它不该替正式房间收尾。 */
+    if (!S.adminPreview) {
+      mutate(function (w) {
+        w.ended = 1;
+        if (w.party && w.party.state === 'started') w.party.state = 'done';
+        return w;
+      });
+    }
     setTimeout(function () { openPhoto({ finale: true }); }, 460);
   }
 
@@ -2630,7 +3106,8 @@ window.Game = (function () {
   /* 拍照时要把结局遮罩一起收起来（与普通关面板不同） */
   function hidePanelsForPhoto() {
     ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#finale', '#book-panel',
-      '#plot-panel', '#craft-panel', '#mem-photo', '#res-panel', '#quest-panel', '#settings-panel'].forEach(function (s) {
+      '#plot-panel', '#craft-panel', '#mem-photo', '#res-panel', '#quest-panel', '#settings-panel',
+      '#party-panel'].forEach(function (s) {
       var el = $(s); if (el) el.classList.add('hidden');
     });
     syncPanelChrome();
@@ -2643,23 +3120,31 @@ window.Game = (function () {
   var PHOTO_W = 1920, PHOTO_H = 1080;
 
   /* ---------- 小镇合照：按圣诞树的阶段构图 ----------
-   * 树有 4 个阶段（0 小树苗 / 1 已装饰 / 2 挂上彩灯 / 3 全树点亮），
-   * 照片跟着阶段变：星星、月亮、窗灯、路灯、礼物、居民、灯串、雪量全都不一样，
+   * v4.5：六个阶段（0 小树苗 → 5 完全点亮）。照片跟着阶段变：
+   * 星星、月亮、窗灯、路灯、树下礼物、居民、雪量、树的实际大小全都不一样，
    * 所以回头看旧照片，能一眼看出「那时候小镇还没这么亮」。
+   * treeS 是「再乘一次」的构图系数：树本身的几何已经随阶段长高，
+   * 这里只微调取景，保证六个阶段的成像高度一阶比一阶高、又不会顶出画面。
    * 注意：最高阶段也只是「漂亮」，不能和最终结局那张比——那张另有渲染器。
    */
   var TOWN_STAGES = [
     { star: 62, moon: 0.70, win: 0.16, lamps: 2, gifts: 1, snow: 62,
-      treeS: 1.16, glow: 0.10, garland: 0, heart: false, tag: '小树苗',
+      treeS: 1.05, glow: 0.10, heart: false, tag: '小树苗',
       cx: 0.452, gap: 0.050, npcs: [], line: '一切才刚刚开始' },
-    { star: 104, moon: 0.84, win: 0.34, lamps: 2, gifts: 3, snow: 84,
-      treeS: 1.40, glow: 0.16, garland: 0, heart: true, tag: '已装饰',
-      cx: 0.460, gap: 0.058, npcs: ['elf'], line: '树上第一次挂满了彩球' },
-    { star: 156, moon: 0.96, win: 0.62, lamps: 4, gifts: 6, snow: 106,
-      treeS: 1.66, glow: 0.24, garland: 1, heart: true, tag: '挂上彩灯',
-      cx: 0.466, gap: 0.064, npcs: ['elf', 'snowman', 'postman'], line: '小镇开始有了圣诞节的样子' },
+    { star: 92, moon: 0.80, win: 0.26, lamps: 2, gifts: 1, snow: 74,
+      treeS: 1.54, glow: 0.13, heart: true, tag: '初生',
+      cx: 0.456, gap: 0.054, npcs: [], line: '它开始往上长了' },
+    { star: 124, moon: 0.90, win: 0.42, lamps: 2, gifts: 3, snow: 88,
+      treeS: 1.70, glow: 0.18, heart: true, tag: '开始装饰',
+      cx: 0.460, gap: 0.058, npcs: ['elf'], line: '树上第一次挂上了彩球' },
+    { star: 160, moon: 0.98, win: 0.64, lamps: 4, gifts: 5, snow: 106,
+      treeS: 1.79, glow: 0.24, heart: true, tag: '节日树形',
+      cx: 0.464, gap: 0.062, npcs: ['elf', 'snowman'], line: '小镇开始有了圣诞节的样子' },
+    { star: 186, moon: 1.02, win: 0.80, lamps: 4, gifts: 7, snow: 122,
+      treeS: 1.86, glow: 0.29, heart: true, tag: '即将点亮',
+      cx: 0.467, gap: 0.065, npcs: ['elf', 'snowman', 'postman', 'baker'], line: '灯串亮了，就差最后一点' },
     { star: 214, moon: 1.06, win: 0.94, lamps: 4, gifts: 10, snow: 138,
-      treeS: 1.92, glow: 0.34, garland: 1, heart: true, tag: '全树点亮',
+      treeS: 1.84, glow: 0.34, heart: true, tag: '完全点亮',
       cx: 0.470, gap: 0.068,
       npcs: ['elf', 'snowman', 'postman', 'baker', 'shepherd', 'barista'], line: '我们把这里变成了真正的圣诞小镇' }
   ];
@@ -2676,7 +3161,7 @@ window.Game = (function () {
   };
 
   function photoNightSky(ctx, W, H, cfg) {
-    cfg = cfg || TOWN_STAGES[3];
+    cfg = cfg || TOWN_STAGES[5];
     var sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, '#070e22');
     sky.addColorStop(0.45, '#132542');
@@ -2750,7 +3235,7 @@ window.Game = (function () {
 
   /* 小镇：一栋一栋错落排开，屋顶压雪、留出间距，窗灯按阶段亮 */
   function photoTownSilhouette(ctx, W, H, baseY, cfg) {
-    cfg = cfg || TOWN_STAGES[3];
+    cfg = cfg || TOWN_STAGES[5];
 
     /* 镇的暖光：越往后越亮，让地平线不空 */
     var glow = ctx.createLinearGradient(0, baseY - 190, 0, baseY + 20);
@@ -2935,8 +3420,8 @@ window.Game = (function () {
      阶段只改亮度、树的尺寸、礼物数量、居民数量和雪量——
      所以翻旧照片一眼就能看出「那时候小镇还没这么亮」。 */
   function renderTownPhoto(ctx, W, H) {
-    var stage = Math.max(0, Math.min(3, treeStage()));
-    var cfg = TOWN_STAGES[stage];
+    var stage = Math.max(0, Math.min(5, treeStage()));
+    var cfg = TOWN_STAGES[stage] || TOWN_STAGES[5];
     var k = W / 1920;
     var groundY = H * 0.625;
 
@@ -3325,8 +3810,35 @@ window.Game = (function () {
         openMailPanel();
         return;
       }
+      /* 圣诞老人：树亮了之后他这儿才是「庆典入口」。
+         条件没到（或人没齐）时 talkSanta() 自己给出提示面板；
+         主线还没走到这一步就返回 false，落回上面那套普通闲聊。 */
+      if (it.ref.id === 'santa') {
+        if (!S.quest.talked[it.ref.id]) {
+          S.quest.talked[it.ref.id] = 1;
+          updateQuest(); syncQuest();
+        }
+        if (talkSanta()) return;
+      }
+      /* 老木匠：每天第一次说话，塞几根边角料（木材的另一条来源，
+         不占温室的地、也不用等 6 小时）。 */
+      if (it.ref.id === 'carpenter') {
+        var cw0 = curWorld() || {};
+        if (cw0.carpenterDay !== dayStr()) {
+          var firstC = !S.quest.talked[it.ref.id];
+          grantCarpenterScraps(function (got) {
+            openDialog(it.ref.name, got
+              ? ['「木头是有脾气的，得顺着它的纹路来。」',
+                 '老鲁从刨花堆里挑出几根边角料塞给你：「拿着，反正也进不了炉子。」',
+                 '🪵 木材 +3（每天一次，说句话就有）']
+              : ['「木头是有脾气的，得顺着它的纹路来。」']);
+            if (firstC && !S.quest.talked[it.ref.id]) { S.quest.talked[it.ref.id] = 1; updateQuest(); syncQuest(); }
+          });
+          return;
+        }
+      }
       var stage = treeStage();
-      var pool = (stage >= 2 && it.ref.lateLines && it.ref.lateLines.length) ? it.ref.lateLines : it.ref.lines;
+      var pool = (stage >= 4 && it.ref.lateLines && it.ref.lateLines.length) ? it.ref.lateLines : it.ref.lines;
       if (!pool || !pool.length) pool = ['……'];
       var idx = (S.npcIdx[it.ref.id] || 0);
       /* 委托那句是「附加」的：它自己出问题，也不能把正常对话一起拖没 */
@@ -3425,6 +3937,13 @@ window.Game = (function () {
       w.quest.found[m.id] = Date.now();
       w.res = w.res || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
       w.res.seeds = (w.res.seeds || 0) + 1;      // 一段回忆，化作一颗种子
+      /* v4.5：屋子里的旧物里常夹着一件能挂上树的手工小东西 ——
+         这是「探索获得礼物」的一条独立渠道，不花材料、不用等包裹。 */
+      if (m.room) {
+        w.res.materials = (w.res.materials || 0) + 1;
+        w.roomGift = w.roomGift || {};
+        w.roomGift[m.id] = w.roomGift[m.id] || Date.now();
+      }
       /* v4.3：地图里的回忆是一封信——拆开会附一件当地特产和一封回信 */
       if (pl) {
         w.spec = w.spec || {};
@@ -3441,6 +3960,8 @@ window.Game = (function () {
       refreshHUD();
       if (pl) {
         toast('💭 收进回忆册 · ✉️ 信里还有 ' + pl.icon + ' ' + pl.item + ' 和 ' + pl.name + ' 的地址', 5200);
+      } else if (m.room) {
+        toast('💭 收进回忆册了 · 旧物里还夹着一件手工小礼物 🎁 +1', 3600);
       } else {
         toast('💭 收进回忆册了 · 这段回忆化作一颗种子 🌱', 3200);
       }
@@ -3514,14 +4035,23 @@ window.Game = (function () {
     if (c.type === 'cocoa') return '在咖啡店喝过一杯热可可';
     if (c.type === 'talk') return '和镇上 ' + (c.n || 1) + ' 个人说过话';
     if (c.type === 'craft') return '在工坊做过一件小东西';
-    if (c.type === 'tree') return '小镇的树长到第 ' + (c.n || 1) + ' 阶';
+    if (c.type === 'tree') return '小镇的树长到「' + treeStageName(c.n || 1) + '」（第 ' + ((c.n || 1) + 1) + ' 阶 / 共 6 阶）';
     if (c.type === 'visit') return '已经去过 ' + (c.n || 1) + ' 个地方';
     return '';
   }
+  /* 默认 OR：cond 里任一条满足就给票（前六张票都是这个节奏，hint 文案也写的「或者」）。
+     写了 all: true 的票改成 AND：每一条都必须满足。
+     —— 冰岛（07）用的就是 AND，否则「树长到第 3 阶」单独就能把北境之票发出来，
+        玩家还没去过几个地方就先知道有这张票了。 */
   function ticketCondMet(id) {
     var tk = ticketOf(id);
-    if (!tk || !tk.cond) return false;
-    for (var i = 0; i < tk.cond.length; i++) if (condMet(tk.cond[i])) return true;
+    if (!tk || !tk.cond || !tk.cond.length) return false;
+    var i;
+    if (tk.all) {
+      for (i = 0; i < tk.cond.length; i++) if (!condMet(tk.cond[i])) return false;
+      return true;
+    }
+    for (i = 0; i < tk.cond.length; i++) if (condMet(tk.cond[i])) return true;
     return false;
   }
   /* 「有票」= 存档里已经记下，或此刻条件就满足（后者会被 syncTickets 落盘） */
@@ -3599,7 +4129,9 @@ window.Game = (function () {
    * 所以用一张已知字段白名单来区分，而不是「备份里没有就留着」。 */
   var WORLD_KEYS = ['res', 'quest', 'garden', 'cocoa', 'daily', 'crafted', 'ranch',
     'tickets', 'travel', 'spots', 'addr', 'spec', 'parcels', 'mail', 'sent',
-    'addrDay', 'addrTradeDay', 'commDone', 'chapter', 'chapterDay', 'treeStage', 'ended'];
+    'addrDay', 'addrTradeDay', 'commDone', 'chapter', 'chapterDay', 'treeStage', 'ended',
+    /* v4.5 新增：树刻度版本 / 庆典共享状态 / 礼物渠道的一次性记账 */
+    'treeStageVer', 'party', 'mapGift', 'roomGift', 'expressDay', 'carpenterDay'];
 
   /* ---------- 素材注册表（管理员「+5」用）----------
    * 不另开一套库存：直接读 RES_NAME（游戏里所有会写进 world.res 的可计数素材）。
@@ -3699,7 +4231,7 @@ window.Game = (function () {
       (miss.length ? '　未找到：' + esc(miss.slice(0, 6).join('、')) + (miss.length > 6 ? '…' : '') : '　全部收齐') + '</span></div>');
 
     var st = treeStage();
-    var stName = ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][Math.min(3, st)] || '小树苗';
+    var stName = treeStageName(st);
     lines.push('<div class="admin-sec"><b>圣诞树</b><span>第 ' + st + ' 阶 · ' + stName + '</span></div>');
 
     var canEnd = treeStage() >= 3 && S.quest.step >= 6;
@@ -3930,28 +4462,24 @@ window.Game = (function () {
       });
     } else if (kind === 'tree') {
       var s0 = treeStage();
-      mutate(function (w) { w.treeStage = 3; return w; })
+      mutate(function (w) { w.treeStage = TREE_STAGE_MAX; w.treeStageVer = 2; return w; })
         .then(function (ok) {
           logAdmin('点亮圣诞树', 'treeStage', s0, treeStage(), !!ok);
           renderAdminStatus(); toast(adminWriteMsg(ok, '🎄 树已经点亮到最后阶段', '树没点亮'), 3600);
         });
     } else if (kind === 'ending') {
+      /* v4.5：这是「本机预览」，只在本机把演出放一遍，
+         不写共享存档（不改树阶、不改 quest、不改 ended / party），
+         所以它既不会替正式房间开庆典，也不会给任何一边发奖励。 */
       S.adminEnding = true;
-      mutate(function (w) {
-        w.treeStage = 3;
-        w.quest = w.quest || {};
-        if ((w.quest.step || 0) < 6) w.quest.step = 6;
-        w.ended = false;
-        return w;
-      }).then(function (ok) {
-        logAdmin('开启最终结局', 'ending', null, null, !!ok);
-        renderAdminStatus();
-        closeAllPanelsSilent();
-        S.paused = false;
-        S.endHintShown = true;
-        setTimeout(function () { if (!S.ending) startEnding(); }, 260);
-        toast('🎁 结局开始了');
-      });
+      S.adminPreview = true;
+      S.ended = false;
+      logAdmin('开启最终结局（本机预览）', 'ending', null, null, true);
+      renderAdminStatus();
+      closeAllPanelsSilent();
+      S.paused = false;
+      setTimeout(function () { if (!S.ending) startEnding(); }, 260);
+      return;
     } else if (kind === 'restore') {
       /* 这里已经不会走到：restore 在 adminDo 开头就分流到 adminRestore()。 */
     }
@@ -4085,6 +4613,9 @@ window.Game = (function () {
     list.innerHTML = '';
     TravelMaps.list().forEach(function (d) {
       var owned = hasTicket(d.id);
+      /* v4.5：标了 hidden 的票（最后那张）在没拿到之前连灰卡都不出现——
+         以前它会以「？？？ / 目的地未知」的形式占着一个位子，等于提前告诉玩家「还有一张」。 */
+      if (d.ticket && d.ticket.hidden && !owned) return;
       var visited = travelVisited(d.id);
       var mm = mapMemory(d.id);
       var got = !!(mm && S.quest.found[mm.id]);
@@ -4124,13 +4655,15 @@ window.Game = (function () {
     });
 
     var n = ticketOwnedCount();
+    var total = ticketTotal();
     var sub = $('#station-sub');
-    if (sub) sub.textContent = '车票 ' + n + ' / ' + ticketTotal();
+    /* 只报「手上有几张」，不报总数：总数会顺带告诉玩家「还有一张藏着」 */
+    if (sub) sub.textContent = '车票 ' + n + ' 张' + (n >= total ? ' · 全了' : '');
     var note = $('#station-note');
     if (note) {
-      note.textContent = n >= 6
-        ? ticketTotal() + ' 张票都到手了。想去哪儿，就挑一张。'
-        : '有票的方向才能上车。没票的那几张，先把小镇上的日子过得再热闹一点。';
+      note.textContent = n >= total
+        ? total + ' 张票都到手了。想去哪儿，就挑一张。'
+        : '有票的方向才能上车。剩下的那些，先把小镇上的日子过得再热闹一点。';
     }
     $('#station-panel').classList.remove('hidden');
     pause();
@@ -4143,6 +4676,7 @@ window.Game = (function () {
     list.innerHTML = '';
     TravelMaps.list().forEach(function (d) {
       var owned = hasTicket(d.id);
+      if (d.ticket && d.ticket.hidden && !owned) return;   // 没拿到的隐藏票不进册子
       var row = document.createElement('div');
       row.className = 'ticket-row' + (owned ? '' : ' locked');
 
@@ -4166,9 +4700,10 @@ window.Game = (function () {
       list.appendChild(row);
     });
     var n = ticketOwnedCount();
-    $('#ticket-count').textContent = n + ' / ' + ticketTotal();
-    $('#ticket-note').textContent = n >= 6
-      ? '集齐了。' + ticketTotal() + ' 张票、' + ticketTotal() + ' 个地方，都去过一遍。'
+    var tt = ticketTotal();
+    $('#ticket-count').textContent = n >= tt ? (n + ' / ' + tt) : ('已得 ' + n + ' 张');
+    $('#ticket-note').textContent = n >= tt
+      ? '集齐了。' + tt + ' 张票、' + tt + ' 个地方，都去过一遍。'
       : '有票才能上车。每张票都只差一件小事——看看下面写的那行字。';
     $('#ticket-panel').classList.remove('hidden');
     pause();
@@ -4201,6 +4736,7 @@ window.Game = (function () {
         return w;
       }).then(function () { refreshHUD(); }, function () { });
     }
+    grantMapGift(id);
     if (window.TravelMaps) TravelMaps.bg(id);
     /* 上车是一次性事件，不是每 150ms 的位移同步——demo 模式也照写，
        这样刷新页面 / 关掉重开都能回到同一张地图。 */
@@ -4262,7 +4798,7 @@ window.Game = (function () {
   /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
   var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
     '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
-    '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel'];
+    '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel', '#party-panel'];
 
   function closeAllPanels() {
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
@@ -4327,23 +4863,35 @@ window.Game = (function () {
   }
   function openTreePanel() {
     var stage = treeStage();
-    var names = ['一棵安静的小树苗，等着你们来装点。', '已经挂上了彩球和金色灯带，越来越有味道了。', '彩灯亮起来了！一闪一闪的。', '✨ 全树点亮！这是属于你们的小镇之光。'];
-    $('#tree-stage-text').textContent = '当前阶段：' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][stage];
-    $('#tree-desc').textContent = names[stage];
+    var names = [
+      '一棵安静的小树苗，等着你们来装点。',
+      '它开始往上长了：三层枝叶，还什么都没挂。',
+      '第一颗彩球挂上去了，树上有了颜色。',
+      '树形长开了，彩球成串，树顶那颗星也装上了——只是还没通电。',
+      '灯串亮了，星星有了光，树下开始堆礼物。就差最后一点。',
+      '✨ 全树点亮。这是属于你们两个人的小镇之光。'
+    ];
+    $('#tree-stage-text').textContent = '当前阶段：' + treeStageName(stage) + '（' + stage + '/' + TREE_STAGE_MAX + '）';
+    $('#tree-desc').textContent = names[Math.min(stage, TREE_STAGE_MAX)];
     var need = $('#tree-need');
     var deco = $('#tree-deco');
-    if (stage >= 3) {
-      need.textContent = '🎄 树已经全亮。圣诞夜：2026 年 12 月 25 日（今天 ' + dayStr() + '）';
+    if (stage >= TREE_STAGE_MAX) {
+      need.textContent = '🎄 树已经全亮。圣诞夜：2026 年 12 月 25 日（今天 ' + dayStr() + '）' +
+        '　—— 庆典不会自己开始：和 ' + NAME[S.otherSlot] + ' 一起到圣诞老人跟前，说一声「开 Party 吧」。';
       deco.classList.add('hidden');
+      deco.disabled = true;
     } else {
-      var cost = TREE_COST[stage];
+      var cost = TREE_COST[stage] || {};
       var r = worldRes();
-      var enough = (r.wood || 0) >= (cost.wood || 0) && (r.flowers || 0) >= (cost.flowers || 0) && (r.materials || 0) >= (cost.materials || 0);
-      need.textContent = '升到「' + ['已装饰', '挂上彩灯', '全树点亮'][stage] + '」需要：🪵 ' + (cost.wood || 0) + ' · 🌸 ' + (cost.flowers || 0) + ' · 🎁 ' + (cost.materials || 0) +
-        '（现有 🪵 ' + (r.wood || 0) + ' 🌸 ' + (r.flowers || 0) + ' 🎁 ' + (r.materials || 0) + '）';
+      var lack = treeCostLack(cost, r);
+      var haveText = '（现有 🪵 ' + (r.wood || 0) + ' 🌸 ' + (r.flowers || 0) + ' 🎁 ' + (r.materials || 0) +
+        ((cost.hay || cost.milk) ? (' 🌾 ' + (r.hay || 0) + ' 🥛 ' + (r.milk || 0)) : '') + '）';
+      need.textContent = '升到「' + treeNextName(stage) + '」需要：' + treeCostText(cost) + haveText;
       deco.classList.remove('hidden');
-      deco.textContent = enough ? '✨ 使用材料装饰 → ' + ['已装饰', '挂上彩灯', '全树点亮'][stage] : '材料还不够（去温室种植 → 工坊制作）';
-      deco.disabled = !enough;
+      deco.textContent = lack.length
+        ? ('还差 ' + lack.map(function (x) { return (RES_NAME[x.key] || x.key) + ' ' + (x.need - x.have); }).join(' · '))
+        : ('✨ 装饰一下 → ' + treeNextName(stage));
+      deco.disabled = lack.length > 0;
     }
     $('#tree-panel').classList.remove('hidden');
     pause();
@@ -4374,7 +4922,7 @@ window.Game = (function () {
       '<div class="res-line"><b>✉️ 地址 · ' + '🌏 特产</b><span>' + addrCount() + ' / ' + ((T() && T().count) || 41) + ' 个地方 · 已收 ' + specCount() + ' 种特产</span></div>' +
       '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') + '</span></div>' +
       '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' 段已收进册子</span></div>' +
-      '<div class="res-line"><b>🎄 圣诞树</b><span>' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] + '</span></div>';
+      '<div class="res-line"><b>🎄 圣诞树</b><span>' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）</span></div>';
     $('#res-panel').classList.remove('hidden');
     pause();
   }
@@ -4407,7 +4955,7 @@ window.Game = (function () {
           : ('🤝 委托 · ' + nm + '：' + c.ask + '（' + commWantText(c) + ' → ' + commGiveText(c) + '）')) + '</span></div>';
     });
     rows += '<div class="quest-line"><span class="quest-mark">🎄</span><span>圣诞树：' +
-      ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
+      treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）' +
       ' · 回忆 ' + foundCount() + ' / ' + ((window.Memories || []).length) +
       ' · 车票 ' + ticketOwnedCount() + ' / ' + ticketTotal() +
       ' · 特产 ' + specCount() + ' / ' + ((T() && T().count) || 41) +
@@ -4737,6 +5285,12 @@ window.Game = (function () {
 
     var a = $('#mail-addr');
     if (a) { a.disabled = addrToday() || !un.length; a.textContent = addrToday() ? '今天领过了' : '领今天的地址'; }
+    var mf = $('#mail-fast');
+    if (mf) {
+      var canFast = !expressDayDone() && (worldRes().paper || 0) >= 1 && expressPool().length > 0;
+      mf.disabled = !canFast;
+      mf.textContent = expressDayDone() ? '今天加急用过了' : '加急代寄（📄1）';
+    }
     var tr = $('#mail-trade');
     if (tr) {
       var r = worldRes();
@@ -5080,7 +5634,8 @@ window.Game = (function () {
                 ty: Math.round(S.remote.ty), seen: !!S.remote.seen, inter: S.remote.inter || 0 },
       chapter: chapterNo(), chapterDay: chapterDayStr(),
       ranch: Object.assign({}, (curWorld() && curWorld().ranch) || {}),
-      indoors: !!S.interId, memoryCount: foundCount()
+      indoors: !!S.interId, memoryCount: foundCount(),
+      party: partySnapshot()
     };
   }
 
@@ -5134,6 +5689,23 @@ window.Game = (function () {
     /* 写入口加一道闸：只有 ?dev=1 的验收页面，或者已经在上界面里输对过口令，
        才肯执行——控制台里喊一句 devAdminAct('tickets') 不再直接生效。 */
     devAdminAct: function (k) { if (!S.dev && !adminOk) return false; adminDo(k); return true; },
+    /* v4.5 双人庆典：只读快照 + 三个「和玩家按同一个按钮」的动作。
+       它们不绕过任何判定——条件不够时和真人点下去的结果一样（什么都不发生）。 */
+    devParty: function () { return partySnapshot(); },
+    devDecorate: function () { if (!S.dev) return false; decorateTree(); return true; },
+    devTreePanel: function () { if (!S.dev) return false; openTreePanel(); return true; },
+    devTalkSanta: function () { if (!S.dev) return false; talkSanta(); return true; },
+    devPartyGo: function () { if (!S.dev) return false; startParty(); return true; },
+    devPartyLater: function () { if (!S.dev) return false; closeAllPanels(); return true; },
+    devGiftSources: function () {
+      var w = curWorld() || {};
+      return {
+        mapGift: Object.keys(w.mapGift || {}), roomGift: Object.keys(w.roomGift || {}),
+        expressDay: w.expressDay || '', carpenterDay: w.carpenterDay || '',
+        materials: (worldRes().materials || 0), paper: (worldRes().paper || 0),
+        wood: (worldRes().wood || 0)
+      };
+    },
     /* 只读：素材注册表 / 管理员日志 / 礼品图鉴计数（验收脚本用来对账） */
     devAdminMats: function () {
       return matList().map(function (m) { return { key: m.key, label: m.label, n: resNum(m.key) }; });
@@ -5217,6 +5789,8 @@ window.Game = (function () {
       if (!S.dev) return Promise.resolve(false);
       return mutate(function (w) {
         for (var k in patch) if (patch.hasOwnProperty(k)) w[k] = patch[k];
+        /* 夹具写的是「六阶段刻度」，别让老存档迁移把它再折一次 */
+        if (!patch.hasOwnProperty('treeStageVer')) w.treeStageVer = 2;
         return w;
       });
     },

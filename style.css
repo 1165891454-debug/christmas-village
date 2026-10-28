@@ -1078,3 +1078,17 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
 .spec-cell.is-got em { color: rgba(246, 239, 224, .7); }
 .spec-cell.is-got .sp-ico { opacity: 1; }
 .book-empty-note { margin: 6px 0 2px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+
+/* ---------- v4.5 双人庆典邀请（圣诞老人） ---------- */
+.party-panel .party-say p {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: #f6efe0;
+}
+.party-panel .party-say p:last-child { margin-bottom: 2px; color: #ffe6ae; }
+.party-panel .panel-actions { flex-wrap: wrap; gap: 8px; }
+.party-panel #party-go { flex: 1 1 100%; }
+/* 两个按钮都要够手指点：小屏上次按钮也不能低于 44px（Apple HIG 最小触控区） */
+.party-panel #party-go,
+.party-panel #party-later { min-height: 44px; }

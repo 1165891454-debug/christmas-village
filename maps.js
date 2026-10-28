@@ -1558,7 +1558,7 @@ window.TravelMaps = (function () {
     },
     eggPos: { x: 1058, y: 938 },
     ticket: { no: '05', code: 'WHI', color: '#b07a3c', ink: '#3a2610', paper: '#f9efdd',
-      cond: [{ type: 'mem', n: 7 }, { type: 'tree', n: 2 }],
+      cond: [{ type: 'mem', n: 7 }, { type: 'tree', n: 4 }],
       hint: '把回忆册攒到七段，或者让小镇的大树再长一阶。' },
     spots: [
       { x: 520, y: 992, r: 86, label: '📷 在越野车旁合影' },
@@ -2694,8 +2694,15 @@ window.TravelMaps = (function () {
     ticket: {
       no: '07', code: 'ISL', color: '#57b3a6', ink: '#062026', paper: '#e8f5f3',
       title: '北境之票',
-      cond: [{ type: 'visit', n: 4 }, { type: 'tree', n: 3 }],
-      hint: '去过几个地方、树也长得像样了，车站就多出这一张。'
+      /* all: true = 两条都要满足。这张是最后一站，不能靠「树亮了」单独换出来，
+         否则玩家还没去过几个地方，车站里就先出现一张陌生的票。 */
+      all: true,
+      /* v4.5：树改成六阶段，这里跟着改刻度（5 = 完全点亮，即树到顶）。
+         仍然是 AND：只满足树、或只去过几个地方，都换不出这张票。 */
+      cond: [{ type: 'visit', n: 4 }, { type: 'tree', n: 5 }],
+      /* 没拿到之前，车站和车票册里连这张灰卡都不显示（连「还有第 7 张」都不提示） */
+      hidden: true,
+      hint: '去过的地方够多了，树也长得像样了——两样都齐了，车站才会多出这一张。'
     },
     spots: [
       { x: 508, y: 950, r: 88, label: '📷 在冰湖边合影' },
@@ -3533,7 +3540,9 @@ window.TravelMaps = (function () {
 
     text(g, 'No.', cx + 34, 34, 8.5, owned ? 'rgba(30,20,10,.5)' : 'rgba(90,88,84,.5)', 'center', '400');
     text(g, tk.no || '00', cx + 34, 60, 26, owned ? ink : '#7b776f', 'center', '700');
-    text(g, tk.code || '---', cx + 34, 78, 9.5, owned ? tk.color : '#8b8780', 'center', '600');
+    /* 没票的时候连三字代号也留白：ISL / SRM 这种缩写一样能让人猜出目的地。
+       有票才印真代号。 */
+    text(g, owned ? (tk.code || '---') : '---', cx + 34, 78, 9.5, owned ? tk.color : '#8b8780', 'center', '600');
 
     /* 打孔 */
     g.fillStyle = owned ? '#ffffff' : '#efece6';

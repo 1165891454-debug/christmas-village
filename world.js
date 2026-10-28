@@ -1189,26 +1189,73 @@ window.World = (function () {
     [78, 22, 24, 18, '#a97ed6', '#f7eefc', 0],
     [56, -6, 26, 21, '#6fbf8f', '#f4ead8', 1]
   ];
-  /* 每个阶段树下摆几件：越往后越热闹 */
-  var TREE_GIFT_N = [0, 3, 6, 9];
+  /* 每个阶段树下摆几件：越往后越热闹（v4.5：六个阶段） */
+  var TREE_GIFT_N = [0, 0, 2, 4, 7, 9];
 
-  /* 挂饰数量：每层几个（下密上疏），三个阶段明显不同 */
+  /* 挂饰数量：每层几个（下密上疏）。v4.5 起六个阶段各一套：
+     2 阶只有零星几颗、3 阶成串、4 阶开始满、5 阶最密。 */
   var ORN_N = {
-    1: [2, 2, 2, 1, 1],
-    2: [4, 3, 3, 2, 1],
-    3: [5, 5, 4, 3, 2]
+    2: [2, 1, 1, 1],
+    3: [3, 2, 2, 2, 1],
+    4: [4, 3, 3, 2, 2],
+    5: [5, 4, 4, 3, 2]
   };
   /* 每个阶段只用一套配色：暖金打底，越往后才慢慢掺进红蓝绿 */
   var ORN_PALETTE = {
-    1: ['#e3c07a', '#f2e2a8', '#c9905a'],
-    2: ['#dc4f3c', '#e3c07a', '#4f86d6', '#f2e2a8', '#58b368'],
-    3: ['#f2c869', '#dc4f3c', '#f9efcd', '#e3c07a', '#4f86d6', '#58b368', '#c86bb1']
+    2: ['#e3c07a', '#f2e2a8', '#c9905a'],
+    3: ['#e3c07a', '#c9905a', '#f2e2a8', '#b5644a'],
+    4: ['#dc4f3c', '#e3c07a', '#4f86d6', '#f2e2a8', '#58b368'],
+    5: ['#f2c869', '#dc4f3c', '#f9efcd', '#e3c07a', '#4f86d6', '#58b368', '#c86bb1']
   };
+
+  /* ============================================================
+   * v4.5：六个阶段的树体几何
+   * ------------------------------------------------------------
+   * 以前只有两种形状——「小树苗」和「满高五层」——所以第一次升级
+   * 就直接变成最大形态，后面两阶只是往上挂东西。
+   * 现在 1→2→3 每一阶都真的长高、长宽、多一层：
+   *   1 初生     3 层 / 高 ~176
+   *   2 开始装饰 4 层 / 高 ~260
+   *   3 节日树形 5 层 / 高 ~308
+   *   4 即将点亮 5 层 / 满高 340
+   *   5 完全点亮 满高再放大 6%
+   * ============================================================ */
+  var TREE_TIERS_YOUNG = [
+    { apex: -62, bot: 2, half: 50, tips: 6 },
+    { apex: -120, bot: -44, half: 40, tips: 5 },
+    { apex: -174, bot: -102, half: 29, tips: 4 }
+  ];
+  var TREE_TIERS_MID = [
+    { apex: -84, bot: 2, half: 68, tips: 7 },
+    { apex: -148, bot: -64, half: 56, tips: 6 },
+    { apex: -208, bot: -128, half: 44, tips: 5 },
+    { apex: -258, bot: -190, half: 31, tips: 4 }
+  ];
+  var TREE_TIERS_NEAR = [
+    { apex: -100, bot: 2, half: 86, tips: 8 },
+    { apex: -164, bot: -78, half: 72, tips: 7 },
+    { apex: -218, bot: -146, half: 56, tips: 6 },
+    { apex: -264, bot: -200, half: 42, tips: 5 },
+    { apex: -306, bot: -246, half: 29, tips: 4 }
+  ];
+
+  /* 5 阶比 4 阶再高 6%：最后一步是「长成」，不只是「变亮」 */
+  var TREE_TIERS_FULL = TREE_TIERS.map(function (L) {
+    return { apex: L.apex * 1.06, bot: L.bot * 1.06, half: L.half * 1.06, tips: L.tips };
+  });
+
+  function tiersFor(stage) {
+    if (stage <= 1) return TREE_TIERS_YOUNG;
+    if (stage === 2) return TREE_TIERS_MID;
+    if (stage === 3) return TREE_TIERS_NEAR;
+    if (stage >= 5) return TREE_TIERS_FULL;
+    return TREE_TIERS;
+  }
 
   /* back=true 画「树后那半圈」，false 画「树前那半圈」，中间隔着一整棵树。
      同侧再按 dy 从远到近排，靠前的礼物压住靠后的，才有堆叠感。 */
   function drawTreeGifts(ctx, x, y, stage, back) {
-    var n = TREE_GIFT_N[Math.min(stage, 3)] || 0;
+    var n = TREE_GIFT_N[Math.min(stage, 5)] || 0;
     var list = [];
     for (var i = 0; i < n && i < TREE_GIFTS.length; i++) {
       var gf = TREE_GIFTS[i];
@@ -1222,40 +1269,55 @@ window.World = (function () {
     }
   }
 
+  /* 六阶段圣诞树。同一个函数既画小镇里的树，也被合照调用，
+     所以「玩到的」和「拍下来的」永远一致。
+
+     stage 0 小树苗 → 1 初生 → 2 开始装饰 → 3 节日树形 → 4 即将点亮 → 5 完全点亮
+     每一阶都同时改四件事：树体几何（层数 / 高度 / 宽度）、挂饰密度、
+     光照（地面光池 / 暖晕 / 光柱）、星与飞雪。 */
   function drawBigTree(ctx, tree, stage, t) {
     var x = tree.x, y = tree.y;
-    var lit = stage >= 2, full = stage >= 3;
+    stage = Math.max(0, Math.min(5, (typeof stage === 'number') ? stage : 0));
 
-    // ---- 地面光池（点亮后才有）----
-    if (lit) {
-      var pool = ctx.createRadialGradient(x, y + 8, 10, x, y + 8, 190);
-      pool.addColorStop(0, 'rgba(255,214,132,' + (full ? 0.34 : 0.22) + ')');
-      pool.addColorStop(0.55, 'rgba(255,196,110,' + (full ? 0.13 : 0.07) + ')');
+    if (stage === 0) { drawSapling(ctx, x, y, t); return; }
+
+    var tiers = tiersFor(stage);
+    var sc = (stage >= 5) ? 1.06 : 1;        // 只用于暖晕/光柱这类「绝对偏移」的换算
+    var base = tiers[0];                     // 最下面一层
+    var tip = tiers[tiers.length - 1];       // 最上面一层
+    var halfW = base.half;
+    var k = halfW / 104;                     // 相对满树的尺寸系数：所有细节都按它缩放
+    var starY = tip.apex - 12 * k;
+    var lit = stage >= 4;                    // 灯串通电
+    var full = stage >= 5;                   // 全亮：光柱 / 星屑 / 飘雪 / 光环
+
+    // ---- 地面光池（4 阶起，5 阶最强）----
+    if (stage >= 4) {
+      var poolA = full ? 0.34 : 0.16;
+      var pool = ctx.createRadialGradient(x, y + 8, 10, x, y + 8, 190 * k);
+      pool.addColorStop(0, 'rgba(255,214,132,' + poolA + ')');
+      pool.addColorStop(0.55, 'rgba(255,196,110,' + (poolA * 0.38).toFixed(3) + ')');
       pool.addColorStop(1, 'rgba(255,196,110,0)');
       ctx.fillStyle = pool;
       ctx.save();
       ctx.translate(x, y + 8);
       ctx.scale(1, 0.42);
-      ctx.beginPath(); ctx.arc(0, 0, 190, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, 190 * k, 0, 7); ctx.fill();
       ctx.restore();
     }
 
-    if (stage === 0) {
-      drawSapling(ctx, x, y, t);
-      return;
-    }
-
     // ---- 树后的暖晕 ----
-    if (lit) {
-      var halo = ctx.createRadialGradient(x, y - 190, 20, x, y - 190, 250);
-      halo.addColorStop(0, 'rgba(255,206,120,' + (full ? 0.26 : 0.14) + ')');
-      halo.addColorStop(0.6, 'rgba(255,190,110,' + (full ? 0.10 : 0.05) + ')');
+    if (stage >= 4) {
+      var haloA = full ? 0.26 : 0.12;
+      var halo = ctx.createRadialGradient(x, y - 190 * sc, 20, x, y - 190 * sc, 250 * k);
+      halo.addColorStop(0, 'rgba(255,206,120,' + haloA + ')');
+      halo.addColorStop(0.6, 'rgba(255,190,110,' + (haloA * 0.4).toFixed(3) + ')');
       halo.addColorStop(1, 'rgba(255,190,110,0)');
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(x, y - 190, 250, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - 190 * sc, 250 * k, 0, 7); ctx.fill();
     }
 
-    // ---- 最终阶段：雪地上慢慢荡开的两圈光 ----
+    // ---- 完全点亮：雪地上慢慢荡开的两圈光 ----
     if (full) {
       for (var rp = 0; rp < 2; rp++) {
         var ph = ((t / 2600) + rp * 0.5) % 1;
@@ -1263,7 +1325,7 @@ window.World = (function () {
         ctx.translate(x, y + 8);
         ctx.scale(1, 0.34);
         ctx.beginPath();
-        ctx.arc(0, 0, 92 + ph * 104, 0, 7);
+        ctx.arc(0, 0, (92 + ph * 104) * k, 0, 7);
         ctx.strokeStyle = 'rgba(255,228,160,' + (0.26 * (1 - ph)).toFixed(3) + ')';
         ctx.lineWidth = 2.2;
         ctx.stroke();
@@ -1271,14 +1333,14 @@ window.World = (function () {
       }
     }
 
-    // ---- 基座：雪堆 ----
+    // ---- 基座：雪堆（跟着树宽走）----
     ctx.beginPath();
-    ctx.ellipse(x, y + 6, 92, 24, 0, 0, 7);
+    ctx.ellipse(x, y + 6, halfW * 0.88 + 6, 12 + 12 * k, 0, 0, 7);
     ctx.fillStyle = 'rgba(120,150,190,.22)';
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(x, y + 2, 84, 20, 0, 0, 7);
-    var sgm = ctx.createLinearGradient(x - 84, y - 16, x + 84, y + 20);
+    ctx.ellipse(x, y + 2, halfW * 0.81 + 5, 10 + 10 * k, 0, 0, 7);
+    var sgm = ctx.createLinearGradient(x - halfW, y - 16, x + halfW, y + 20);
     sgm.addColorStop(0, '#fdfeff');
     sgm.addColorStop(1, '#dfe9f6');
     ctx.fillStyle = sgm;
@@ -1287,14 +1349,16 @@ window.World = (function () {
     // ---- 树后那圈礼物：先画，等下被最低一层枝叶压住一点 ----
     drawTreeGifts(ctx, x, y, stage, true);
 
-    // ---- 树干 ----
-    var tg = ctx.createLinearGradient(x - 9, 0, x + 9, 0);
+    // ---- 树干：高度跟着最下面一层走（树越长越高，树干也越来越粗）----
+    var trunkTop = base.apex * 0.60;
+    var tHalf = Math.max(3.2, halfW * 0.100);
+    var tg = ctx.createLinearGradient(x - tHalf, 0, x + tHalf, 0);
     tg.addColorStop(0, '#8a5a38'); tg.addColorStop(0.4, '#6d4426'); tg.addColorStop(1, '#4d2f1a');
     ctx.beginPath();
-    ctx.moveTo(x - 10, y + 6);
-    ctx.quadraticCurveTo(x - 7.5, y - 34, x - 6, y - 66);
-    ctx.lineTo(x + 6, y - 66);
-    ctx.quadraticCurveTo(x + 7.5, y - 34, x + 10, y + 6);
+    ctx.moveTo(x - tHalf, y + 6);
+    ctx.quadraticCurveTo(x - tHalf * 0.75, y + trunkTop * 0.5, x - tHalf * 0.6, y + trunkTop);
+    ctx.lineTo(x + tHalf * 0.6, y + trunkTop);
+    ctx.quadraticCurveTo(x + tHalf * 0.75, y + trunkTop * 0.5, x + tHalf, y + 6);
     ctx.closePath();
     ctx.fillStyle = tg;
     ctx.fill();
@@ -1305,60 +1369,59 @@ window.World = (function () {
     ctx.lineWidth = 1;
     for (var bk = 0; bk < 3; bk++) {
       ctx.beginPath();
-      ctx.moveTo(x - 6 + bk * 4, y - 10 - bk * 14);
-      ctx.quadraticCurveTo(x - 4 + bk * 4, y - 30 - bk * 14, x - 5 + bk * 4, y - 52 - bk * 10);
+      ctx.moveTo(x - tHalf * 0.6 + bk * tHalf * 0.4, y - 10 - bk * 14);
+      ctx.quadraticCurveTo(x - tHalf * 0.4 + bk * tHalf * 0.4, y - 30 - bk * 14, x - tHalf * 0.5 + bk * tHalf * 0.4, y - 52 - bk * 10);
       ctx.stroke();
     }
 
-    // ---- 最终阶段：从星落下来的光柱 ----
-    /* v4.1：光柱改画在树「后面」。以前画在树身上，用 lighter 叠一层，
-       整棵树会被冲成惨白的一团，层次全丢了。 */
+    // ---- 完全点亮：从星落下来的光柱（画在树后面，别把树冲白）----
     if (full) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      var beam = ctx.createLinearGradient(x, y - 320, x, y + 10);
+      var beam = ctx.createLinearGradient(x, y + tip.apex - 20, x, y + 10);
       beam.addColorStop(0, 'rgba(255,226,150,.30)');
       beam.addColorStop(0.5, 'rgba(255,226,150,.08)');
       beam.addColorStop(1, 'rgba(255,226,150,0)');
       ctx.fillStyle = beam;
       ctx.beginPath();
-      ctx.moveTo(x - 12, y - 330);
-      ctx.lineTo(x + 12, y - 330);
-      ctx.lineTo(x + 132, y + 14);
-      ctx.lineTo(x - 132, y + 14);
+      ctx.moveTo(x - 12 * k, y + tip.apex - 24);
+      ctx.lineTo(x + 12 * k, y + tip.apex - 24);
+      ctx.lineTo(x + 132 * k, y + 14);
+      ctx.lineTo(x - 132 * k, y + 14);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
     }
 
-    // ---- 五层枝扇（seed 让每层的枝尖略微参差）----
+    // ---- 枝扇（层数随阶段增加）----
     var tops = ['#3a8a5c', '#3d7a52', '#35804f', '#3c7a52', '#3a875a'];
-    for (var i = 0; i < TREE_TIERS.length; i++) {
-      var L = TREE_TIERS[i];
+    for (var i = 0; i < tiers.length; i++) {
+      var L = tiers[i];
       firTier(ctx, x, y + L.apex, y + L.bot, L.half, L.tips,
-        tops[i], i % 2 ? '#245f3e' : '#286843', 0.62 + i * 0.09, lit, 3.7 + i * 1.9, full);
+        tops[i % tops.length], i % 2 ? '#245f3e' : '#286843',
+        Math.min(0.92, 0.44 + stage * 0.08 + i * 0.05), lit, 3.7 + i * 1.9, full);
     }
 
     // ---- 树前那圈礼物：画在枝叶之后，完整露出来 ----
     drawTreeGifts(ctx, x, y, stage, false);
 
-    // ---- 彩球（stage>=1）----
-    if (stage >= 1) {
-      var pal = ORN_PALETTE[Math.min(stage, 3)] || ORN_PALETTE[1];
-      var nTier = ORN_N[Math.min(stage, 3)] || ORN_N[1];
+    // ---- 彩球（2 阶起，越往后越密）----
+    if (stage >= 2) {
+      var pal = ORN_PALETTE[Math.min(stage, 5)] || ORN_PALETTE[2];
+      var nTier = ORN_N[Math.min(stage, 5)] || ORN_N[2];
       var cIdx = 0;
-      for (var oi = 0; oi < TREE_TIERS.length; oi++) {
-        var Lr = TREE_TIERS[oi];
+      for (var oi = 0; oi < tiers.length; oi++) {
+        var Lr = tiers[oi];
         var nO = nTier[oi] || 0;
-        for (var k = 0; k < nO; k++) {
+        for (var kk = 0; kk < nO; kk++) {
           /* 横向等分 + 固定抖动，纵向 0.46~0.90 错落 —— 挂满但不成排 */
-          var jr = jag(4.1 + oi * 3.3, k);
-          var u = -0.72 + 1.44 * ((k + 0.5) / nO) + (jr - 0.5) * 0.26;
-          var vv = 0.46 + 0.44 * jag(9.7 + oi * 2.7, k);
+          var jr = jag(4.1 + oi * 3.3, kk);
+          var u = -0.72 + 1.44 * ((kk + 0.5) / nO) + (jr - 0.5) * 0.26;
+          var vv = 0.46 + 0.44 * jag(9.7 + oi * 2.7, kk);
           var pt = surfPt(x, y + Lr.apex, y + Lr.bot, Lr.half, u, vv);
-          var r = 6.0 - oi * 0.45 + (Math.abs(u) > 0.55 ? 0.4 : 0) + jr * 0.5;
-          if (stage >= 3 && cIdx % 7 === 3) r += 1.3;   // 少数大球当视觉重点
-          var flick = full ? (0.62 + 0.38 * Math.sin(t / 560 + cIdx * 1.7)) : 1;
+          var r = (6.0 - oi * 0.45 + (Math.abs(u) > 0.55 ? 0.4 : 0) + jr * 0.5) * Math.max(0.7, k);
+          if (full && cIdx % 7 === 3) r += 1.3;   // 少数大球当视觉重点
+          var flick = lit ? (0.62 + 0.38 * Math.sin(t / 560 + cIdx * 1.7)) : 1;
           if (lit && r > 5.2) drawGlow(ctx, pt.x, pt.y, 'rgba(255,232,168,' + (0.30 * flick + 0.10).toFixed(3) + ')', 12 + r, 0.8);
           ornament(ctx, pt.x, pt.y, r, pal[cIdx % pal.length]);
           cIdx++;
@@ -1366,29 +1429,31 @@ window.World = (function () {
       }
     }
 
-    // ---- 灯串（stage>=2）----
+    // ---- 灯串（4 阶起；5 阶全部串上）----
     if (lit) {
-      for (var gi = 0; gi < TREE_TIERS.length - 1; gi++) {
-        var Lg = TREE_TIERS[gi];
-        garland(ctx, x, y + Lg.apex, y + Lg.bot, Lg.half, t, gi * 1.7, full ? 1 : 0.72);
+      var garN = full ? tiers.length - 1 : Math.min(2, tiers.length - 1);
+      for (var gi = 0; gi < garN; gi++) {
+        var Lg = tiers[gi];
+        garland(ctx, x, y + Lg.apex, y + Lg.bot, Lg.half, t, gi * 1.7, full ? 1 : 0.62);
       }
     }
 
-    // ---- 顶星 ----
-    if (stage >= 2) {
-      treeStar(ctx, x, y - 336, full ? 19 : 14, t, 1);
+    // ---- 顶星：3 阶是「装上了但还没通电」，4 阶亮起，5 阶最大 ----
+    if (stage >= 3) {
+      if (stage === 3) treeStar(ctx, x, starY, 11 * Math.max(0.75, k), t, 0);
+      else treeStar(ctx, x, starY, (full ? 19 : 15) * Math.max(0.8, k), t, 1);
     } else {
-      // 还没通电：只插一根尖枝
+      // 还没装星：只插一根尖枝
       ctx.beginPath();
-      ctx.moveTo(x - 3, y - 316);
-      ctx.lineTo(x, y - 336);
-      ctx.lineTo(x + 3, y - 316);
+      ctx.moveTo(x - 3, y + tip.apex + 18);
+      ctx.lineTo(x, y + tip.apex - 2);
+      ctx.lineTo(x + 3, y + tip.apex + 18);
       ctx.closePath();
       ctx.fillStyle = '#2f744c';
       ctx.fill();
     }
 
-    // ---- 星屑 + 飘雪（stage 3；光柱已经在树后面画过了）----
+    // ---- 星屑 + 飘雪（只在完全点亮的 5 阶）----
     if (full) {
       for (var sp = 0; sp < 9; sp++) {
         var a2 = (sp * 2.399) % (Math.PI * 2);
@@ -3120,6 +3185,7 @@ window.World = (function () {
     getGroundCanvas: getGroundCanvas,
     drawGround: drawGround, drawSnowPiles: drawSnowPiles, drawFence: drawFence,
     drawBorderTrees: drawBorderTrees, drawBuilding: drawBuilding, drawBigTree: drawBigTree,
+    tiersFor: tiersFor, stageNames: ['小树苗', '初生', '开始装饰', '节日树形', '即将点亮', '完全点亮'],
     drawLamp: drawLamp, drawBench: drawBench, drawPond: drawPond, drawIceRink: drawIceRink,
     drawBridge: drawBridge, drawEggs: drawEggs, drawRoomEggs: drawRoomEggs, drawProps: drawProps,
     ranch: ranch, animals: ranchAnimals, haystack: haystack,
