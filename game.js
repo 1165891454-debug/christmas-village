@@ -1089,7 +1089,7 @@ window.Game = (function () {
     base.addEventListener('pointercancel', joyEnd);
     base.addEventListener('lostpointercapture', joyEnd);
 
-    bindAdmin();   // 隐藏应急入口（长按标题 5 秒），不占界面任何位置
+    bindAdmin();   // 管理员入口（设置最底部的「小镇维护」），不占界面任何位置
     $('#btn-interact').addEventListener('click', function () { doInteract(); });
     $('#btn-menu').addEventListener('click', function () { toggleMenu(); });
     $('#menu-close').addEventListener('click', function () { closeAllPanels(); });
@@ -2384,10 +2384,11 @@ window.Game = (function () {
   }
 
   /* ============================================================
-   * 应急管理（默认隐藏）
-   *   入口：长按顶部标题 5 秒。界面上没有任何按钮，正常流程不会误触。
+   * 应急管理（对玩家隐藏）
+   *   入口：菜单 → ⚙️ 设置 → 最底部那行灰色小字「小镇维护」→ 4 位口令。
+   *         （v4.4.0 之前是「长按顶部标题 5 秒」，手机上按不出来，已下线。）
    *   口令：4 位数字（默认是圣诞节那天 1225）。前端只存哈希值，不存明文。
-   *   说明：这是「隐藏入口」，不是真正的安全边界——网页是公开的，
+   *   说明：这是「不太显眼的入口」，不是真正的安全边界——网页是公开的，
    *   任何人都能改前端代码。真正需要防人的改动，必须走 Firebase 安全规则，
    *   这里所有写操作都仍然老老实实经过原来的 world 事务与规则校验。
    * ============================================================ */
@@ -2520,64 +2521,20 @@ window.Game = (function () {
     }
   }
 
-  /* 隐藏应急入口：长按顶栏 5 秒 → 口令 1225。
-     v4.3.1 修了两个「按不出来」的原因：
-       1) 原来任何 1px 的 pointermove 都会取消计时，而真机上握着不动也会持续冒
-          ±2~3px 的 move 事件 → 永远等不到 5 秒。现在给 18px 容差。
-       2) 原来在第 5 秒「按住不放」时就开面板，松手后浏览器补的那个 click 会把
-          刚开的遮罩点掉（真机上这个补发延迟能到 1~2 秒，1.5s 保护窗挡不住）。
-          现在改成「满 5 秒就亮灯、松手才开」，并在 touchend 上 preventDefault
-          把那一下 click 直接掐掉——面板开出来就不会再被自己的手指关掉。 */
-  var ADMIN_HOLD_MS = 5000, ADMIN_SLOP = 18;
+  /* 管理员入口：菜单 → 设置 → 最底部的「小镇维护」一行小字 → 4 位口令。
+     原来这里是「长按顶栏 5 秒」，手机上要好几次才按得出来，所以改成看得见、但
+     存在感很低的一行灰字。只换了「怎么进去」：口令校验、面板内容、备份机制
+     全部沿用原来的实现，这里不做第二套。 */
   function bindAdmin() {
-    var bar = document.querySelector('#topbar');
-    var brand = document.querySelector('#topbar .brand');
-    if (bar && !bar.dataset.adminBound) {
-      bar.dataset.adminBound = '1';
-      var timer = null, holding = false, armed = false, sx = 0, sy = 0;
-      var mark = function (on) { if (brand) brand.classList.toggle('is-holding', !!on); };
-      var clear = function () {
-        holding = false; armed = false;
-        if (timer) { clearTimeout(timer); timer = null; }
-        mark(false);
-      };
-      var fire = function (e) {
-        if (!armed) return;
-        armed = false; holding = false;
-        mark(false);
-        if (e && e.cancelable) { e.preventDefault(); e.stopPropagation(); }
-        S.adminGuardUntil = Date.now() + 1200;
+    var maint = $('#set-maint');
+    if (maint && !maint.dataset.adminBound) {
+      maint.dataset.adminBound = '1';
+      maint.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        /* 刚点开的这一下别顺带把面板又关掉（设置面板会先被收起来） */
+        S.adminGuardUntil = Date.now() + 400;
         openAdminGate();
-      };
-      var start = function (e) {
-        if (e.target && e.target.closest && e.target.closest('button, a, input, .room-code')) return;
-        sx = e.clientX || 0; sy = e.clientY || 0;
-        holding = true; armed = false;
-        if (timer) clearTimeout(timer);
-        mark(true);
-        timer = setTimeout(function () {
-          timer = null;
-          if (!holding) return;
-          armed = true;   /* 灯亮满 = 松手就开 */
-        }, ADMIN_HOLD_MS);
-      };
-      bar.addEventListener('pointerdown', start);
-      /* 手指滑出顶栏再松开时 pointerup 不会回到 bar 上，这里兜一层。
-         已经「灯亮满」的情况不能在这里清掉——真正的开面板留给 touchend/mouseup，
-         因为只有在那两个事件上 preventDefault 才能把补发的 click 掐死。 */
-      window.addEventListener('pointerup', function () { if (!armed) clear(); });
-      window.addEventListener('pointercancel', function () { if (!armed) clear(); });
-      /* 松手这一下：够 5 秒就开面板，并把随之而来的 click 掐掉 */
-      window.addEventListener('touchend', fire, { passive: false, capture: true });
-      window.addEventListener('mouseup', fire, true);
-      /* 只在小幅抖动之外才判定「这是在拖」，滑出标题也不取消 */
-      bar.addEventListener('pointermove', function (e) {
-        if (!holding) return;
-        if (Math.abs(e.clientX - sx) > ADMIN_SLOP || Math.abs(e.clientY - sy) > ADMIN_SLOP) clear();
-      });
-      /* 安卓长按可能弹系统菜单，顺手拦掉，免得手势被打断 */
-      bar.addEventListener('contextmenu', function (e) {
-        if (e.target && e.target.closest && e.target.closest('.brand')) e.preventDefault();
       });
     }
     /* 电脑上给个快捷键：Ctrl/⌘ + Shift + A（手机上没键盘，等于不对玩家暴露） */
@@ -2595,14 +2552,18 @@ window.Game = (function () {
     if (okBtn && !okBtn.dataset.bound) {
       okBtn.dataset.bound = '1';
       okBtn.addEventListener('click', function () {
-        var v = ($('#admin-pin').value || '').trim();
+        var pinEl = $('#admin-pin');
+        var v = (pinEl.value || '').trim();
         if (djb2('omo' + v) === ADMIN_HASH) {
           adminOk = true;
           $('#admin-pin-wrap').classList.add('hidden');
           $('#admin-body').classList.remove('hidden');
           renderAdminStatus();
         } else {
+          /* 只告诉对方「不对」，不透露位数、不透露任何内部信息 */
           $('#admin-pin-err').classList.remove('hidden');
+          pinEl.value = '';
+          try { pinEl.focus(); } catch (e) { }
         }
       });
       $('#admin-pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') okBtn.click(); });

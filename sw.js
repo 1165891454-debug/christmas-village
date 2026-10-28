@@ -2,11 +2,11 @@
  * 策略：导航与配置走网络优先（保证更新可达），静态资源缓存优先。
  * 版本号变更（CACHE 名）即可强制刷新全部缓存。
  */
-var CACHE = 'omo-v4.4.0';
+var CACHE = 'omo-v4.4.0b';
 var CORE = [
   './',
   './index.html',
-  './style.css?v=4.4.0',
+  './style.css?v=4.4.0b',
   './firebase-config.js?v=4.4.0',
   './memories.js?v=4.4.0',
   './chars.js?v=4.4.0',
@@ -14,7 +14,7 @@ var CORE = [
   './world.js?v=4.4.0',
   './maps.js?v=4.4.0',
   './specialties.js?v=4.4.0',
-  './game.js?v=4.4.0',
+  './game.js?v=4.4.0b',
   './app.js?v=4.4.0',
   './manifest.webmanifest',
   './icons/icon-192.png',
