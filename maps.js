@@ -463,7 +463,7 @@ window.TravelMaps = (function () {
    * 地图定义
    * ============================================================ */
   var D = {};
-  var ORDER = ['sayram', 'tibet', 'doha', 'wuhan', 'wuhai', 'kl'];
+  var ORDER = ['sayram', 'tibet', 'doha', 'wuhan', 'wuhai', 'kl', 'iceland'];
 
   /* ------------------------------------------------------------
    * 1. 新疆 · 赛里木湖
@@ -2413,6 +2413,896 @@ window.TravelMaps = (function () {
         if (avoidHit(fx, fy, av, 48)) continue;
         flowerDot(g, fx, fy, 2, rnd() > 0.5 ? '#f6e8a8' : '#f0a0b8');
       }
+    }
+  };
+
+  /* ------------------------------------------------------------
+   * 7. 冰岛 · 极光下的冰川
+   *    冬夜天空 / 多层极光 / 冰川与冰崖 / 冰湖 / 黑色火山砂
+   *
+   *    这张图的构图是「自下而上」看的，所以纵向分区写死在这里：
+   *      天 0~700   ·  极光 470~670   ·  三层山脊 690~830
+   *      冰湖 806~902  ·  黑砂岸 892~1200（可走 930~1150）
+   *    横屏时镜头往上偏（camBias），抬头就能看见极光——
+   *    这也是这张图唯一需要「改取景」的地方，别的地图仍是 0.8 居中。
+   * ------------------------------------------------------------ */
+
+  var ICE = { horizon: 700, lakeTop: 806, lakeBot: 902, shoreTop: 892 };
+
+  /* ---------- 极光 ----------
+   * 一条极光 = 一条会起伏的中心线，用「由粗到细、由淡到亮」的六道描边叠出来。
+   * 这样边缘是软的、中间是亮的，像发光的管子；
+   * 再用横向的正弦权重把两端淡掉，就不会变成一条横贯画面的绿条。
+   * 底下的细光丝只留很淡的一点，作为「帘」的纹理。 */
+  function auroraBand(g, o) {
+    var step = 16;
+    function cy(x) {
+      return o.y
+        + Math.sin(x / o.p + o.ph) * o.a
+        + Math.sin(x / (o.p * 0.33) + o.ph * 1.9) * (o.a * 0.32)
+        + Math.sin(x / (o.p * 0.13) + o.ph * 3.4) * (o.a * 0.11);
+    }
+    var x0 = o.x0, x1 = o.x1, span = x1 - x0;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'butt'; g.lineJoin = 'round';
+    g.strokeStyle = o.c;
+    for (var pi = 0; pi < o.pass.length; pi++) {
+      g.lineWidth = o.w * o.pass[pi][0];
+      var al = o.pass[pi][1] * o.gain;
+      for (var x = x0; x < x1; x += step) {
+        var t = (x + step / 2 - x0) / span;
+        var tp = Math.sin(Math.PI * Math.max(0.004, Math.min(0.996, t)));
+        g.globalAlpha = al * Math.pow(tp, 0.5);
+        g.beginPath();
+        g.moveTo(x, cy(x));
+        g.lineTo(x + step + 1.5, cy(x + step + 1.5));
+        g.stroke();
+      }
+    }
+    /* 帘上的竖纹：不是等距的一把梳子（那会像下雨），
+       而是用一条平滑噪声决定「宽窄 + 长短 + 亮度」，
+       于是自然出现一束一束的亮带——极光的竖纹本来就是这样聚散的。 */
+    function nz(x) {
+      var v = 0.5 + 0.30 * Math.sin(x / 37 + (o.ph || 0))
+        + 0.18 * Math.sin(x / 13 + (o.ph || 0) * 2.3)
+        + 0.10 * Math.sin(x / 5.7 + (o.ph || 0) * 3.7);
+      return Math.max(0, Math.min(1, v));
+    }
+    var fx = x0;
+    while (fx < x1) {
+      var n = nz(fx);
+      var w2 = 3 + n * 15;
+      var len = (o.tall || 110) * (0.28 + n * 1.05);
+      var yy2 = cy(fx);
+      var t2 = (fx - x0) / span;
+      var tp2 = Math.sin(Math.PI * Math.max(0.004, Math.min(0.996, t2)));
+      var lg2 = g.createLinearGradient(0, yy2 - len, 0, yy2 + 8);
+      lg2.addColorStop(0, o.c0);
+      lg2.addColorStop(0.55, o.c);
+      lg2.addColorStop(1, o.c);
+      g.fillStyle = lg2;
+      g.globalAlpha = (0.05 + n * 0.12) * o.gain * Math.pow(tp2, 0.5);
+      g.fillRect(fx, yy2 - len, w2, len + 8);
+      fx += w2 * (0.45 + n * 0.75);
+    }
+    g.restore();
+  }
+
+  /* 三层：主帘（青绿）· 高层（淡青）· 低层（紫，压在山脊后面） */
+  var AURORA_BANDS = [
+    { x0: -90, x1: 1000, y: 596, a: 30, p: 430, ph: 0.35, w: 132, gain: 1, seed: 21,
+      c: 'rgba(96,255,206,.85)', c0: 'rgba(96,255,206,0)', tall: 150,
+      pass: [[1, .040], [.72, .050], [.48, .066], [.30, .082], [.16, .098], [.07, .086]] },
+    { x0: 250, x1: 1620, y: 556, a: 24, p: 330, ph: 2.30, w: 96, gain: .86, seed: 57,
+      c: 'rgba(150,255,224,.80)', c0: 'rgba(150,255,224,0)', tall: 125,
+      pass: [[1, .034], [.70, .044], [.44, .060], [.26, .074], [.12, .086], [.05, .070]] },
+    { x0: -60, x1: 1500, y: 648, a: 44, p: 520, ph: 4.10, w: 150, gain: .70, seed: 92,
+      c: 'rgba(178,146,255,.62)', c0: 'rgba(178,146,255,0)', tall: 130,
+      pass: [[1, .030], [.68, .038], [.42, .050], [.24, .060], [.11, .064], [.05, .050]] }
+  ];
+
+  /* 动的那一层：整片极光画进一张半分辨率的小画布，每帧只 drawImage 一次。
+     逐帧重画上千道描边的话，iPhone 上会掉到 20fps 以下。 */
+  var _aurCv = null;
+  var AUR_TOP = 400, AUR_BOT = 740;
+  function auroraSprite() {
+    if (_aurCv) return _aurCv;
+    var c = document.createElement('canvas');
+    c.width = 760; c.height = (AUR_BOT - AUR_TOP) / 2;
+    var g = c.getContext('2d');
+    g.scale(0.5, 0.5);
+    g.translate(0, -AUR_TOP);
+    for (var i = 0; i < AURORA_BANDS.length; i++) {
+      var b = AURORA_BANDS[i];
+      auroraBand(g, { x0: b.x0, x1: b.x1, y: b.y, a: b.a, p: b.p, ph: b.ph, w: b.w,
+        c: b.c, c0: b.c0, tall: b.tall, pass: b.pass, seed: b.seed, gain: 1 });
+    }
+    _aurCv = c;
+    return c;
+  }
+
+  /* ---------- 山脊 ----------
+   * 一串尖峰叠出来的剪影。峰形用 (1-|t|)^k 而不是高斯：
+   * 高斯在顶点是圆的，叠出来是一排馒头山；(1-|t|) 在顶点有尖角，
+   * 叠上第二层更细的「石脊」，才有冰岛那种又碎又陡的山脊线。
+   * 全局的 jag() 是按 H=1000 归一化的，这张图高 1200，直接用它会把山脊抬高 115px，
+   * 正好压在极光上——所以这里全部用绝对坐标重写。 */
+  function iceRidgePts(baseY, peaks, spires, jitter, seed) {
+    var pts = [];
+    for (var x = -60; x <= W + 60; x += 8) {
+      var y = baseY;
+      for (var i = 0; i < peaks.length; i++) {
+        var p = peaks[i];
+        var t = Math.abs((x - p.x) / p.w);
+        if (t < 1) y -= Math.pow(1 - t, 1.15) * p.h;
+      }
+      for (var j = 0; j < spires.length; j++) {
+        var q = spires[j];
+        var t2 = Math.abs((x - q.x) / q.w);
+        if (t2 < 1) y -= Math.pow(1 - t2, 0.95) * q.h;
+      }
+      y += Math.sin(x / 23 + seed) * jitter + Math.sin(x / 7.3 + seed * 2.3) * jitter * 0.55;
+      pts.push([x, y]);
+    }
+    return pts;
+  }
+  function iceRidge(g, pts, fill, baseY, snowA, snowTop) {
+    g.beginPath();
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (var i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+    g.lineTo(W + 60, baseY + 40); g.lineTo(-60, baseY + 40);
+    g.closePath();
+    g.fillStyle = fill; g.fill();
+    if (snowA) {
+      /* 雪只落在最高的那一段：用一条竖直渐变裁在山体里，
+         峰越低离渐变底越近，落到的雪就越少——不用为每座山单独算雪线。 */
+      g.save();
+      g.clip();
+      var gr = g.createLinearGradient(0, snowTop, 0, snowTop + 96);
+      gr.addColorStop(0, 'rgba(232,246,255,' + snowA + ')');
+      gr.addColorStop(0.42, 'rgba(206,230,252,' + (snowA * 0.52).toFixed(3) + ')');
+      gr.addColorStop(1, 'rgba(190,220,248,0)');
+      g.fillStyle = gr;
+      g.fillRect(-60, snowTop, W + 120, 160);
+      g.restore();
+    }
+  }
+
+  /* ---------- 冰 ---------- */
+  var iceRnd = seeded(1207);
+
+  /* 浮冰 / 小冰山：水上白、水下蓝，底下一圈倒影 */
+  function icefloe(g, x, y, w2, h2, seed) {
+    var r = seeded(seed);
+    g.fillStyle = 'rgba(140,200,230,.10)';
+    g.beginPath(); g.ellipse(x, y + h2 * 0.34, w2 * 0.92, h2 * 0.30, 0, 0, 7); g.fill();
+    /* 水下 */
+    g.beginPath();
+    g.moveTo(x - w2, y);
+    g.lineTo(x - w2 * 0.55, y + h2 * 0.40);
+    g.lineTo(x - w2 * 0.05, y + h2 * 0.26);
+    g.lineTo(x + w2 * 0.48, y + h2 * 0.44);
+    g.lineTo(x + w2, y + h2 * 0.12);
+    g.closePath();
+    g.fillStyle = 'rgba(54,116,156,.50)'; g.fill();
+    /* 水上：几个折面 */
+    g.beginPath();
+    g.moveTo(x - w2, y);
+    g.lineTo(x - w2 * 0.74, y - h2 * (0.44 + r() * 0.16));
+    g.lineTo(x - w2 * 0.34, y - h2 * (0.86 + r() * 0.14));
+    g.lineTo(x + w2 * 0.04, y - h2 * (0.58 + r() * 0.12));
+    g.lineTo(x + w2 * 0.46, y - h2 * (0.80 + r() * 0.20));
+    g.lineTo(x + w2, y - h2 * 0.30);
+    g.lineTo(x + w2, y);
+    g.closePath();
+    var gr = g.createLinearGradient(x - w2, y - h2, x + w2 * 0.6, y);
+    gr.addColorStop(0, '#f6fdff');
+    gr.addColorStop(0.40, '#d6effb');
+    gr.addColorStop(1, '#7fb6d8');
+    g.fillStyle = gr; g.fill();
+    /* 受光的那一刀 */
+    g.strokeStyle = 'rgba(255,255,255,.62)'; g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(x - w2 * 0.34, y - h2 * 0.86);
+    g.lineTo(x + w2 * 0.04, y - h2 * 0.58);
+    g.stroke();
+    /* 一道冷蓝的暗面 */
+    g.fillStyle = 'rgba(96,152,190,.22)';
+    g.beginPath();
+    g.moveTo(x + w2 * 0.04, y - h2 * 0.58);
+    g.lineTo(x + w2 * 0.46, y - h2 * 0.80);
+    g.lineTo(x + w2, y - h2 * 0.30);
+    g.lineTo(x + w2, y);
+    g.lineTo(x + w2 * 0.04, y);
+    g.closePath(); g.fill();
+  }
+
+  /* 低矮的木栈台：冰岛那种贴着地的观景平台 */
+  function deck(g, x, y, w2, s) {
+    var h2 = 13 * s;
+    g.fillStyle = 'rgba(6,10,16,.42)';
+    g.beginPath(); g.ellipse(x + w2 / 2, y + h2 + 5 * s, w2 * 0.54, 6 * s, 0, 0, 7); g.fill();
+    /* 支柱 */
+    g.fillStyle = '#3b332c';
+    for (var p = 0; p < 4; p++) {
+      var px = x + 10 * s + p * (w2 - 20 * s) / 3;
+      g.fillRect(px - 2.7 * s, y, 5.4 * s, h2 + 9 * s);
+    }
+    /* 台面 */
+    g.fillStyle = '#6a5a48';
+    g.fillRect(x, y - 4 * s, w2, h2);
+    g.strokeStyle = 'rgba(20,14,9,.38)'; g.lineWidth = 1.2;
+    for (var l = 1; l < 9; l++) {
+      g.beginPath();
+      g.moveTo(x + w2 * l / 9, y - 4 * s);
+      g.lineTo(x + w2 * l / 9, y + h2 - 4 * s);
+      g.stroke();
+    }
+    /* 板面上的一条亮边 + 雪 */
+    g.fillStyle = 'rgba(122,108,90,.85)';
+    g.fillRect(x, y + h2 - 4.2 * s, w2, 1.6 * s);
+    g.fillStyle = 'rgba(240,250,255,.92)';
+    g.fillRect(x, y - 5.6 * s, w2 * 0.62, 2.4 * s);
+    g.fillRect(x + w2 * 0.70, y - 5.2 * s, w2 * 0.30, 1.8 * s);
+    /* 两根木桩 + 一道绳 */
+    g.strokeStyle = '#463c32'; g.lineWidth = 4 * s;
+    g.beginPath(); g.moveTo(x + 6 * s, y - 4 * s); g.lineTo(x + 6 * s, y - 27 * s); g.stroke();
+    g.beginPath(); g.moveTo(x + w2 - 6 * s, y - 4 * s); g.lineTo(x + w2 - 6 * s, y - 27 * s); g.stroke();
+    g.strokeStyle = 'rgba(206,198,178,.55)'; g.lineWidth = 1.4 * s;
+    g.beginPath();
+    g.moveTo(x + 6 * s, y - 25 * s);
+    g.quadraticCurveTo(x + w2 / 2, y - 19 * s, x + w2 - 6 * s, y - 25 * s);
+    g.stroke();
+  }
+
+  /* 一片雪：两头收尖的透镜形，比椭圆「自然」，不会看成水洼 */
+  function lens(g, x, y, w2, h2, tilt) {
+    g.save();
+    g.translate(x, y);
+    if (tilt) g.rotate(tilt);
+    g.beginPath();
+    g.moveTo(-w2, 0);
+    g.bezierCurveTo(-w2 * 0.52, -h2 * 1.18, w2 * 0.52, -h2 * 1.18, w2, 0);
+    g.bezierCurveTo(w2 * 0.54, h2 * 0.62, -w2 * 0.54, h2 * 0.62, -w2, 0);
+    g.closePath();
+    g.restore();
+  }
+
+  D.iceland = {
+    id: 'iceland', name: '冰岛', sub: '北境 · 极光与冰川',
+    card: '整片天都在发光。冰川一直躺在那儿，安静得像睡着了。',
+    arrive: '🚉 到得很晚，天已经黑透。抬头的那一下，你会记很久。',
+    line: '雪把声音都吃掉了，只剩冰在轻轻响。',
+    w: W, h: 1140,
+    /* 这张图的主角是天空。取景不写死 0.8：
+       按窗口高度算出「一屏大约看 620 个世界单位」的比例，夹在 0.62~0.86 之间；
+       再把镜头往上偏 0.70，让极光永远在画面上半部。 */
+    fitSky: 620, minZoom: 0.60, maxZoom: 0.86, camBias: 0.80,
+    walk: { y0: 900, y1: 1030 },
+    spawn: { x: 332, y: 966, dir: 1 },
+    exitPos: { x: 178, y: 1002 },
+    view: {
+      x: 700, y: 916, r: 104, label: '🌌 一起看极光',
+      lines: [
+        '你们把手肘搭在木栏上，谁也没先开口。',
+        '天上有好几层光，一层压着一层，慢慢翻过去。',
+        '冰湖把这些光又还了一遍，颜色比天上暗一点。'
+      ]
+    },
+    eggPos: { x: 1212, y: 902 },
+    ticket: {
+      no: '07', code: 'ISL', color: '#57b3a6', ink: '#062026', paper: '#e8f5f3',
+      title: '北境之票',
+      cond: [{ type: 'visit', n: 4 }, { type: 'tree', n: 3 }],
+      hint: '去过几个地方、树也长得像样了，车站就多出这一张。'
+    },
+    spots: [
+      { x: 508, y: 950, r: 88, label: '📷 在冰湖边合影' },
+      { x: 962, y: 992, r: 88, label: '📷 在冰块前合影' }
+    ],
+    obstacles: [
+      { x: 382, y: 918, w: 96, h: 44 },      // 岸边那块玄武岩
+      { x: 1052, y: 940, w: 90, h: 42 },     // 中右的礁石
+      { x: 1362, y: 964, w: 132, h: 58 }     // 右端那片矮岩台
+    ],
+    paint: function (g, mode) {
+      var full = mode !== 'thumb';
+      var rnd = seeded(1207);
+
+      /* ================= 天 ================= */
+      g.fillStyle = lin(g, 0, 0, 0, 760, [
+        0, '#01030a', 0.14, '#030814', 0.32, '#05101f', 0.50, '#07182b',
+        0.68, '#0a2038', 0.84, '#0d2a46', 1, '#123452'
+      ]);
+      g.fillRect(0, 0, W, 770);
+
+      /* 星星：越靠地平线越稀、越暗；少数几颗带十字芒 */
+      var starN = full ? 190 : 50;
+      for (var s = 0; s < starN; s++) {
+        var sx = rnd() * W, sy = Math.pow(rnd(), 0.78) * 620;
+        var sa = (0.16 + rnd() * 0.62) * Math.max(0.10, 1 - sy / 820);
+        var sr2 = rnd() > 0.92 ? 1.7 : (rnd() > 0.55 ? 1.1 : 0.72);
+        g.fillStyle = 'rgba(222,238,255,' + sa.toFixed(3) + ')';
+        g.beginPath(); g.arc(sx, sy, sr2, 0, 7); g.fill();
+        if (full && rnd() > 0.94) {
+          g.strokeStyle = 'rgba(214,236,255,' + (sa * 0.46).toFixed(3) + ')';
+          g.lineWidth = 0.7;
+          g.beginPath();
+          g.moveTo(sx - 3.8, sy); g.lineTo(sx + 3.8, sy);
+          g.moveTo(sx, sy - 3.8); g.lineTo(sx, sy + 3.8);
+          g.stroke();
+        }
+      }
+
+      /* 地平线上那层很淡的冷光，把天空托住 */
+      bloom(g, 720, 700, 760, 'rgba(64,158,190,.15)', 1);
+      bloom(g, 220, 636, 420, 'rgba(52,120,170,.09)', 1);
+
+      /* ================= 极光 ================= */
+      /* 静态这层只做「底色」，画得淡一点：真正流动的那层在 anim 里叠上来，
+         两层都用 lighter，静态太亮就会糊成一块白板（上一版就是这个毛病）。 */
+      for (var a = 0; a < AURORA_BANDS.length; a++) {
+        var bd = AURORA_BANDS[a];
+        auroraBand(g, { x0: bd.x0, x1: bd.x1, y: bd.y, a: bd.a, p: bd.p, ph: bd.ph, w: bd.w,
+          c: bd.c, c0: bd.c0, tall: bd.tall, pass: bd.pass, seed: bd.seed, gain: 0.46 });
+      }
+      /* 极光落在雪雾上的那一层薄光 */
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = lin(g, 0, 560, 0, 700, [0, 'rgba(70,210,180,.10)', 1, 'rgba(60,190,170,0)']);
+      g.fillRect(0, 560, W, 140);
+      g.restore();
+
+      /* 很少量的薄云：只在极光和山之间露一条 */
+      if (full) {
+        for (var cl = 0; cl < 5; cl++) {
+          g.fillStyle = 'rgba(120,150,190,.045)';
+          g.beginPath();
+          g.ellipse(140 + cl * 330, 648 + (cl % 3) * 26, 200 + (cl % 2) * 130, 7 + (cl % 3) * 3, 0, 0, 7);
+          g.fill();
+        }
+      }
+
+      /* ================= 三层山脊 ================= */
+      /* 最远：只剩剪影，颜色比天空更暗，顶上挂一点被极光照亮的雪 */
+      iceRidge(g, iceRidgePts(766, [
+        { x: 40, y: 0, w: 150, h: 44 }, { x: 250, y: 0, w: 130, h: 34 },
+        { x: 430, y: 0, w: 170, h: 52 }, { x: 640, y: 0, w: 140, h: 30 },
+        { x: 860, y: 0, w: 180, h: 48 }, { x: 1080, y: 0, w: 140, h: 36 },
+        { x: 1280, y: 0, w: 190, h: 50 }, { x: 1480, y: 0, w: 140, h: 40 }
+      ], [
+        { x: 90, y: 0, w: 40, h: 30 }, { x: 175, y: 0, w: 26, h: 22 },
+        { x: 330, y: 0, w: 34, h: 26 }, { x: 470, y: 0, w: 44, h: 34 },
+        { x: 560, y: 0, w: 24, h: 20 }, { x: 700, y: 0, w: 30, h: 24 },
+        { x: 920, y: 0, w: 46, h: 32 }, { x: 1010, y: 0, w: 22, h: 18 },
+        { x: 1190, y: 0, w: 36, h: 28 }, { x: 1350, y: 0, w: 42, h: 30 },
+        { x: 1440, y: 0, w: 26, h: 22 }
+      ], 2.4, 3.1), '#1b3149', 766, 0.20, 704);
+
+      /* 中景：真的盖着雪的山 */
+      iceRidge(g, iceRidgePts(812, [
+        { x: 20, y: 0, w: 190, h: 56 }, { x: 280, y: 0, w: 170, h: 42 },
+        { x: 520, y: 0, w: 210, h: 66 }, { x: 780, y: 0, w: 180, h: 38 },
+        { x: 1030, y: 0, w: 200, h: 58 }, { x: 1290, y: 0, w: 190, h: 44 },
+        { x: 1500, y: 0, w: 180, h: 50 }
+      ], [
+        { x: 120, y: 0, w: 46, h: 34 }, { x: 300, y: 0, w: 30, h: 24 },
+        { x: 430, y: 0, w: 40, h: 30 }, { x: 590, y: 0, w: 52, h: 40 },
+        { x: 690, y: 0, w: 28, h: 22 }, { x: 880, y: 0, w: 36, h: 28 },
+        { x: 1140, y: 0, w: 48, h: 36 }, { x: 1250, y: 0, w: 26, h: 20 },
+        { x: 1400, y: 0, w: 40, h: 30 }
+      ], 3.2, 7.7), '#122438', 812, 0.34, 738);
+
+      /* 最近：几乎全黑的一条，把湖和山分开 */
+      iceRidge(g, iceRidgePts(842, [
+        { x: 100, y: 0, w: 240, h: 34 }, { x: 430, y: 0, w: 260, h: 40 },
+        { x: 760, y: 0, w: 220, h: 28 }, { x: 1060, y: 0, w: 270, h: 42 },
+        { x: 1350, y: 0, w: 240, h: 32 }
+      ], [
+        { x: 220, y: 0, w: 40, h: 20 }, { x: 500, y: 0, w: 44, h: 24 },
+        { x: 640, y: 0, w: 26, h: 16 }, { x: 900, y: 0, w: 36, h: 18 },
+        { x: 1180, y: 0, w: 46, h: 26 }, { x: 1420, y: 0, w: 32, h: 18 }
+      ], 2.0, 11.3), '#0a1626', 842, 0.16, 802);
+
+      /* 山脚的雾：把中景和冰湖之间糊一层，不然两排山都浮着 */
+      g.fillStyle = lin(g, 0, 760, 0, 850, [
+        0, 'rgba(126,164,200,0)', 0.55, 'rgba(112,158,196,.13)', 1, 'rgba(96,140,178,.04)'
+      ]);
+      g.fillRect(0, 760, W, 90);
+
+      /* ================= 冰湖 ================= */
+      g.fillStyle = lin(g, 0, ICE.lakeTop, 0, ICE.lakeBot, [
+        0, '#1c4058', 0.30, '#17364c', 0.68, '#102838', 1, '#0c1e2b'
+      ]);
+      g.fillRect(0, ICE.lakeTop, W, ICE.lakeBot - ICE.lakeTop);
+
+      /* 极光倒映在冰面上：一层一层很淡的横光，靠岸最近的那几条最亮 */
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      for (var wr = 0; wr < 12; wr++) {
+        var wy = ICE.lakeTop + 4 + wr * 7.6;
+        var wa = 0.075 - wr * 0.0052;
+        if (wa <= 0) break;
+        g.fillStyle = 'rgba(112,236,204,' + wa.toFixed(3) + ')';
+        g.beginPath();
+        g.ellipse(700 + Math.sin(wr * 0.9) * 90, wy, 660 - wr * 34, 2.4 + wr * 0.12, 0, 0, 7);
+        g.fill();
+      }
+      bloom(g, 700, ICE.lakeTop + 8, 480, 'rgba(74,214,186,.13)', 1);
+      g.restore();
+
+      /* 冰面的裂纹：横着顺几条，偶尔分个岔 */
+      if (full) {
+        g.strokeStyle = 'rgba(214,240,255,.30)'; g.lineWidth = 1.1;
+        for (var cr = 0; cr < 12; cr++) {
+          var cxx = 30 + cr * 130 + (cr % 3) * 17;
+          var cyy = ICE.lakeTop + 14 + (cr % 4) * 19;
+          g.beginPath();
+          g.moveTo(cxx, cyy);
+          g.lineTo(cxx + 34, cyy + 5);
+          g.lineTo(cxx + 62, cyy - 2);
+          g.lineTo(cxx + 88, cyy + 4);
+          g.stroke();
+          if (cr % 3 === 0) {
+            g.beginPath();
+            g.moveTo(cxx + 34, cyy + 5);
+            g.lineTo(cxx + 46, cyy + 16);
+            g.stroke();
+          }
+        }
+      }
+
+      /* 碎冰 */
+      var rw2 = seeded(88);
+      for (var fl = 0; fl < (full ? 54 : 12); fl++) {
+        var fx2 = rw2() * W, fy2 = ICE.lakeTop + 8 + rw2() * 76;
+        var fw2 = 4 + rw2() * 15;
+        g.fillStyle = 'rgba(226,244,255,' + (0.14 + rw2() * 0.36).toFixed(3) + ')';
+        g.beginPath();
+        g.ellipse(fx2, fy2, fw2, fw2 * 0.24, rw2() * 0.4, 0, 7);
+        g.fill();
+      }
+      /* 浮着的冰山：近大远小 */
+      icefloe(g, 250, 852, 74, 46, 5);
+      icefloe(g, 556, 866, 58, 34, 9);
+      icefloe(g, 792, 856, 86, 52, 13);
+      icefloe(g, 1150, 870, 66, 40, 21);
+      icefloe(g, 1400, 852, 52, 30, 27);
+      /* 靠岸的冰排：贴着水边的一条白 */
+      g.fillStyle = 'rgba(232,246,255,.62)';
+      for (var isl = 0; isl < 16; isl++) {
+        var ix = -20 + isl * 98 + rnd() * 40;
+        lens(g, ix, ICE.lakeBot - 3 + rnd() * 4, 32 + rnd() * 34, 4 + rnd() * 3, 0);
+        g.fill();
+      }
+
+      /* ================= 左：一条压进湖里的冰川 =================
+         先画湖再画冰：冰舌是探进水里的，若先画冰再盖水，
+         冰就只剩水面以上一条白边（上一版就是那样，看着像一道白线）。
+         造型走「低多边形冰体」——几块大折面 + 亮棱，
+         和这个游戏其它地图的平面画风一致，也比画一堆弧线更像冰。 */
+      function icePoly(pts, fill) {
+        g.beginPath();
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (var i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+        g.closePath();
+        g.fillStyle = fill; g.fill();
+      }
+      var GL_OUT = [[560, 764], [640, 772], [712, 796], [748, 824], [742, 858],
+        [700, 872], [640, 880], [560, 882], [480, 878], [410, 870],
+        [356, 858], [316, 832], [318, 800], [368, 778], [452, 768]];
+      icePoly(GL_OUT, lin(g, 430, 760, 640, 882, [
+        0, '#ffffff', 0.30, '#eaf8ff', 0.62, '#c6e2f5', 1, '#84b6d6'
+      ]));
+      g.save();
+      g.beginPath();
+      g.moveTo(GL_OUT[0][0], GL_OUT[0][1]);
+      for (var gi = 1; gi < GL_OUT.length; gi++) g.lineTo(GL_OUT[gi][0], GL_OUT[gi][1]);
+      g.closePath(); g.clip();
+      /* 折面：每块一个冷暖，明暗拉开，冰的体积就出来了 */
+      icePoly([[452, 768], [560, 764], [640, 772], [712, 796], [556, 828]], 'rgba(255,255,255,.56)');
+      icePoly([[556, 828], [712, 796], [748, 824], [742, 858], [660, 868]], 'rgba(40,94,142,.32)');
+      icePoly([[368, 778], [452, 768], [556, 828], [470, 856]], 'rgba(120,172,210,.15)');
+      icePoly([[470, 856], [660, 868], [640, 880], [480, 878], [410, 870]], 'rgba(26,74,120,.40)');
+      icePoly([[318, 800], [368, 778], [470, 856], [410, 870], [356, 858], [316, 832]], 'rgba(240,252,255,.46)');
+      /* 竖向的冰棱：冰舌表面被拉出来的一道道沟 */
+      g.strokeStyle = 'rgba(255,255,255,.40)'; g.lineWidth = 1.3;
+      var flute = [400, 442, 486, 528, 572, 618, 664];
+      for (var fl2 = 0; fl2 < flute.length; fl2++) {
+        g.beginPath();
+        g.moveTo(flute[fl2] + 6, 772 + (fl2 % 3) * 6);
+        g.lineTo(flute[fl2] - 4, 862 + (fl2 % 2) * 8);
+        g.stroke();
+      }
+      /* 冰裂隙：短、直、带一点折角，不要画成弧（弯的会看成笑脸） */
+      g.strokeStyle = 'rgba(44,96,142,.32)'; g.lineWidth = 1.5;
+      for (var gc = 0; gc < 8; gc++) {
+        var gx2 = 350 + ((gc * 57) % 330), gy2 = 812 + ((gc * 31) % 54);
+        g.beginPath();
+        g.moveTo(gx2, gy2);
+        g.lineTo(gx2 + 14, gy2 + 5 + (gc % 3));
+        g.lineTo(gx2 + 30, gy2 + 1);
+        g.stroke();
+      }
+      /* 冰洞：不是「一个黑眼珠」，而是一块凹进去的深蓝 —— 边缘软、里面也没有死黑 */
+      var cav = g.createRadialGradient(392, 848, 8, 392, 852, 54);
+      cav.addColorStop(0, 'rgba(26,88,116,.34)');
+      cav.addColorStop(0.55, 'rgba(30,96,126,.16)');
+      cav.addColorStop(1, 'rgba(34,104,134,0)');
+      g.fillStyle = cav;
+      g.beginPath(); g.ellipse(392, 850, 58, 30, -0.10, 0, 7); g.fill();
+      g.restore();
+      /* 冰舌边缘的亮边 */
+      g.strokeStyle = 'rgba(248,255,255,.66)'; g.lineWidth = 1.8;
+      g.beginPath();
+      g.moveTo(452, 768); g.lineTo(560, 764); g.lineTo(640, 772); g.lineTo(712, 796);
+      g.stroke();
+      /* 入水处：一圈更深的蓝 + 一层倒影 */
+      g.fillStyle = 'rgba(30,84,126,.36)';
+      g.beginPath();
+      g.moveTo(316, 832); g.lineTo(356, 858); g.lineTo(410, 870); g.lineTo(480, 878);
+      g.lineTo(560, 882); g.lineTo(640, 880); g.lineTo(700, 872); g.lineTo(742, 858);
+      g.lineTo(742, 898); g.lineTo(316, 898);
+      g.closePath(); g.fill();
+
+      /* ================= 右：一整面冰崖 =================
+         不用一排尖齿（那会像白栅栏）：顶边是一条连着的崖脊，
+         靠不规则间距的竖冰裂 + 明暗分块做出「一整面墙」。 */
+      var CF_TOP = [[896, 822], [940, 800], [986, 778], [1040, 762], [1096, 750],
+        [1152, 738], [1206, 732], [1262, 738], [1318, 748], [1372, 754],
+        [1428, 758], [1472, 764], [1512, 758]];
+      g.beginPath();
+      g.moveTo(896, 878);
+      g.lineTo(896, 818);
+      for (var cf = 1; cf < CF_TOP.length; cf++) g.lineTo(CF_TOP[cf][0], CF_TOP[cf][1]);
+      g.lineTo(1512, 878);
+      g.closePath();
+      var cliff = g.createLinearGradient(0, 716, 0, 878);
+      cliff.addColorStop(0, '#fbfeff');
+      cliff.addColorStop(0.26, '#e8f6fe');
+      cliff.addColorStop(0.66, '#bcdcf1');
+      cliff.addColorStop(1, '#6ba3c6');
+      g.fillStyle = cliff; g.fill();
+      g.save();
+      g.clip();
+      /* 折面：冰崖也用「几块大折面 + 亮棱」来画。
+         竖条纹会像铁皮瓦/栅栏，纯白渐变会像一顶帐篷——
+         折面才有体积，也和左边那条冰川是一套画法。 */
+      var bx = [896, 992, 1082, 1176, 1270, 1382, 1512];
+      var bsk = [0, 16, -12, 20, -14, 9, 0];
+      for (var bi = 0; bi < 6; bi++) {
+        var t0 = [bx[bi], 698], t1 = [bx[bi + 1], 698];
+        var b1 = [bx[bi + 1] + bsk[bi + 1], 892], b0 = [bx[bi] + bsk[bi], 892];
+        icePoly([t0, t1, b1, b0], bi % 2
+          ? 'rgba(255,255,255,.17)'
+          : 'rgba(40,94,140,.15)');
+        g.strokeStyle = 'rgba(255,255,255,.42)'; g.lineWidth = 1.6;
+        g.beginPath();
+        g.moveTo(t0[0], t0[1]); g.lineTo(b0[0], b0[1]);
+        g.stroke();
+      }
+      /* 靠下才有的几道短竖沟：冰壁脚下被水啃出来的痕 */
+      g.strokeStyle = 'rgba(40,94,140,.20)'; g.lineWidth = 2.2;
+      for (var gq = 0; gq < 9; gq++) {
+        var qx = 910 + gq * 68 + ((gq * 37) % 23);
+        g.beginPath();
+        g.moveTo(qx, 824 + (gq % 3) * 9);
+        g.lineTo(qx + (gq % 2 ? 5 : -4), 880);
+        g.stroke();
+      }
+      /* 横向的冰层：很淡的几道，说明冰是一层层积的 */
+      g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1.4;
+      for (var ly = 0; ly < 5; ly++) {
+        var lyy = 776 + ly * 20;
+        g.beginPath();
+        g.moveTo(896, lyy + Math.sin(ly) * 4);
+        g.quadraticCurveTo(1200, lyy - 5, 1512, lyy + 3);
+        g.stroke();
+      }
+      /* 贴水的那一截更蓝 */
+      g.fillStyle = lin(g, 0, 830, 0, 878, [0, 'rgba(52,118,164,0)', 1, 'rgba(32,90,136,.66)']);
+      g.fillRect(896, 830, 620, 50);
+      g.restore();
+      /* 崖顶的雪 */
+      g.strokeStyle = 'rgba(252,255,255,.78)'; g.lineWidth = 2.2;
+      g.beginPath();
+      g.moveTo(896, 818);
+      for (var ct = 1; ct < CF_TOP.length; ct++) g.lineTo(CF_TOP[ct][0], CF_TOP[ct][1]);
+      g.stroke();
+
+      /* 崩下来的冰块：浮在冰舌和冰崖前面 */
+      icefloe(g, 330, 886, 26, 13, 41);
+      icefloe(g, 742, 880, 22, 11, 43);
+      icefloe(g, 862, 870, 30, 15, 47);
+      icefloe(g, 1470, 884, 24, 12, 49);
+
+      /* ================= 岸：黑色火山砂 =================
+         这一段整体压在 892~1060 这 170 个单位里，1060 往下只留一层渐到全黑的砂，
+         给镜头一点余量：地图太高时人会贴在最底下，天也就留不住。 */
+      g.fillStyle = lin(g, 0, ICE.shoreTop, 0, 1140, [
+        0, '#26262c', 0.16, '#1d1e23', 0.44, '#151619', 0.74, '#0f1013', 1, '#08090c'
+      ]);
+      g.beginPath();
+      g.moveTo(-10, 1150);
+      g.lineTo(-10, ICE.shoreTop + 4);
+      g.bezierCurveTo(240, ICE.shoreTop - 6, 470, ICE.shoreTop + 12, 700, ICE.shoreTop);
+      g.bezierCurveTo(920, ICE.shoreTop - 12, 1150, ICE.shoreTop + 14, 1360, ICE.shoreTop);
+      g.bezierCurveTo(1430, ICE.shoreTop - 5, 1480, ICE.shoreTop + 4, 1510, ICE.shoreTop - 2);
+      g.lineTo(1510, 1150);
+      g.closePath();
+      g.fill();
+      /* 贴着水的那一条湿砂，比别处深 */
+      g.fillStyle = 'rgba(6,10,16,.42)';
+      g.beginPath();
+      g.moveTo(-10, ICE.shoreTop + 6);
+      g.bezierCurveTo(240, ICE.shoreTop - 4, 470, ICE.shoreTop + 14, 700, ICE.shoreTop + 2);
+      g.bezierCurveTo(920, ICE.shoreTop - 10, 1150, ICE.shoreTop + 16, 1360, ICE.shoreTop + 2);
+      g.bezierCurveTo(1430, ICE.shoreTop - 3, 1480, ICE.shoreTop + 6, 1510, ICE.shoreTop);
+      g.lineTo(1510, ICE.shoreTop + 24);
+      g.bezierCurveTo(1200, ICE.shoreTop + 36, 900, ICE.shoreTop + 24, 600, ICE.shoreTop + 32);
+      g.bezierCurveTo(300, ICE.shoreTop + 40, 100, ICE.shoreTop + 24, -10, ICE.shoreTop + 30);
+      g.closePath();
+      g.fill();
+
+      /* 岸上的雪：贴着水先铺一条连续的雪带，再往里有几片被风吹散的积雪。
+         注意两点——① 雪要白：低透明度的白压在黑砂上只会变成灰，
+         看着像一摊水洼；② 形状要长、要薄，「被风吹出来的一层」不是一堆圆饼。 */
+      g.save();
+      g.lineJoin = 'round'; g.lineCap = 'round';
+      g.strokeStyle = 'rgba(224,240,254,.92)'; g.lineWidth = 19;
+      g.beginPath();
+      g.moveTo(-20, ICE.shoreTop + 9);
+      g.bezierCurveTo(240, ICE.shoreTop - 1, 470, ICE.shoreTop + 17, 700, ICE.shoreTop + 5);
+      g.bezierCurveTo(920, ICE.shoreTop - 7, 1150, ICE.shoreTop + 19, 1360, ICE.shoreTop + 5);
+      g.bezierCurveTo(1430, ICE.shoreTop, 1480, ICE.shoreTop + 9, 1520, ICE.shoreTop + 3);
+      g.stroke();
+      /* 雪带不能是一条完美平行线：压几块黑砂回去，让它断断续续 */
+      g.fillStyle = 'rgba(22,23,27,.55)';
+      for (var bk = 0; bk < (full ? 16 : 5); bk++) {
+        lens(g, rnd() * W, ICE.shoreTop + 3 + rnd() * 14, 16 + rnd() * 40, 3 + rnd() * 5, 0);
+        g.fill();
+      }
+      /* 往里的积雪：一片一片，薄、长、边缘收尖。
+         雪一定要够白——低透明的白压在黑砂上只会变成一块灰色水洼。 */
+      for (var sp2 = 0; sp2 < (full ? 11 : 3); sp2++) {
+        var sx3 = -40 + sp2 * 142 + rnd() * 60;
+        var sy3 = ICE.shoreTop + 12 + rnd() * 118;
+        var sw3 = 60 + rnd() * 96, sh3 = 6 + rnd() * 7;
+        g.fillStyle = 'rgba(46,84,126,.20)';
+        lens(g, sx3 + 6, sy3 + sh3 * 0.8, sw3, sh3 * 0.7, 0);
+        g.fill();
+        g.fillStyle = 'rgba(238,249,255,' + (0.74 + rnd() * 0.22).toFixed(2) + ')';
+        lens(g, sx3, sy3, sw3, sh3, (rnd() - 0.5) * 0.05);
+        g.fill();
+      }
+      /* 几道被风拉长的雪痕 */
+      g.strokeStyle = 'rgba(226,242,254,.24)'; g.lineWidth = 1.6;
+      if (full) {
+        for (var wk = 0; wk < 9; wk++) {
+          var wkx = rnd() * W, wky = ICE.shoreTop + 22 + rnd() * 140;
+          g.beginPath();
+          g.moveTo(wkx - 70, wky);
+          g.quadraticCurveTo(wkx, wky - 5, wkx + 90, wky + 2);
+          g.stroke();
+        }
+      }
+      g.restore();
+      /* 雪里露出来的黑砂：细长的斑，别摆成均匀的点 */
+      for (var sp = 0; sp < (full ? 34 : 9); sp++) {
+        g.fillStyle = 'rgba(18,19,24,' + (0.12 + rnd() * 0.26).toFixed(3) + ')';
+        lens(g, rnd() * W, ICE.shoreTop + 10 + rnd() * 150, 18 + rnd() * 56, 3 + rnd() * 7, 0);
+        g.fill();
+      }
+      /* 风吹出来的砂纹：很淡的横线，给地面一点朝向 */
+      if (full) {
+        g.strokeStyle = 'rgba(150,158,176,.055)'; g.lineWidth = 1.4;
+        for (var wl = 0; wl < 14; wl++) {
+          var wy2 = ICE.shoreTop + 14 + wl * 11;
+          var wo = rnd() * 300;
+          g.beginPath();
+          g.moveTo(wo - 120, wy2);
+          g.quadraticCurveTo(wo + 120, wy2 - 4, wo + 360, wy2 + 1);
+          g.stroke();
+        }
+      }
+
+      /* ================= 木栈台 ================= */
+      deck(g, 616, 942, 168, 1.2);      // 观景台（view 就在这里）
+      deck(g, 906, 984, 104, 0.9);      // 另一处矮木台（合影用）
+
+      /* ================= 玄武岩 ================= */
+      function boulder(bx, by, bw2, bh2, seed) {
+        var rb = seeded(seed);
+        g.fillStyle = 'rgba(3,5,9,.50)';
+        g.beginPath(); g.ellipse(bx + bw2 / 2, by + bh2 - 1, bw2 * 0.58, bh2 * 0.24, 0, 0, 7); g.fill();
+        g.beginPath();
+        g.moveTo(bx, by + bh2);
+        g.lineTo(bx + bw2 * 0.04, by + bh2 * 0.40);
+        g.lineTo(bx + bw2 * 0.30, by);
+        g.lineTo(bx + bw2 * 0.68, by + bh2 * 0.11);
+        g.lineTo(bx + bw2, by + bh2 * 0.48);
+        g.lineTo(bx + bw2, by + bh2);
+        g.closePath();
+        var bg2 = g.createLinearGradient(bx, by, bx, by + bh2);
+        bg2.addColorStop(0, '#3a3e47');
+        bg2.addColorStop(1, '#121418');
+        g.fillStyle = bg2; g.fill();
+        /* 雪帽 */
+        g.fillStyle = 'rgba(238,249,255,.95)';
+        g.beginPath();
+        g.moveTo(bx + bw2 * 0.06, by + bh2 * 0.40);
+        g.lineTo(bx + bw2 * 0.30, by + 1);
+        g.lineTo(bx + bw2 * 0.68, by + bh2 * 0.13);
+        g.lineTo(bx + bw2 * 0.58, by + bh2 * 0.26);
+        g.lineTo(bx + bw2 * 0.32, by + bh2 * 0.16);
+        g.closePath(); g.fill();
+        /* 石面细裂纹 */
+        g.strokeStyle = 'rgba(178,188,204,.16)'; g.lineWidth = 1;
+        for (var kk = 0; kk < 3; kk++) {
+          g.beginPath();
+          g.moveTo(bx + bw2 * (0.2 + rb() * 0.5), by + bh2 * 0.55);
+          g.lineTo(bx + bw2 * (0.3 + rb() * 0.5), by + bh2 * 0.88);
+          g.stroke();
+        }
+      }
+      boulder(382, 918, 96, 44, 6);
+      boulder(1052, 940, 90, 42, 8);
+      boulder(70, 986, 122, 52, 15);
+      boulder(1424, 1000, 96, 40, 19);
+
+      /* 岸边的碎冰：几块被冲上来的蓝冰，给前景一点颜色 */
+      icefloe(g, 262, 934, 34, 18, 33);
+      icefloe(g, 836, 962, 26, 14, 35);
+      icefloe(g, 1160, 976, 30, 16, 37);
+
+      /* 右端那片矮岩台 */
+      g.fillStyle = '#191b20';
+      g.beginPath();
+      g.moveTo(1362, 1022);
+      g.lineTo(1362, 982); g.lineTo(1392, 968); g.lineTo(1434, 973);
+      g.lineTo(1476, 964); g.lineTo(1494, 976); g.lineTo(1494, 1022);
+      g.closePath();
+      g.fill();
+      g.fillStyle = 'rgba(232,244,253,.88)';
+      g.beginPath();
+      g.moveTo(1362, 982); g.lineTo(1392, 968); g.lineTo(1434, 973);
+      g.lineTo(1476, 964); g.lineTo(1494, 976); g.lineTo(1494, 986);
+      g.lineTo(1476, 975); g.lineTo(1434, 984); g.lineTo(1392, 979);
+      g.closePath();
+      g.fill();
+
+      /* 木头界桩 + 反光条 */
+      function stake(sx2, sy2, s2) {
+        g.strokeStyle = 'rgba(4,6,10,.45)'; g.lineWidth = 4 * s2;
+        g.beginPath(); g.moveTo(sx2 + 2, sy2 + 2); g.lineTo(sx2 + 2, sy2 - 32 * s2); g.stroke();
+        g.strokeStyle = '#6a5744'; g.lineWidth = 3.2 * s2;
+        g.beginPath(); g.moveTo(sx2, sy2); g.lineTo(sx2, sy2 - 32 * s2); g.stroke();
+        g.fillStyle = 'rgba(238,248,255,.9)';
+        g.beginPath(); g.ellipse(sx2, sy2 - 32 * s2, 3.2 * s2, 1.7 * s2, 0, 0, 7); g.fill();
+        g.fillStyle = 'rgba(230,238,246,.55)';
+        g.fillRect(sx2 - 1.5 * s2, sy2 - 21 * s2, 3 * s2, 5.4 * s2);
+      }
+      stake(238, 972, 1);
+      stake(296, 978, 1);
+      stake(862, 966, 1);
+
+      /* 雪地里的小草：几撮就够 */
+      var rt = seeded(41);
+      for (var tf = 0; tf < (full ? 20 : 6); tf++) {
+        var tfx = 60 + rt() * 1380, tfy = 906 + rt() * 110;
+        if (tfy < 940 && tfx > 600 && tfx < 820) continue;
+        if (tfx > 1350 && tfy > 950) continue;
+        tuft(g, tfx, tfy, 0.7 + rt() * 0.5, 'rgba(146,136,106,.45)');
+      }
+      /* 一串脚印，从木栈台往右走 */
+      if (full) {
+        for (var fp = 0; fp < 13; fp++) {
+          var fpx = 796 + fp * 24, fpy = 918 + Math.sin(fp * 0.9) * 8 + fp * 2.0;
+          g.fillStyle = 'rgba(126,150,174,.22)';
+          g.beginPath(); g.ellipse(fpx, fpy, 3.2, 1.8, 0.3, 0, 7); g.fill();
+          g.beginPath(); g.ellipse(fpx + 7.5, fpy + 3.6, 3.2, 1.8, 0.3, 0, 7); g.fill();
+        }
+      }
+
+      /* 回小镇的路牌 */
+      g.fillStyle = 'rgba(3,7,12,.45)';
+      g.beginPath(); g.ellipse(182, 970, 24, 6.5, 0, 0, 7); g.fill();
+      g.fillStyle = '#5a4a38'; g.fillRect(176, 890, 8, 80);
+      g.fillStyle = '#c9b79c';
+      g.beginPath();
+      g.moveTo(182, 896); g.lineTo(266, 900); g.lineTo(254, 918); g.lineTo(182, 916);
+      g.closePath(); g.fill();
+      g.strokeStyle = 'rgba(30,26,20,.55)'; g.lineWidth = 1.6; g.stroke();
+      text(g, '小镇', 220, 913, 14, '#2a241c');
+      g.fillStyle = 'rgba(238,248,255,.9)';
+      g.beginPath(); g.ellipse(180, 886, 11, 3.6, 0, 0, 7); g.fill();
+
+      if (full) {
+        vignette(g, 0.34, 'rgba(3,8,18,.46)');
+        grain(g, 900, 17);
+      }
+    },
+    anim: function (ctx, t) {
+      /* 极光在动：半分辨率的一张图，每帧一次 drawImage。 */
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var spr = auroraSprite();
+      var dx = Math.sin(t / 12000) * 26;
+      var dy = Math.sin(t / 7700 + 1.2) * 7;
+      ctx.globalAlpha = 0.40 + 0.08 * Math.sin(t / 6300);
+      ctx.drawImage(spr, dx, AUR_TOP + dy, 1520, AUR_BOT - AUR_TOP);
+      ctx.restore();
+
+      /* 星光呼吸：只挑十几颗 */
+      ctx.save();
+      for (var i = 0; i < 14; i++) {
+        var sx = 50 + i * 104;
+        var sy = 50 + ((i * 173) % 460);
+        var a = 0.13 + 0.19 * (0.5 + 0.5 * Math.sin(t / 1500 + i * 1.7));
+        ctx.fillStyle = 'rgba(226,242,255,' + a.toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(sx, sy, 1.4, 0, 7); ctx.fill();
+      }
+      ctx.restore();
+
+      /* 冰面上的微光：贴着水走 */
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (var k = 0; k < 8; k++) {
+        var wx = 110 + k * 186 + Math.sin(t / 2800 + k) * 14;
+        var wa = 0.05 + 0.05 * Math.sin(t / 2000 + k * 2.1);
+        ctx.fillStyle = 'rgba(190,255,236,' + Math.max(0, wa).toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.ellipse(wx, 812 + (k % 3) * 17, 46, 3.2, 0, 0, 7);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      /* 雪：很少的几片 */
+      ctx.save();
+      for (var f = 0; f < 26; f++) {
+        var fx = ((t / 52 + f * 141) % 1620) - 60;
+        var fy = 140 + ((f * 73 + Math.sin(t / 2600 + f) * 24) % 960);
+        var fa = 0.10 + 0.22 * ((f % 5) / 5);
+        ctx.fillStyle = 'rgba(240,250,255,' + fa.toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(fx, fy, 0.9 + (f % 3) * 0.5, 0, 7); ctx.fill();
+      }
+      ctx.restore();
+
+      /* 动态层的两个小色块：站着、不动、不参与碰撞，也没有提示与标签。
+         画在动态层而不是背景里，所以缩略图和合影里都不会出现。 */
+      ctx.save();
+      var br = Math.sin(t / 2300) * 0.5;
+      [[1398, 0], [1428, 1]].forEach(function (p, pi) {
+        var px = p[0], py = 1018 + (p[1] ? 2 : 0);
+        ctx.fillStyle = 'rgba(3,6,11,.40)';
+        ctx.beginPath(); ctx.ellipse(px, py + 1, 9, 2.6, 0, 0, 7); ctx.fill();
+        /* 大衣（背对） */
+        ctx.fillStyle = pi ? '#161c27' : '#1c222c';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(px - 6.2, py - 27 + br * 0.3, 12.4, 27, 3.8);
+        else ctx.rect(px - 6.2, py - 27 + br * 0.3, 12.4, 27);
+        ctx.fill();
+        /* 肩 */
+        ctx.beginPath(); ctx.arc(px, py - 27.5 + br * 0.3, 5.6, Math.PI, 0); ctx.fill();
+        /* 头 */
+        ctx.fillStyle = '#242832';
+        ctx.beginPath(); ctx.arc(px, py - 35 + br * 0.3, 4.8, 0, 7); ctx.fill();
+        /* 极光打在肩上的一点边光 */
+        ctx.strokeStyle = 'rgba(150,255,214,.34)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(px, py - 35 + br * 0.3, 4.8, Math.PI * 1.06, Math.PI * 1.58);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(px - 6, py - 22 + br * 0.3);
+        ctx.lineTo(px - 6, py - 6 + br * 0.3);
+        ctx.stroke();
+      });
+      /* 脚边一盏小灯 */
+      bloom(ctx, 1413, 1030, 26, 'rgba(255,214,150,.26)', 1);
+      ctx.fillStyle = 'rgba(255,232,180,.8)';
+      ctx.beginPath(); ctx.arc(1413, 1030, 2, 0, 7); ctx.fill();
+      ctx.restore();
     }
   };
 

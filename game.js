@@ -372,7 +372,7 @@ window.Game = (function () {
   function takeAddrToday() {
     if (addrToday()) { toast('📬 今天的信已经给过你了，明天再来', 2800); return; }
     var pool = unknownPlaces();
-    if (!pool.length) { toast('📬 所有地址都收齐了——41 个地方，一个不剩', 3400); return; }
+    if (!pool.length) { toast('📬 所有地址都收齐了——' + ((T() && T().count) || 41) + ' 个地方，一个不剩', 3400); return; }
     var ds = parseInt(dayStr().replace(/-/g, ''), 10) || 0;
     var pl = pool[ds % pool.length];
     mutate(function (w) {
@@ -727,7 +727,7 @@ window.Game = (function () {
       prog: function () {
         return '树 ' + ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
           ' · 回忆 ' + Math.min(11, foundCount()) + '/11 · 产物 ' + Math.min(3, ranchGoodsCount()) + '/3' +
-          ' · 特产 ' + Math.min(6, specCount()) + '/6';
+          ' · 特产 ' + specCount() + '/' + ((T() && T().count) || 41);
       } }
   ];
 
@@ -1252,6 +1252,18 @@ window.Game = (function () {
   function zoomNow() {
     var mp = curMap();
     if (!mp) return 1;
+    /* v4.4：有的地图（冰岛）主角是天空。
+       fitSky = 希望「一屏看到多少个世界单位高」：
+         太高的窗口（竖屏）不会被放大到看不出比例，太矮的窗口（横屏）也会缩一点，
+       最终夹在 minZoom~maxZoom 之间。
+       注意不要用「刚好装下整张 h」——那样整张图一览无余，人只有十来个像素，
+       而且远处的东西一眼就在画面里了。 */
+    if (mp.fitSky) {
+      var z2 = S.view.h / mp.fitSky;
+      z2 = Math.min(z2, mp.maxZoom || MAP_ZOOM);
+      z2 = Math.max(z2, mp.minZoom || MAP_ZOOM);
+      return z2;
+    }
     return mp.zoom || MAP_ZOOM;
   }
 
@@ -1415,8 +1427,11 @@ window.Game = (function () {
        这样整张地图的高度能一次看全，不再只看到一条横带。 */
     var zi2 = zoomNow();
     var vwW = S.view.w / zi2, vhW = S.view.h / zi2;
+    /* camBias：玩家在竖直方向上落在画面的第几成（0.5 = 正中）。
+       主角是天空的地图会调大到 0.7，人压低一点，上半屏留给天。 */
+    var bias = (mp2 && mp2.camBias) || 0.5;
     var targetCx = S.self.x - vwW / 2;
-    var targetCy = S.self.y - vhW / 2;
+    var targetCy = S.self.y - vhW * bias;
     S.cam.x = iw2 <= vwW ? (iw2 - vwW) / 2 : Math.max(0, Math.min(iw2 - vwW, targetCx));
     S.cam.y = ih2 <= vhW ? (ih2 - vhW) / 2 : Math.max(0, Math.min(ih2 - vhW, targetCy));
   }
@@ -2064,7 +2079,7 @@ window.Game = (function () {
       }
       return best;
     }
-    World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, '💬 和 ' + n.name + ' 交谈', n); });
+    World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, '💬 和' + n.name + '交谈', n); });
     /* 牧场：三只动物 + 干草垛 */
     if (World.animals) {
       World.animals.forEach(function (a) { consider('ranch', a.x, a.y - 18, 64, ranchLabel(a), a); });
@@ -2099,6 +2114,17 @@ window.Game = (function () {
   function doInteract() {
     if (!S.curInteract) return;
     var it = S.curInteract;
+    try {
+      doInteractInner(it);
+    } catch (err) {
+      /* 一个互动出错不该让玩家「点了没反应」：写进控制台，同时给一句人话，
+         并把这次互动从当前状态里清掉，下一次重新判定。 */
+      if (window.console && console.error) console.error('[interact]', it && it.type, err);
+      S.curInteract = null;
+      toast('这一步没走通，再试一次 ✦', 2600);
+    }
+  }
+  function doInteractInner(it) {
     if (it.type === 'npc') {
       /* 邮差不是只说话：他手上有一整个信袋（回信 / 地址 / 委托） */
       if (it.ref.id === 'postman') {
@@ -2110,10 +2136,14 @@ window.Game = (function () {
         return;
       }
       var stage = treeStage();
-      var lines = (stage >= 2 && it.ref.lateLines) ? it.ref.lateLines : it.ref.lines;
+      var pool = (stage >= 2 && it.ref.lateLines && it.ref.lateLines.length) ? it.ref.lateLines : it.ref.lines;
+      if (!pool || !pool.length) pool = ['……'];
       var idx = (S.npcIdx[it.ref.id] || 0);
-      var commLine = talkComm(it.ref.id);
-      openDialog(it.ref.name, commLine ? [lines[idx % lines.length], commLine] : lines[idx % lines.length]);
+      /* 委托那句是「附加」的：它自己出问题，也不能把正常对话一起拖没 */
+      var commLine = null;
+      try { commLine = talkComm(it.ref.id); } catch (e) { if (window.console) console.warn('[comm]', it.ref.id, e); }
+      var first = pool[idx % pool.length];
+      openDialog(it.ref.name, commLine ? [first, commLine] : [first]);
       S.npcIdx[it.ref.id] = idx + 1;
       if (!S.quest.talked[it.ref.id]) {
         S.quest.talked[it.ref.id] = 1;
@@ -2324,6 +2354,11 @@ window.Game = (function () {
     TravelMaps.list().forEach(function (d) { if (hasTicket(d.id)) n++; });
     return n;
   }
+  /* 一共几张票 = 一共几张地图。v4.4 加了冰岛，所有「/ 6」的文案都改走这里，
+     以后再加地图不会再出现「7 张票 / 6」这种数字。 */
+  function ticketTotal() {
+    return (window.TravelMaps && TravelMaps.list().length) || 6;
+  }
 
   /* 条件满足就补票；已去过的城市也补票（老存档迁移，绝不让玩过的地方退回去锁住） */
   function syncTickets() {
@@ -2392,7 +2427,7 @@ window.Game = (function () {
     if (window.TravelMaps) {
       TravelMaps.list().forEach(function (d) { (hasTicket(d.id) ? owned : locked).push(d.name); });
     }
-    lines.push('<div class="admin-sec"><b>车票</b><span>' + owned.length + ' / 6' +
+    lines.push('<div class="admin-sec"><b>车票</b><span>' + owned.length + ' / ' + ticketTotal() +
       (locked.length ? '　未获得：' + esc(locked.join('、')) : '　全部到手') + '</span></div>');
 
     var found = foundCount();
@@ -2445,7 +2480,7 @@ window.Game = (function () {
         w.tickets = w.tickets || {};
         TravelMaps.list().forEach(function (d) { if (!w.tickets[d.id]) w.tickets[d.id] = Date.now(); });
         return w;
-      }).then(function () { renderAdminStatus(); toast('🎫 六张车票都补上了'); });
+      }).then(function () { renderAdminStatus(); toast('🎫 车票全补上了 · ' + ticketTotal() + ' 张'); });
     } else if (kind === 'memories') {
       mutate(function (w) {
         w.quest = w.quest || {};
@@ -2628,11 +2663,11 @@ window.Game = (function () {
 
     var n = ticketOwnedCount();
     var sub = $('#station-sub');
-    if (sub) sub.textContent = '车票 ' + n + ' / 6';
+    if (sub) sub.textContent = '车票 ' + n + ' / ' + ticketTotal();
     var note = $('#station-note');
     if (note) {
       note.textContent = n >= 6
-        ? '六张票都到手了。想去哪儿，就挑一张。'
+        ? ticketTotal() + ' 张票都到手了。想去哪儿，就挑一张。'
         : '有票的方向才能上车。没票的那几张，先把小镇上的日子过得再热闹一点。';
     }
     $('#station-panel').classList.remove('hidden');
@@ -2669,9 +2704,9 @@ window.Game = (function () {
       list.appendChild(row);
     });
     var n = ticketOwnedCount();
-    $('#ticket-count').textContent = n + ' / 6';
+    $('#ticket-count').textContent = n + ' / ' + ticketTotal();
     $('#ticket-note').textContent = n >= 6
-      ? '集齐了。六张票、六个地方，都去过一遍。'
+      ? '集齐了。' + ticketTotal() + ' 张票、' + ticketTotal() + ' 个地方，都去过一遍。'
       : '有票才能上车。每张票都只差一件小事——看看下面写的那行字。';
     $('#ticket-panel').classList.remove('hidden');
     pause();
@@ -2911,7 +2946,7 @@ window.Game = (function () {
     rows += '<div class="quest-line"><span class="quest-mark">🎄</span><span>圣诞树：' +
       ['小树苗', '已装饰', '挂上彩灯', '全树点亮'][treeStage()] +
       ' · 回忆 ' + foundCount() + ' / ' + ((window.Memories || []).length) +
-      ' · 车票 ' + ticketOwnedCount() + ' / 6' +
+      ' · 车票 ' + ticketOwnedCount() + ' / ' + ticketTotal() +
       ' · 特产 ' + specCount() + ' / ' + ((T() && T().count) || 41) +
       ' · 圣诞夜 2026-12-25（还有 ' + Math.max(0, daysToChristmas()) + ' 天）</span></div>';
 
@@ -3614,6 +3649,12 @@ window.Game = (function () {
     enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave,
     devEnterMap: devEnterMap, devStation: devStation, devInteract: devInteract,
     devIndoor: devIndoor, devLook: devLook,
+    devHit: function (x, y) { return S.dev ? hits(x, y) : null; },
+    devNear: function () {
+      if (!S.dev) return null;
+      var it = findInteract();
+      return it ? { type: it.type, label: it.label, id: (it.ref && (it.ref.id || it.ref.name)) || null } : null;
+    },
     /* v4.1 给验收脚本用的口子（只在 ?dev=1 时有意义，但本身不改变游戏行为） */
     devTicketBook: function () { openTicketBook(); },
     devBook: function () { openBook(); },

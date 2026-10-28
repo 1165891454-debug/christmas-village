@@ -36,7 +36,9 @@ window.Memories = [
   { id: 'suzhou', room: 'cabin', x: 110, y: 300, title: '苏州 · 园林与照顾', location: '江苏 · 苏州', date: '', object: 'pavilion', color: '#58b368', image: null,
     message: '那次旅行你发烧了，行程慢下来，我们在园林里坐了一下午。旅行不总是完美的，但我们会互相照顾。' },
   { id: 'yangzhou', x: 1075, y: 468, title: '扬州 · 一支牙刷', location: '江苏 · 扬州', date: '', object: 'toothbrush', color: '#a8c686', image: null,
-    message: '酒店的那支牙刷，我们一直没舍得扔。最普通的物件，留得最久。' }
+    message: '酒店的那支牙刷，我们一直没舍得扔。最普通的物件，留得最久。' },
+  { id: 'iceland', x: 150, y: 118, title: '冰岛 · 极光下的冰川', location: '冰岛', date: '', object: 'aurora', color: '#6fe3c4', map: 'iceland', image: null,
+    message: '天黑透之后，整片天开始发光。冰川一直躺在那儿，安静得像睡着了。你们站在木栈台上，谁也没先开口。' }
 ];
 
 /* ---------- 原创像素插画（每个地点一个小场景）---------- */
@@ -1964,6 +1966,104 @@ window.MemoryArt = (function () {
     bloom(g, lx4, ly4 - h * 0.08, w * 0.14, 'rgba(255,214,160,.10)', 0.8);
     vignette(g, w, h, 0.46);
     grain(g, w, h, 220, 71);
+  };
+
+  /* ============ 冰岛 · 极光下的冰川 ============ */
+  A.iceland = function (g, w, h) {
+    var s = w / 320;
+    /* 天：越靠地平线越亮一点，是极光把天托起来的 */
+    g.fillStyle = lin(g, 0, 0, 0, h, [0, '#01030a', 0.34, '#05101f', 0.62, '#0a2138', 1, '#123a56']);
+    g.fillRect(0, 0, w, h);
+    /* 星 */
+    var rs = seeded(4127);
+    for (var i = 0; i < 110; i++) {
+      var sx = rs() * w, sy = Math.pow(rs(), 0.8) * h * 0.56;
+      g.fillStyle = 'rgba(226,240,255,' + (0.18 + rs() * 0.62) * (1 - sy / (h * 0.9)) + ')';
+      g.fillRect(sx, sy, 1.1 * s, 1.1 * s);
+    }
+    /* 极光：两条会起伏的帘，靠叠加描边做柔边 */
+    function band(y0, amp, len, wid, col, alpha) {
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.lineCap = 'round';
+      for (var pass = 0; pass < 5; pass++) {
+        g.strokeStyle = col;
+        g.globalAlpha = alpha * (0.5 + pass * 0.16);
+        g.lineWidth = wid * (1 - pass * 0.17);
+        g.beginPath();
+        for (var x = -6; x <= w + 6; x += 4) {
+          var yy = y0 + Math.sin(x / len * 6.2 + 0.6) * amp
+            + Math.sin(x / len * 2.1 + 2.4) * amp * 0.34;
+          if (x < 0) g.moveTo(x, yy); else g.lineTo(x, yy);
+        }
+        g.stroke();
+      }
+      g.restore();
+    }
+    band(h * 0.30, h * 0.055, w, h * 0.115, 'rgba(96,255,206,.85)', 0.13);
+    band(h * 0.20, h * 0.040, w * 0.8, h * 0.075, 'rgba(158,255,226,.8)', 0.10);
+    band(h * 0.38, h * 0.030, w * 1.2, h * 0.060, 'rgba(178,146,255,.6)', 0.09);
+    bloom(g, w * 0.42, h * 0.34, w * 0.52, 'rgba(70,230,190,.16)', 1);
+
+    /* 山：三层，越远越淡 */
+    ridge(g, w, h, [[0, 0.60], [0.10, 0.53], [0.19, 0.58], [0.29, 0.50], [0.40, 0.57],
+    [0.51, 0.51], [0.62, 0.57], [0.73, 0.52], [0.84, 0.58], [0.94, 0.53], [1.02, 0.58]], 'rgba(40,70,100,.55)');
+    ridge(g, w, h, [[0, 0.66], [0.12, 0.60], [0.24, 0.65], [0.37, 0.58], [0.50, 0.65],
+    [0.63, 0.59], [0.76, 0.66], [0.88, 0.60], [1.02, 0.65]], 'rgba(22,42,64,.85)');
+    /* 冰川：一大块折面的冰，落进湖里 */
+    var gl = [[0.50, 0.635], [0.60, 0.628], [0.68, 0.645], [0.72, 0.680],
+    [0.66, 0.700], [0.56, 0.702], [0.48, 0.695], [0.44, 0.672], [0.455, 0.650]];
+    g.beginPath();
+    g.moveTo(gl[0][0] * w, gl[0][1] * h);
+    for (var q = 1; q < gl.length; q++) g.lineTo(gl[q][0] * w, gl[q][1] * h);
+    g.closePath();
+    g.fillStyle = lin(g, w * 0.45, h * 0.62, w * 0.66, h * 0.71,
+      [0, '#ffffff', 0.45, '#dcefff', 1, '#8cbcd9']);
+    g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 1.2 * s;
+    g.beginPath();
+    g.moveTo(gl[0][0] * w, gl[0][1] * h);
+    g.lineTo(w * 0.60, h * 0.628); g.lineTo(w * 0.68, h * 0.645);
+    g.stroke();
+    /* 冰湖 */
+    g.fillStyle = lin(g, 0, h * 0.68, 0, h * 0.80, [0, '#1b3f57', 0.6, '#153347', 1, '#0e2534']);
+    g.fillRect(0, h * 0.68, w, h * 0.14);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    for (var r2 = 0; r2 < 5; r2++) {
+      g.fillStyle = 'rgba(120,240,208,' + (0.07 - r2 * 0.012) + ')';
+      g.beginPath();
+      g.ellipse(w * 0.46, h * (0.695 + r2 * 0.016), w * 0.36, 1.6 * s, 0, 0, 7);
+      g.fill();
+    }
+    g.restore();
+    /* 黑砂岸 + 雪 */
+    g.fillStyle = '#0d0e12';
+    g.fillRect(0, h * 0.80, w, h * 0.20);
+    var rn = seeded(97);
+    for (var sn = 0; sn < 18; sn++) {
+      var sxx = rn() * w, syy = h * (0.795 + rn() * 0.10);
+      g.fillStyle = 'rgba(226,242,255,' + (0.5 + rn() * 0.4) + ')';
+      g.beginPath();
+      g.ellipse(sxx, syy, (10 + rn() * 26) * s, (1.6 + rn() * 2.4) * s, 0, 0, 7);
+      g.fill();
+    }
+    /* 两个人：背对着，看天 */
+    [[w * 0.30, 0], [w * 0.335, 1]].forEach(function (p, pi) {
+      var px2 = p[0], py2 = h * 0.885 + (p[1] ? 2 : 0);
+      g.fillStyle = 'rgba(3,6,11,.5)';
+      g.beginPath(); g.ellipse(px2, py2 + 1, 5 * s, 1.6 * s, 0, 0, 7); g.fill();
+      g.fillStyle = pi ? '#171d29' : '#1d232e';
+      g.fillRect(px2 - 3.3 * s, py2 - 15 * s, 6.6 * s, 15 * s);
+      g.beginPath(); g.arc(px2, py2 - 15 * s, 3.2 * s, Math.PI, 0); g.fill();
+      g.fillStyle = '#262a34';
+      g.beginPath(); g.arc(px2, py2 - 19.6 * s, 2.7 * s, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(150,255,214,.4)'; g.lineWidth = 1 * s;
+      g.beginPath(); g.arc(px2, py2 - 19.6 * s, 2.7 * s, Math.PI * 1.06, Math.PI * 1.6); g.stroke();
+    });
+    bloom(g, w * 0.318, h * 0.90, w * 0.06, 'rgba(255,214,150,.20)', 1);
+    vignette(g, w, h, 0.44);
+    grain(g, w, h, 200, 55);
   };
 
   return A;

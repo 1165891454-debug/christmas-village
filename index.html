@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.3.1" />
+  <link rel="stylesheet" href="style.css?v=4.4.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -272,7 +272,7 @@
       <!-- 小镇车站 · 目的地选择 -->
       <div id="station-panel" class="panel station-panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
-          <div class="panel-name">🚉 小镇车站 <span id="station-sub" class="panel-sub">六条线，今天都发车</span></div>
+          <div class="panel-name">🚉 小镇车站 <span id="station-sub" class="panel-sub">今天都发车</span></div>
           <button class="panel-x" data-close="station-panel" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body">
@@ -292,7 +292,7 @@
           <button class="panel-x" data-close="ticket-panel" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body">
-          <p class="muted small-note" id="ticket-note">六张票，六条线。拿到一张，就能去一个地方。</p>
+          <p class="muted small-note" id="ticket-note">一张票，一条线。拿到一张，就能去一个地方。</p>
           <div id="ticket-list" class="ticket-list"></div>
         </div>
         <div class="panel-actions"><button id="ticket-close" class="btn ghost small">合上票册</button></div>
@@ -510,15 +510,15 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js?v=4.3.1"></script>
-  <script src="memories.js?v=4.3.1"></script>
-  <script src="chars.js?v=4.3.1"></script>
-  <script src="sprites.js?v=4.3.1"></script>
-  <script src="world.js?v=4.3.1"></script>
-  <script src="maps.js?v=4.3.1"></script>
-  <script src="specialties.js?v=4.3.1"></script>
-  <script src="game.js?v=4.3.1"></script>
-  <script src="app.js?v=4.3.1"></script>
+  <script src="firebase-config.js?v=4.4.0"></script>
+  <script src="memories.js?v=4.4.0"></script>
+  <script src="chars.js?v=4.4.0"></script>
+  <script src="sprites.js?v=4.4.0"></script>
+  <script src="world.js?v=4.4.0"></script>
+  <script src="maps.js?v=4.4.0"></script>
+  <script src="specialties.js?v=4.4.0"></script>
+  <script src="game.js?v=4.4.0"></script>
+  <script src="app.js?v=4.4.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

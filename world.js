@@ -65,17 +65,19 @@ window.World = (function () {
   obstacles.push({ x: 980, y: 930, w: 105, h: 130 });
   obstacles.push({ x: 1145, y: 930, w: 95, h: 130 });
   obstacles.push({ x: 40, y: 470, w: 260, h: 90 });
-  obstacles.push({ x: 420, y: 880, w: 180, h: 120 });
   obstacles.push({ x: 60, y: 700, w: 200, h: 150 });
 
-  /* ---------- v4.2 小镇牧场（左侧中部，围栏围起来的一片地） ---------- */
-  var ranch = { x: 312, y: 648, w: 296, h: 224, gateX: 444, gateW: 56 };
+  /* ---------- 小镇牧场（左侧中部，围栏围起来的一片地） ----------
+   * v4.4：门口从 56 加宽到 84，并把门口正南方那块看不见的碰撞体删掉了。
+   * （那块 180×120 的方块是 v1 遗留的，早就没有对应的东西画在那里，
+   *   但它正好横在门口外面，人走到门口就被一堵空气墙挡住 —— 牧场一直进不去。） */
+  var ranch = { x: 312, y: 648, w: 296, h: 224, gateX: 436, gateW: 84 };
   /* 围栏 + 马厩 + 干草垛 + 水槽都参与碰撞，只在下方留一道门 */
   obstacles.push({ x: 312, y: 648, w: 296, h: 12 });     // 上
   obstacles.push({ x: 312, y: 648, w: 12, h: 224 });     // 左
   obstacles.push({ x: 596, y: 648, w: 12, h: 224 });     // 右
-  obstacles.push({ x: 312, y: 860, w: 132, h: 12 });     // 下（左半）
-  obstacles.push({ x: 500, y: 860, w: 108, h: 12 });     // 下（右半）→ 中间 444~500 是门口
+  obstacles.push({ x: 312, y: 860, w: 124, h: 12 });     // 下（左半）
+  obstacles.push({ x: 520, y: 860, w: 88, h: 12 });      // 下（右半）→ 中间 436~520 是门口
   obstacles.push({ x: 330, y: 660, w: 116, h: 88 });     // 马厩
   obstacles.push({ x: 546, y: 690, w: 44, h: 34 });      // 干草垛
   obstacles.push({ x: 424, y: 796, w: 56, h: 20 });      // 水槽
@@ -145,7 +147,10 @@ window.World = (function () {
       '今天烤了一炉星星形状的，专门给你们留的。',
       '这么多人一起过节，面团都不够用啦。'
     ] },
-    { id: 'shepherd', x: 660, y: 792, name: '牧羊女 · 小禾', style: 'shepherd', lines: [
+    /* 小禾就站在牧场门口左边（v4.4 从围栏东侧挪过来）：
+       以前她站在围栏外侧的过道上，看着像「牧场门口」，其实离门 160px，
+       玩家进门的方向根本碰不到她；现在她在门柱旁边，走过去一定要经过。 */
+    { id: 'shepherd', x: 414, y: 900, name: '牧羊女·小禾', style: 'shepherd', lines: [
       '奶油、云朵、布丁今天乖不乖？',
       '先喂饱，第二天才有得收——急不来的。',
       '干草垛每天能抱三捆，别一次全用完了。'
@@ -1964,8 +1969,52 @@ window.World = (function () {
     ball(ctx, r2.gateX + r2.gateW / 2, r2.y + r2.h - 4, 3.2, '#f2e2a8', { outline: false });
     drawGlow(ctx, r2.gateX + r2.gateW / 2, r2.y + r2.h - 4, 'rgba(255,214,150,.24)', 26, 0.8);
 
-    /* 木牌 */
-    var sgx = r2.gateX + r2.gateW + 10, sgy = r2.y + r2.h + 6;
+    /* 门就是开着的：两根门柱之间空出来，谁都能走进去。
+       （门口不放任何带碰撞的东西——这里曾经被一块看不见的旧碰撞体堵死过。） */
+    /* 门口的一块踏石：告诉人「这里能走进去」 */
+    ctx.fillStyle = 'rgba(206,212,222,.75)';
+    ctx.beginPath();
+    ctx.ellipse(r2.gateX + r2.gateW / 2, r2.y + r2.h + 12, 34, 9, 0, 0, 7);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,160,176,.55)'; ctx.lineWidth = 1.4; ctx.stroke();
+
+    /* 门口被踩出来的一条小路：从门洞一直通到广场 */
+    ctx.fillStyle = 'rgba(150,128,104,.18)';
+    ctx.beginPath();
+    ctx.moveTo(r2.gateX + 12, r2.y + r2.h + 6);
+    ctx.lineTo(r2.gateX + r2.gateW - 12, r2.y + r2.h + 6);
+    ctx.lineTo(r2.gateX + r2.gateW + 2, r2.y + r2.h + 74);
+    ctx.lineTo(r2.gateX - 2, r2.y + r2.h + 74);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(120,102,84,.14)';
+    for (var pt2 = 0; pt2 < 6; pt2++) {
+      ctx.beginPath();
+      ctx.ellipse(r2.gateX + 26 + (pt2 % 2) * 40, r2.y + r2.h + 14 + pt2 * 10, 6, 2.6, 0, 0, 7);
+      ctx.fill();
+    }
+
+    /* 门口旁边的零碎：奶罐 + 水桶 + 一小堆干草屑（都放在门右侧，别挡路） */
+    var mx = r2.gateX + r2.gateW + 30, my = r2.y + r2.h + 30;
+    shadow(ctx, mx + 7, my + 1, 9, 3);
+    box(ctx, mx, my - 24, 15, 25, '#b9c0c6', { r: 4 });
+    ctx.fillStyle = '#8e989f';
+    ctx.fillRect(mx, my - 16, 15, 2);
+    ctx.fillStyle = '#d7dde1';
+    ctx.beginPath(); ctx.ellipse(mx + 7, my - 25, 7, 2.4, 0, 0, 7); ctx.fill();
+    var bx2 = r2.gateX + r2.gateW + 56, by2 = r2.y + r2.h + 26;
+    shadow(ctx, bx2 + 6, by2 + 1, 8, 2.6);
+    box(ctx, bx2, by2 - 13, 12, 13, '#8a6244', { r: 3 });
+    ctx.fillStyle = '#7a5334';
+    ctx.beginPath(); ctx.ellipse(bx2 + 6, by2 - 13, 6, 2, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#b98d5a'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(bx2 + 6, by2 - 14, 5, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    ctx.fillStyle = 'rgba(201,164,92,.75)';
+    for (var hs = 0; hs < 5; hs++) {
+      ctx.fillRect(bx2 + 18 + hs * 3, by2 - 4 - (hs % 2) * 2, 5, 2);
+    }
+
+    /* 木牌：挪到门左边，别挡着门口 */
+    var sgx = r2.gateX - 92, sgy = r2.y + r2.h + 34;
     ctx.fillStyle = '#6b4a2f';
     ctx.fillRect(sgx + 10, sgy - 6, 4, 18);
     box(ctx, sgx - 6, sgy - 24, 52, 20, '#a9793f', { r: 3 });
@@ -1973,6 +2022,7 @@ window.World = (function () {
     ctx.font = '600 10px "PingFang SC", "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('🐄 牧场', sgx + 20, sgy - 10);
+    ctx.textAlign = 'left';
   }
 
   /* ---- 三只动物：只用基本图形，靠小动作显得活着 ---- */
