@@ -22,6 +22,53 @@
  *  3. claimParcel() 在「包裹不在了 / 还没到」时放弃事务（以前会算提交成功，
  *     于是另一端刚领走的那次这边照样弹「回信到了」）。
  */
+/* ============================================================
+ * v4.6.0 · 运行时诊断（白屏排查用）
+ * ------------------------------------------------------------
+ * 背景：此前没有任何 window.onerror / unhandledrejection 兜底。
+ * 一旦 draw() 里某个像素绘制抛错，loop() 里排在后面的
+ * requestAnimationFrame 就不会执行 —— 表现是「画面停住不动」，
+ * 手机上再切后台回来就成了「白屏」，看起来像游戏自己重启。
+ *
+ * 这里的做法（刻意不做的：捕获到错误就 location.reload）：
+ *   1. 记录最近 20 条错误到内存 + localStorage['omo_err_log_v1']；
+ *   2. 只在第一次出错时给一句人话提示，不打断游玩；
+ *   3. 绝不自动刷新 —— 刷新会把「还没提交的输入」和「刚打的开局」一起丢掉，
+ *      等于用重启掩盖根因。真要重来，由玩家点「返回大厅」。
+ * 排查方法：控制台执行 Game.diag() 看最近错误；Game.diag(true) 清空。
+ * ============================================================ */
+(function () {
+  var LOG = [];
+  function push(kind, msg, extra) {
+    var row = { t: new Date().toISOString(), kind: kind, msg: String(msg || '').slice(0, 400), extra: extra || '' };
+    LOG.push(row);
+    if (LOG.length > 20) LOG.shift();
+    try { localStorage.setItem('omo_err_log_v1', JSON.stringify(LOG)); } catch (e) { }
+    if (window.console && console.error) console.error('[omo:' + kind + ']', msg, extra || '');
+    /* 第一次出错提示一句，之后安静记录，避免连弹 */
+    if (!push.shown) {
+      push.shown = true;
+      var el = document.getElementById('toast');
+      if (el) {
+        el.textContent = '⚠️ 画面出了点小问题，已记录（不影响存档）。若一直不动，点菜单 → 返回大厅重进。';
+        el.classList.remove('hidden');
+        clearTimeout(push._t);
+        push._t = setTimeout(function () { el.classList.add('hidden'); }, 6000);
+      }
+    }
+  }
+  window.__omoDiag = { log: LOG, push: push };
+  window.addEventListener('error', function (e) {
+    /* 资源加载失败（img/script 404）没有 message，单独标出来 */
+    if (e && e.message) push('error', e.message, (e.filename || '') + ':' + (e.lineno || 0));
+    else if (e && e.target && e.target.tagName) push('resource', e.target.tagName + ' ' + (e.target.src || e.target.href || ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    push('promise', (r && (r.message || r.code || r)) || 'unhandled rejection', '');
+  });
+})();
+
 window.Game = (function () {
   'use strict';
 
@@ -43,6 +90,7 @@ window.Game = (function () {
     online: null,   // null=未知；true/false 由 app.js 的 .info/connected 推过来（管理员提示用）
     ending: null, ended: false, photo: false, lastQuestText: '',
     endHintShown: false, plotIdx: 0,
+    needResize: false, frameErr: 0,
     /* ---------- 开发模式（v4.5.0d 重做）----------
      * 以前这里是 `dev: /[?&#]dev=1/.test(location.search)`——也就是说，
      * 任何人在正式网站上多打一个 ?dev=1，就能把生长缩到 6 秒、把日期门打开、
@@ -487,6 +535,9 @@ window.Game = (function () {
       // 回信里总会夹一点心意：两朵干花
       w.res = w.res || {};
       w.res.flowers = (w.res.flowers || 0) + 2;
+      /* v4.6.0：每封信都夹一张信纸 —— 让「寄→收→再寄」这个循环不至于卡在纸上，
+         也顺便把「重复等两小时」的疲惫感压下去一点（纸不用再专门去换）。 */
+      w.res.paper = (w.res.paper || 0) + 1;
       // 每收满 5 种特产，邮局补贴一次
       var n = Object.keys(w.spec).length;
       if (n % 5 === 0) {
@@ -778,11 +829,14 @@ window.Game = (function () {
       }
       for (var k in c.give) if (c.give.hasOwnProperty(k)) w.res[k] = (w.res[k] || 0) + c.give[k];
       w.commDone[commKey(c.idx)] = Date.now();
+      /* v4.6.0：交一次委托给一张抽奖券（写在同一笔事务里，双端不会各发一张） */
+      w.lottery = w.lottery || { tickets: 0, pity: 0, day: '', total: 0 };
+      w.lottery.tickets = (w.lottery.tickets || 0) + 1;
       return w;
     }).then(function (ok) {
       if (!ok) { refreshHUD(); return; }
       Snd.sfx('ding');
-      toast('🤝 委托完成：' + commGiveText(c), 3600);
+      toast('🤝 委托完成：' + commGiveText(c) + ' · 🎟️ 抽奖券 +1', 4200);
       refreshHUD();
     });
     return '（' + c.say + '）这里是 ' + commGiveText(c) + '，收下吧。';
@@ -844,10 +898,24 @@ window.Game = (function () {
 
   function refreshHUD() {
     var r = worldRes();
+    var st0 = lotteryState();
     var el = $('#res-chip');
     if (el) {
       el.textContent = '🪵 ' + (r.wood || 0) + ' · 🌸 ' + (r.flowers || 0) + ' · 🌱 ' + (r.seeds || 0) + ' · 🎁 ' + (r.materials || 0) +
         ((r.hay || r.milk || r.wool || r.egg) ? (' · 🌾 ' + (r.hay || 0)) : '');
+      if (st0.tickets > 0) el.textContent += ' · 🎟️ ' + st0.tickets;
+    }
+    /* 右下角的券按钮也带上张数（角标）：不点开面板就知道有没有券可抽 */
+    var ql = $('#btn-lottery');
+    if (ql) {
+      ql.setAttribute('data-n', String(st0.tickets));
+      ql.classList.toggle('is-empty', st0.tickets <= 0);
+    }
+    /* v4.6.0：每天的第一张抽奖券。只查一次（进房间/刷新后第一次拿到存档时），
+       不是签到墙 —— 不领也不影响任何玩法，只是少一张券。 */
+    if (!S.lotDayChecked && curWorld()) {
+      S.lotDayChecked = true;
+      setTimeout(grantLotteryDaily, 1200);
     }
   }
 
@@ -862,10 +930,14 @@ window.Game = (function () {
     }
     if (!w.quest) return;
     var q = w.quest;
+    /* v4.6.0：以前这里是「只进不出」的并集 —— 云端删掉的回忆在本地永远留着。
+       于是在另一台设备「恢复备份 / 回滚」之后，本地还在按旧进度算车票和章节。
+       现在云端有的键就以云端为准（云端是唯一真相），没有的键才保留本地。 */
     ['talked', 'visited', 'found'].forEach(function (k) {
-      var rem = q[k] || {};
-      S.quest[k] = S.quest[k] || {};
-      for (var key in rem) if (rem[key] && !S.quest[k][key]) S.quest[k][key] = rem[key];
+      if (!q[k]) return;
+      var rem = q[k], out = {};
+      for (var key in rem) if (rem[key]) out[key] = rem[key];
+      S.quest[k] = out;
     });
     if ((q.step || 0) > S.quest.step) S.quest.step = q.step;
     /* 旅行打卡点（共享）：改完立刻能算「已经拍过」 */
@@ -962,16 +1034,41 @@ window.Game = (function () {
   /* 是否今天已经推进过一章：v4.3 起不再当锁用，只记录日期 */
   function canAdvanceToday() { return true; }
 
+  /* ---------- v4.6.0：章节节奏 ----------
+   * 之前的问题：前四章的条件分别是「聊 1 人 / 聊 4 人+进小屋 / 2 段室内回忆 /
+   * 干草+喂一次」，全部能在开局 5 分钟内走完，于是玩家感觉「一局就通关了」。
+   *
+   * 现在仍然是「条件到了就翻页」（没有任何「今天只能推一章」、没有签到、
+   * 没有现实时间锁），但每一章都要求跨一个系统、多做一个动作：
+   *   前四章要跑遍四间屋子、找到 3 段室内回忆、领一次补给、真的种下两颗种子。
+   * 于是「连续玩」依然成立，「一口气清空」不成立 —— 因为要把镇子走一遍。
+   * 每推一章给一点点资源，让推进本身有手感（不给多，避免冲淡后面的种植）。 */
+  function visitedCount() { return Object.keys(S.quest.visited || {}).length; }
+  function plantedNow() {
+    var g = (curWorld() || {}).garden || {};
+    var n = 0;
+    for (var k in g) if (g.hasOwnProperty(k) && g[k] && g[k].kind) n++;
+    return n;
+  }
+  function dailyTaken() {
+    var w = curWorld() || {};
+    return !!(w.daily && w.daily.day === dayStr());
+  }
+  function harvestsEver() { var w = curWorld() || {}; return w.harvests || 0; }
+
   var CHAPTERS = [
-    { t: '回到小镇', tip: '先和圣诞老人打个招呼',
+    { t: '回到小镇', tip: '先和圣诞老人打个招呼（车站旁边那棵大树下）',
       ok: function () { return !!S.quest.talked.santa; },
       prog: function () { return S.quest.talked.santa ? '✓' : '还没聊过'; } },
-    { t: '认识邻居', tip: '镇上现在有八个人：圣诞老人、雪人、小精灵、老板娘、邮差阿信、面包师麦香、牧羊女小禾、老木匠老鲁',
-      ok: function () { return talkCount() >= 4 && !!S.quest.visited.cabin; },
-      prog: function () { return '聊过 ' + Math.min(4, talkCount()) + '/4 · 小屋 ' + (S.quest.visited.cabin ? '✓' : '×'); } },
-    { t: '屋里的旧照片', tip: '四间屋子的角落都藏着回忆——不只是雪地上有',
-      ok: function () { return roomFoundCount() >= 2; },
-      prog: function () { return '室内回忆 ' + Math.min(2, roomFoundCount()) + '/2'; } },
+    { t: '认识邻居', tip: '镇上现在有八个人。先认识五个：圣诞老人、雪人、小精灵、老板娘、邮差阿信、面包师麦香、牧羊女小禾、老木匠老鲁',
+      ok: function () { return talkCount() >= 5 && visitedCount() >= 2; },
+      prog: function () { return '聊过 ' + Math.min(5, talkCount()) + '/5 · 进过 ' + Math.min(2, visitedCount()) + '/2 间屋子'; } },
+    { t: '屋里的旧照片', tip: '四间屋子（小屋 / 咖啡馆 / 温室 / 工坊）的角落各藏一段回忆，先找到三段',
+      ok: function () { return roomFoundCount() >= 3; },
+      prog: function () { return '室内回忆 ' + Math.min(3, roomFoundCount()) + '/3'; } },
+    { t: '第一颗种子', tip: '进星星温室：先在补给台领今天的种子，再挑两块地种下（花 30 分钟、树 6 小时，离开也会长）',
+      ok: function () { return dailyTaken() && plantedNow() >= 2; },
+      prog: function () { return '今日补给 ' + (dailyTaken() ? '✓' : '×') + ' · 已种下 ' + Math.min(2, plantedNow()) + '/2'; } },
     { t: '开一片牧场', tip: '去左边牧场抱一捆干草，喂一次牛、羊或鸡',
       ok: function () {
         var w = curWorld() || {};
@@ -981,6 +1078,9 @@ window.Game = (function () {
         var w = curWorld() || {};
         return '干草 ' + (w.ranch && w.ranch.gotHay ? '✓' : '×') + ' · 喂食 ' + (ranchFedAny() ? '✓' : '×');
       } },
+    { t: '第一次收成', tip: '温室里的花熟了就去收——一次收成给鲜花和种子；种树要等 6 小时，但木材更值钱',
+      ok: function () { return harvestsEver() >= 1; },
+      prog: function () { return '收成 ' + Math.min(1, harvestsEver()) + '/1'; } },
     { t: '收下第一份产物', tip: '喂过的动物第二天来收：牛奶 / 羊毛 / 鸡蛋',
       ok: function () { return ranchGoodsCount() >= 1 && foundCount() >= 4; },
       prog: function () { return '产物 ' + Math.min(1, ranchGoodsCount()) + '/1 · 回忆 ' + Math.min(4, foundCount()) + '/4'; } },
@@ -1013,30 +1113,43 @@ window.Game = (function () {
   }
   function questText() { return chapterText(); }
 
-  /* 推进一步：写进共享存档，两台设备看到的是同一章、同一天 */
+  /* 推进一步：写进共享存档，两台设备看到的是同一章、同一天。
+     v4.6.0：① 加 S.advancing 闸门 —— 以前条件同时满足两章时会在同一帧连推两条，
+     弹两三个 toast 叠在一起；② 每章给一点点资源，让「翻页」本身有手感。 */
+  var CHAPTER_GIFT = { wood: 1, flowers: 2 };
   function advanceChapter(to) {
+    if (S.advancing) return;
+    S.advancing = true;
     mutate(function (w) {
+      if ((w.chapter || 0) >= to) return w;      // 对方刚推过 → 不重复发奖励
       w.chapter = to;
       w.chapterDay = dayStr();
+      w.res = w.res || {};
+      w.res.wood = (w.res.wood || 0) + CHAPTER_GIFT.wood;
+      w.res.flowers = (w.res.flowers || 0) + CHAPTER_GIFT.flowers;
       return w;
-    }).then(function () {
+    }).then(function (ok) {
+      S.advancing = false;
+      if (!ok) return;
       refreshHUD();
       var nxt = CHAPTERS[to];
-      if (nxt) toast('📖 第 ' + (to + 1) + ' 章：' + nxt.t + ' —— ' + nxt.tip, 5200);
-      else toast('🎄 八章都过完了。剩下的日子，就在小镇里慢慢等圣诞夜吧。', 5200);
+      if (nxt) toast('📖 第 ' + (to + 1) + ' 章：' + nxt.t + ' —— ' + nxt.tip +
+        '（奖励 🪵' + CHAPTER_GIFT.wood + ' 🌸' + CHAPTER_GIFT.flowers + '）', 5600);
+      else toast('🎄 全部章节都过完了。剩下的日子，就在小镇里慢慢等圣诞夜吧。', 5200);
       Snd.sfx('ding');
       if (to >= CHAPTERS.length) {
         S.quest.step = 6;
         syncQuest();
       }
-    });
+    }).catch(function () { S.advancing = false; });
     S.lastQuestText = '';
   }
 
-  /* v4.3：章节不再「一天只让推一章」，条件到了就推。
-     时长靠真实要做的事撑起来（作物生长 / 牧场隔天 / 包裹往返 / 41 个地址），
+  /* v4.3 / v4.6：章节不再「一天只让推一章」，条件到了就推。
+     时长靠真实要做的事撑起来（作物生长 / 牧场隔天 / 包裹往返 / 42 个地址），
      不靠「明天再来」这四个字。 */
   function updateQuest() {
+    if (S.advancing) return;                     // 上一次翻页还没写进云端，别叠
     var ch = chapterNo();
     if (ch >= CHAPTERS.length) {
       if (S.quest.step < 6) { S.quest.step = 6; syncQuest(); }
@@ -1073,7 +1186,9 @@ window.Game = (function () {
   }
 
   function checkVisitZones() {
-    if (S.interId || S.mapId || S.quest.step > 3) return;
+    /* v4.6.0：不再跟 quest.step 挂钩 —— 第 2 章要求「进过 2 间屋子」，
+       而 step 是旧的 6 步字段，玩家早就不是 0 的时候会一直记不上。 */
+    if (S.interId || S.mapId) return;
     var marked = false;
     function near(x, y, r) { return Math.sqrt(Math.pow(S.self.x - x, 2) + Math.pow(S.self.y - y, 2)) < r; }
     if (!S.quest.visited.cabin && near(285, 410, 110)) { S.quest.visited.cabin = 1; marked = true; }
@@ -1333,8 +1448,14 @@ window.Game = (function () {
      * 现在始终按设备像素比（上限 3）渲染；性能不够时只减粒子与光晕，不降清晰度。 */
     var dpr = Math.min(window.devicePixelRatio || 1, 3);
     S.dpr = dpr;
-    S.view.w = S.canvas.clientWidth;
-    S.view.h = S.canvas.clientHeight;
+    var vw = S.canvas.clientWidth, vh = S.canvas.clientHeight;
+    /* v4.6.0：PWA 切后台回来 / 旋转屏幕 / 软键盘弹出的一瞬间，clientWidth 可能是 0。
+       旧代码会把 canvas.width 直接设成 0 —— 画布内容被清空，之后 draw 全画在 0×0 上，
+       玩家看到的就是「白屏」。现在遇到 0 保留上一次的有效尺寸，等下一次 resize 再调。 */
+    if (!vw || !vh) { S.needResize = true; return; }
+    S.needResize = false;
+    S.view.w = vw;
+    S.view.h = vh;
     S.canvas.width = Math.round(S.view.w * dpr);
     S.canvas.height = Math.round(S.view.h * dpr);
     S.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1543,11 +1664,20 @@ window.Game = (function () {
     $('#menu-quest').addEventListener('click', function () { closeAllPanels(); openQuestPanel(); });
     $('#menu-settings').addEventListener('click', function () { closeAllPanels(); openSettings(); });
 
-    /* 右下角快捷按钮：换装 / 合影（和菜单里走同一条逻辑） */
+    /* 右下角快捷按钮：换装 / 抽奖券（和菜单里走同一条逻辑）
+       v4.6.0：原来的「📸 合影」快捷入口已移除——
+       它只生成同一张固定构图，真正的合影在每张旅行地图的打卡点，
+       以及圣诞树每次升级自动生成的纪念照里。 */
     var qOutfit = $('#btn-outfit');
     if (qOutfit) qOutfit.addEventListener('click', function () { closeAllPanels(); openOutfit(); });
-    var qPhoto = $('#btn-photo');
-    if (qPhoto) qPhoto.addEventListener('click', function () { closeAllPanels(); openPhoto(); });
+    var qLot = $('#btn-lottery');
+    if (qLot) qLot.addEventListener('click', function () { closeAllPanels(); openLottery(); });
+    var mLot = $('#menu-lottery');
+    if (mLot) mLot.addEventListener('click', function () { closeAllPanels(); openLottery(); });
+    var lotDraw = $('#lottery-draw');
+    if (lotDraw) lotDraw.addEventListener('click', function () { drawLottery(1); });
+    var lotDraw5 = $('#lottery-draw5');
+    if (lotDraw5) lotDraw5.addEventListener('click', function () { drawLottery(5); });
 
     /* 统一的关闭入口：任何带 data-close 的按钮都走同一条路，
        以后加面板只要写上按钮就一定能关。 */
@@ -1696,16 +1826,15 @@ window.Game = (function () {
     var pm = $('#photo-modal');
     if (pm) pm.addEventListener('click', function (e) { if (e.target === pm) closePhoto(); });
     $('#photo-save').addEventListener('click', function () { savePhoto(); });
-    document.querySelectorAll('#outfit-list .outfit-btn').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var key = b.dataset.outfit;
-        // 先本地生效：不用等网络回包，关掉面板就能看到新衣服（云端回来后会再对齐一次）
-        if (S.data && S.data.slots && S.data.slots[S.mySlot]) S.data.slots[S.mySlot].outfit = key;
-        S.backend.setOutfit(key).then(function () {
-          toast('换上了「' + b.textContent.trim() + '」✨');
-          closeAllPanels();
-        }).catch(function (e) { toast('换装失败：' + e.message); });
-      });
+    /* v4.6.0：衣柜是动态渲染的（9 套），所以用委托而不是逐个绑定。
+       点一下 = 已拥有就换、没拥有就买（买不起会明说差多少）。 */
+    var olist = $('#outfit-list');
+    if (olist) olist.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('[data-outfit]') : null;
+      if (!b) return;
+      e.preventDefault();
+      try { pickOutfit(b.getAttribute('data-outfit')); }
+      catch (err) { if (window.__omoDiag) window.__omoDiag.push('outfit', err && err.message); toast('这一步没走通，再试一次 ✦', 2600); }
     });
     window.addEventListener('orientationchange', function () { setTimeout(resize, 300); });
   }
@@ -1775,9 +1904,24 @@ window.Game = (function () {
     S.dt = dt;
     S.simT += dt;                             // 累计模拟时间（调试口用来算"每模拟秒位移"）
     perfTick(dt);
-    if (!S.paused) update(dt, ts);
-    if (S.ending) finTick(dt, ts);
-    draw(ts);
+    /* v4.6.0：尺寸曾经被置 0（切后台/旋转）就每帧重试一次，恢复即自动复原 */
+    if (S.needResize) resize();
+    /* v4.6.0：整帧包在 try 里。以前 draw 抛一次错，排在后面的 requestAnimationFrame
+       就不会执行 —— 画面永久定格，用户看到的就是「白屏/卡住」。现在出错的这一帧丢掉，
+       下一帧照排；连续出错超过 4 秒才停循环并明确提示（而不是无限刷错）。 */
+    try {
+      if (!S.paused) update(dt, ts);
+      if (S.ending) finTick(dt, ts);
+      draw(ts);
+      if (S.frameErr) S.frameErr = 0;
+    } catch (err) {
+      S.frameErr = (S.frameErr || 0) + 1;
+      if (window.__omoDiag) window.__omoDiag.push('frame', (err && err.message) || err, (err && err.stack) ? String(err.stack).slice(0, 300) : '');
+      if (S.frameErr === 240) {
+        toast('⚠️ 画面连续出错，已暂停渲染。存档没丢：点菜单 → 返回大厅重进即可。', 8000);
+        return;   // 不再排下一帧，避免把手机烧在这
+      }
+    }
     rafId = requestAnimationFrame(loop);
   }
   function startLoop() {
@@ -1963,6 +2107,7 @@ window.Game = (function () {
   }
 
   function harvest(i) {
+    var gotKind = null;
     mutate(function (w) {
       w.garden = w.garden || {};
       var id = 'p' + (i + 1);
@@ -1970,10 +2115,13 @@ window.Game = (function () {
       if (!p) return w;
       var conf = GROW[p.kind] || GROW.flower;
       if (Date.now() - (p.plantedAt || 0) < conf.ms) return w; // 未成熟（或对方刚收走）
+      gotKind = p.kind;
       delete w.garden[id];
       w.res = w.res || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
       if (p.kind === 'tree') w.res.wood = (w.res.wood || 0) + conf.yield;
       else w.res.flowers = (w.res.flowers || 0) + conf.yield;
+      /* v4.6.0：累计收获次数（章节「第一次收成」用它；老存档没有这个键就是 0） */
+      w.harvests = (w.harvests || 0) + 1;
       return w;
     }).then(function (ok) {
       if (mutNetFail()) return;   // 同上：网络失败时不要谎报「还没长好」
@@ -1983,9 +2131,10 @@ window.Game = (function () {
         var st = plotStates()[i];
         toast(st.ready ? '手慢了一步，好像刚刚被收走了 😮' : '还没长好呢（还需 ' + fmtRemain(st.remain) + '）');
       } else {
+        var picked = (gotKind === 'tree') ? ('🪵 木材 +' + GROW.tree.yield) : ('🌸 鲜花 +' + GROW.flower.yield);
         Snd.sfx('harvest');
         burst(175 + 200 * (i % 3) + (i > 2 ? 200 : 0), (i > 2 ? 400 : 255) - 30, 'spark', 6);
-        toast('收获啦！🪵 木材 / 🌸 鲜花已入账');
+        toast('收获啦！' + picked + ' 入账', 3000);
         closeAllPanels();
       }
     });
@@ -2128,7 +2277,13 @@ window.Game = (function () {
       if (ok && newStage > stage) {
         Snd.sfx('ding');
         burst(World.tree.x, World.tree.y - 120, 'spark', 14);
-        toast('🎄 树长到「' + treeStageName(newStage) + '」了 · 手工礼物 +' + TREE_STAGE_GIFT, 3600);
+        toast('🎄 树长到「' + treeStageName(newStage) + '」了 · 手工礼物 +' + TREE_STAGE_GIFT +
+          ' · 🎟️ 抽奖券 +2', 4400);
+        /* v4.6.0：升阶奖励两张抽奖券（写进同一笔云端状态，两台设备不会各发一次） */
+        grantLottery(2);
+        /* v4.6.0：纪念照。必须等这一笔事务真的提交成功再拍，
+           所以放在 then 里而不是按钮按下时；同一阶只拍一张（stageShots 去重）。 */
+        setTimeout(function () { showStageShot(newStage); }, 900);
       } else {
         toast('这一步没成：可能刚好被对方先点了一下，材料也已退回，看一眼树现在的样子。', 3600);
       }
@@ -2136,6 +2291,32 @@ window.Game = (function () {
       /* 面板不关：升完这一阶直接看到「下一阶要什么」，少点两次 */
       var tp = document.getElementById('tree-panel');
       if (tp && !tp.classList.contains('hidden')) openTreePanel();
+    });
+  }
+
+  /* ============================================================
+   * v4.6.0 · 树升级纪念照
+   * ------------------------------------------------------------
+   * 规则（针对「升级失败却提前生成照片 / 双端重复发放」）：
+   *   1. 只在 decorateTree 的事务 committed 之后调用；
+   *   2. 阶段号用「升级后的那一刻」，不是渲染时再读一次当前树阶
+   *      —— 否则刷新一下、或者对方又升了一阶，旧照片就变成新树了；
+   *   3. world.stageShots[stage] 去重：同一阶只拍一张，
+   *      重复点击、刷新、双端同时升级都不会覆盖已有照片；
+   *   4. 拍的是「小镇合照」这一套（1920×1080、底部纪念文字），
+   *      和以前一样能长按保存，只是六张照片的构图/天色/动作各不相同。
+   * ============================================================ */
+  function showStageShot(stage) {
+    var w = curWorld() || {};
+    if (w.stageShots && w.stageShots[stage]) return;
+    mutate(function (x) {
+      x.stageShots = x.stageShots || {};
+      if (x.stageShots[stage]) return x;      // 对方刚拍过这一阶
+      x.stageShots[stage] = Date.now();
+      return x;
+    }).then(function (ok) {
+      if (!ok) return;
+      openPhoto({ stageShot: stage });
     });
   }
 
@@ -3387,7 +3568,10 @@ window.Game = (function () {
     var title = $('#photo-title');
     if (title) {
       title.textContent = opt.finale ? '📷 我们的最终合影'
-        : (opt.mapId ? ('📷 ' + (opt.label || '旅行打卡')) : '📷 我们的圣诞合照');
+        : (opt.mapId ? ('📷 ' + (opt.label || '旅行打卡'))
+          : (typeof opt.stageShot === 'number'
+            ? ('📷 ' + treeStageName(opt.stageShot) + ' · 树长大的那一天')
+            : '📷 我们的圣诞合照'));
     }
     $('#photo-modal').classList.remove('hidden');
   }
@@ -3402,7 +3586,9 @@ window.Game = (function () {
       var a = document.createElement('a');
       a.href = img.src;
       var tag = S.photoOpt && S.photoOpt.finale ? 'finale'
-        : (S.photoOpt && S.photoOpt.mapId ? S.photoOpt.mapId : 'town');
+        : (S.photoOpt && S.photoOpt.mapId ? S.photoOpt.mapId
+          : (S.photoOpt && typeof S.photoOpt.stageShot === 'number'
+            ? ('tree-stage-' + (S.photoOpt.stageShot + 1)) : 'town'));
       a.download = 'Omos-Christmas-Village-' + tag + '-' + Date.now() + '.png';
       document.body.appendChild(a);
       a.click();
@@ -3439,23 +3625,23 @@ window.Game = (function () {
   var TOWN_STAGES = [
     { star: 62, moon: 0.70, win: 0.16, lamps: 2, gifts: 1, snow: 62,
       treeS: 1.05, glow: 0.10, heart: false, tag: '小树苗',
-      cx: 0.452, gap: 0.050, npcs: [], line: '一切才刚刚开始' },
+      cx: 0.452, gap: 0.050, npcs: [], line: '一切才刚刚开始', sky: 'day', pose: 'sit' },
     { star: 92, moon: 0.80, win: 0.26, lamps: 2, gifts: 1, snow: 74,
       treeS: 1.54, glow: 0.13, heart: true, tag: '初生',
-      cx: 0.456, gap: 0.054, npcs: [], line: '它开始往上长了' },
+      cx: 0.456, gap: 0.054, npcs: [], line: '它开始往上长了', sky: 'dusk', pose: 'stand' },
     { star: 124, moon: 0.90, win: 0.42, lamps: 2, gifts: 3, snow: 88,
       treeS: 1.70, glow: 0.18, heart: true, tag: '开始装饰',
-      cx: 0.460, gap: 0.058, npcs: ['elf'], line: '树上第一次挂上了彩球' },
+      cx: 0.460, gap: 0.058, npcs: ['elf'], line: '树上第一次挂上了彩球', sky: 'night', pose: 'point' },
     { star: 160, moon: 0.98, win: 0.64, lamps: 4, gifts: 5, snow: 106,
       treeS: 1.79, glow: 0.24, heart: true, tag: '节日树形',
-      cx: 0.464, gap: 0.062, npcs: ['elf', 'snowman'], line: '小镇开始有了圣诞节的样子' },
+      cx: 0.464, gap: 0.062, npcs: ['elf', 'snowman'], line: '小镇开始有了圣诞节的样子', sky: 'night', pose: 'hold' },
     { star: 186, moon: 1.02, win: 0.80, lamps: 4, gifts: 7, snow: 122,
       treeS: 1.86, glow: 0.29, heart: true, tag: '即将点亮',
-      cx: 0.467, gap: 0.065, npcs: ['elf', 'snowman', 'postman', 'baker'], line: '灯串亮了，就差最后一点' },
+      cx: 0.467, gap: 0.065, npcs: ['elf', 'snowman', 'postman', 'baker'], line: '灯串亮了，就差最后一点', sky: 'night', pose: 'gaze' },
     { star: 214, moon: 1.06, win: 0.94, lamps: 4, gifts: 10, snow: 138,
       treeS: 1.84, glow: 0.34, heart: true, tag: '完全点亮',
       cx: 0.470, gap: 0.068,
-      npcs: ['elf', 'snowman', 'postman', 'baker', 'shepherd', 'barista'], line: '我们把这里变成了真正的圣诞小镇' }
+      npcs: ['elf', 'snowman', 'postman', 'baker', 'shepherd', 'barista'], line: '我们把这里变成了真正的圣诞小镇', sky: 'night', pose: 'wave' }
   ];
 
   /* 居民站位：都在树的两侧，不挡树干、不挡脸 */
@@ -3471,26 +3657,71 @@ window.Game = (function () {
 
   function photoNightSky(ctx, W, H, cfg) {
     cfg = cfg || TOWN_STAGES[5];
+    /* v4.6.0：六张纪念照的光线不再全是夜。
+       第 1 阶是白天（刚种下的小树苗），第 2 阶是黄昏，第 3 阶起才是夜里点灯，
+       时间本身就是「这一段过去了多久」的证据。 */
+    var mode = cfg.sky || 'night';
     var sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#070e22');
-    sky.addColorStop(0.45, '#132542');
-    sky.addColorStop(1, '#2a4462');
+    if (mode === 'day') {
+      sky.addColorStop(0, '#7db6de');
+      sky.addColorStop(0.42, '#a9d1e8');
+      sky.addColorStop(0.78, '#d8e8f0');
+      sky.addColorStop(1, '#eef5f7');
+    } else if (mode === 'dusk') {
+      sky.addColorStop(0, '#243257');
+      sky.addColorStop(0.34, '#5e4672');
+      sky.addColorStop(0.62, '#b96f66');
+      sky.addColorStop(0.85, '#e8a878');
+      sky.addColorStop(1, '#f6d0a6');
+    } else {
+      sky.addColorStop(0, '#070e22');
+      sky.addColorStop(0.45, '#132542');
+      sky.addColorStop(1, '#2a4462');
+    }
     ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
 
     var rnd = seeded(77);
-    for (var i = 0; i < cfg.star; i++) {
-      var sx = rnd() * W, sy = rnd() * H * 0.62;
-      var r = 1.4 + rnd() * 1.9;
-      ctx.fillStyle = 'rgba(238,246,255,' + (0.12 + rnd() * 0.62).toFixed(3) + ')';
-      ctx.fillRect(sx, sy, r, r);
-      if (i % 17 === 0) {
-        ctx.strokeStyle = 'rgba(226,238,255,' + (0.16 + rnd() * 0.2).toFixed(3) + ')';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(sx - 7, sy); ctx.lineTo(sx + 7, sy);
-        ctx.moveTo(sx, sy - 7); ctx.lineTo(sx, sy + 7);
-        ctx.stroke();
+    if (mode !== 'day') {
+      for (var i = 0; i < cfg.star; i++) {
+        var sx = rnd() * W, sy = rnd() * H * 0.62;
+        var r = 1.4 + rnd() * 1.9;
+        ctx.fillStyle = 'rgba(238,246,255,' + (0.12 + rnd() * 0.62).toFixed(3) + ')';
+        ctx.fillRect(sx, sy, r, r);
+        if (i % 17 === 0) {
+          ctx.strokeStyle = 'rgba(226,238,255,' + (0.16 + rnd() * 0.2).toFixed(3) + ')';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(sx - 7, sy); ctx.lineTo(sx + 7, sy);
+          ctx.moveTo(sx, sy - 7); ctx.lineTo(sx, sy + 7);
+          ctx.stroke();
+        }
       }
+    }
+
+    if (mode === 'day') {
+      /* 白天的太阳：右上角一团柔光，不画硬边圆盘 */
+      var dx = W - 300, dy = 190;
+      var dg = ctx.createRadialGradient(dx, dy, 20, dx, dy, 420);
+      dg.addColorStop(0, 'rgba(255,250,226,.92)');
+      dg.addColorStop(0.22, 'rgba(255,246,206,.42)');
+      dg.addColorStop(1, 'rgba(255,246,206,0)');
+      ctx.fillStyle = dg;
+      ctx.beginPath(); ctx.arc(dx, dy, 420, 0, 7); ctx.fill();
+      return;
+    }
+
+    if (mode === 'dusk') {
+      /* 黄昏：太阳低低地压在山线上，橘红色 */
+      var ex = W - 360, ey = H * 0.60;
+      var eg = ctx.createRadialGradient(ex, ey, 30, ex, ey, 460);
+      eg.addColorStop(0, 'rgba(255,214,150,.95)');
+      eg.addColorStop(0.28, 'rgba(255,158,96,.45)');
+      eg.addColorStop(1, 'rgba(255,140,90,0)');
+      ctx.fillStyle = eg;
+      ctx.beginPath(); ctx.arc(ex, ey, 460, 0, 7); ctx.fill();
+      ctx.fillStyle = '#ffcf8a';
+      ctx.beginPath(); ctx.arc(ex, ey, 56, 0, 7); ctx.fill();
+      return;
     }
 
     /* 月亮：阶段越靠后越大越亮 */
@@ -3670,14 +3901,129 @@ window.Game = (function () {
     ctx.stroke();
   }
 
-  function photoPerson(ctx, x, y, s, opt, isJulie, dir) {
+  function photoPerson(ctx, x, y, s, opt, isJulie, dir, extra) {
+    extra = extra || {};
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(s, s);
     ctx.fillStyle = 'rgba(40,60,90,.22)';
     ctx.beginPath(); ctx.ellipse(0, 2, 30, 7, 0, 0, 7); ctx.fill();
-    Sprites.drawCharacter(ctx, 0, 0, dir === undefined ? 0 : dir, 0, opt, isJulie, 800);
+    /* v4.6.0：第 7 个参数才是「挥手」。以前这里把 isJulie 传给了 wave 位，
+       于是每张合影里 Julie 的手都一直举着、Charles 永远垂着——看起来像两套模板。
+       现在由姿势决定（默认仍然保留「Julie 正对镜头时挥手」的旧观感）。 */
+    var wave = (extra.wave !== undefined) ? !!extra.wave : (isJulie && dir === 0);
+    Sprites.drawCharacter(ctx, 0, 0, dir === undefined ? 0 : dir, 0, opt, wave, 800);
     ctx.restore();
+  }
+
+  /* ============================================================
+   * v4.6.0 · 大地图合影姿势
+   * ------------------------------------------------------------
+   * 只做「站位 + 朝向 + 叠加动作线」，不动 chars.js 的骨架和比例，
+   * 所以两个人永远还是那两个人（身高差、眼镜、发型、衣服都不变）。
+   *
+   * 七种构图各对应一种真实场景：
+   *   stand  正对镜头，肩并肩（默认）
+   *   gaze   并排背对镜头看风景（看湖、看塔、看极光）
+   *   hold   靠在一起 + 中间一条牵手的手
+   *   lean   一个人侧身靠在另一个人身上
+   *   sit    坐在栈道/长椅上（压低身形、缩小比例）
+   *   wave   两人一起朝镜头挥手
+   *   point  一人侧身抬手指向远处，另一人看着他指的方向
+   *   front  两个人都正对镜头，一只手绕过对方的肩
+   *
+   * 坐标约定（很重要，以前这里算错过）：
+   *   chars.js 里角色是「脚底 = 锚点 y」，身高 = 118 × SCALE × 照片缩放，
+   *   所以手在脚底上方约 0.46 个身高、肩在约 0.78 个身高处。
+   *   动作线必须按「身高」换算，不能按画面宽度算——否则手会画到脚踝上。
+   * ============================================================ */
+  function photoCouple(ctx, W, footY, k, pose, outfitA, outfitB, centerX) {
+    /* centerX 是「两个人的中心」在画面里的横向比例：
+       旅行合影偏中（0.49），小镇合照要往左让开树（0.46 左右）。 */
+    var cx = (typeof centerX === 'number') ? centerX : 0.49;
+    var sa = 3.05 * k, sb = 3.00 * k;
+    var BH = 118 * 0.66 * sa;            // 身高（像素）：118 逻辑单位 × 人物缩放 × 照片缩放
+    var HW = 34 * 0.66 * sa;             // 半身宽
+    var cxW = W * cx;
+    var ya = footY, yb = footY + BH * 0.02;
+    var xa = cxW - HW * 1.42, xb = cxW + HW * 1.42;
+    var dirA = 0, dirB = 0, waveA = false, waveB = false;
+    var holdHand = false;
+
+    if (pose === 'gaze') {
+      dirA = 1; dirB = 1;                 // 1 = 朝上 = 背对镜头
+      xa = cxW - HW * 1.48; xb = cxW + HW * 1.48;
+    } else if (pose === 'hold') {
+      xa = cxW - HW * 1.02; xb = cxW + HW * 1.02;   // 肩挨着肩
+      holdHand = true;
+    } else if (pose === 'lean') {
+      dirB = 2;                            // 2 = 朝左，侧过身来
+      xa = cxW - HW * 1.06; xb = cxW + HW * 0.66;   // 靠得更近，肩几乎贴着
+      yb = footY - BH * 0.01;
+      holdHand = true;
+    } else if (pose === 'front') {
+      /* 面对镜头（自拍感）：两个人都正对画面、贴得很近，Julie 抬手打个招呼。
+         这里刻意不再画「搭肩」的手臂——像素角色的肩就在下巴位置，
+         画一条线过去只会像悬空的横杠，反而破坏画面。 */
+      xa = cxW - HW * 1.00; xb = cxW + HW * 1.00;
+      waveB = true;
+    } else if (pose === 'sit') {
+      sa = 3.05 * k * 0.84; sb = 3.00 * k * 0.84;   // 坐着时人矮一截
+      BH = 118 * 0.66 * sa; HW = 34 * 0.66 * sa;
+      xa = cxW - HW * 1.28; xb = cxW + HW * 1.28;
+      ya = footY + BH * 0.10; yb = footY + BH * 0.12;
+    } else if (pose === 'wave') {
+      waveA = true; waveB = true;
+      xa = cxW - HW * 1.30; xb = cxW + HW * 1.30;
+    } else if (pose === 'point') {
+      dirA = 3;                            // 3 = 朝右，侧身
+      xa = cxW - HW * 1.35; xb = cxW + HW * 1.30;
+    }
+
+    photoPerson(ctx, xa, ya, sa, outfitA, false, dirA, { wave: waveA });
+    photoPerson(ctx, xb, yb, sb, outfitB, true, dirB, { wave: waveB });
+
+    var handY = footY - BH * 0.46;         // 手的高度
+    var shoulderY = footY - BH * 0.78;     // 肩的高度
+
+    /* 牵手：从左边那个人的右手牵到右边那个人的左手 */
+    if (holdHand) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(60,44,34,.9)';
+      ctx.lineWidth = 3.0 * k;
+      ctx.beginPath();
+      ctx.moveTo(xa + HW * 0.62, handY + BH * 0.01);
+      ctx.quadraticCurveTo((xa + xb) / 2, handY + BH * 0.05, xb - HW * 0.62, handY + BH * 0.01);
+      ctx.stroke();
+      ctx.strokeStyle = '#f2c9a4';
+      ctx.lineWidth = 2.0 * k;
+      ctx.stroke();
+      ctx.restore();
+    }
+    /* 指远方：从 Charles 肩头往右上挑一小段手臂 */
+    if (pose === 'point') {
+      var sx = xa + HW * 0.45, sy = shoulderY + BH * 0.06;
+      var ex = sx + HW * 1.55, ey = shoulderY - BH * 0.24;
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(60,44,34,.9)';
+      ctx.lineWidth = 2.8 * k;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(sx + HW * 0.75, sy - BH * 0.10, ex, ey);
+      ctx.stroke();
+      ctx.strokeStyle = '#f2c9a4';
+      ctx.lineWidth = 1.8 * k;
+      ctx.stroke();
+      ctx.restore();
+      /* 手指那儿点一颗小光，视线自然被带过去 */
+      var gg = ctx.createRadialGradient(ex, ey, 1, ex, ey, BH * 0.10);
+      gg.addColorStop(0, 'rgba(255,232,170,.85)');
+      gg.addColorStop(1, 'rgba(255,232,170,0)');
+      ctx.fillStyle = gg;
+      ctx.beginPath(); ctx.arc(ex, ey, BH * 0.10, 0, 7); ctx.fill();
+    }
   }
 
   /* 居民：和小镇里用的是同一套 sprite，只是换成照片坐标 */
@@ -3728,8 +4074,11 @@ window.Game = (function () {
      构图固定成「树在右、两个人站在树前偏左、居民分列两边」，
      阶段只改亮度、树的尺寸、礼物数量、居民数量和雪量——
      所以翻旧照片一眼就能看出「那时候小镇还没这么亮」。 */
-  function renderTownPhoto(ctx, W, H) {
-    var stage = Math.max(0, Math.min(5, treeStage()));
+  function renderTownPhoto(ctx, W, H, forceStage) {
+    /* v4.6.0：forceStage = 树升级那一刻的阶段。
+       照片要「记下当时的样子」，所以不能在渲染时才去读当前树阶
+       （升级完立刻刷新页面、或者对方又升了一阶，都会让旧照片变成新树）。 */
+    var stage = Math.max(0, Math.min(5, (typeof forceStage === 'number') ? forceStage : treeStage()));
     var cfg = TOWN_STAGES[stage] || TOWN_STAGES[5];
     var k = W / 1920;
     var groundY = H * 0.625;
@@ -3789,11 +4138,13 @@ window.Game = (function () {
     });
 
     /* 两个人：站在树前偏左，永远是画面里最大的。
-       树越长越大，两个人也一点点往两边让开——站位本身就是"长大了"的证据。 */
-    photoPerson(ctx, W * (cfg.cx - cfg.gap / 2), H * 0.846, 3.15 * k,
-      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 0);
-    photoPerson(ctx, W * (cfg.cx + cfg.gap / 2), H * 0.850, 3.10 * k,
-      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, 0);
+       树越长越大，两个人也一点点往两边让开——站位本身就是"长大了"的证据。
+       v4.6.0：动作也跟着阶段走（蹲着看小树苗 / 一起挂彩球 / 牵手 / 看树顶 / 朝镜头挥手），
+       所以六张纪念照不会只是「同一张图换个树」。 */
+    photoCouple(ctx, W, H * 0.846, k, cfg.pose || 'stand',
+      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }),
+      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }),
+      cfg.cx);
 
     if (cfg.heart) {
       [[W * cfg.cx, H * 0.690, 17 * k], [W * (cfg.cx - 0.026), H * 0.728, 12 * k], [W * (cfg.cx + 0.028), H * 0.736, 13 * k]].forEach(function (h) {
@@ -3921,10 +4272,23 @@ window.Game = (function () {
     opt = opt || {};
     if (opt.finale) { renderFinalePhoto(ctx, W, H); return; }
     if (opt.mapId) renderTravelPhoto(ctx, W, H, opt.mapId, opt.label);
-    else renderTownPhoto(ctx, W, H);
+    else renderTownPhoto(ctx, W, H, opt.stageShot);
   }
 
   /* 旅行打卡照：当地风景当底，两个人站在景里 */
+  /* 每张地图的默认姿势（打卡点上写了 pose 就用打卡点的）。
+     选的时候按「那个地方最有代表性的动作」来，不是随便轮换：
+     湖边看风景、沙漠指向远方、双子塔仰头、冰岛牵手看极光。 */
+  var TRAVEL_POSE = {
+    sayram: 'gaze',    // 赛里木湖：并排看湖
+    tibet: 'point',    // 西藏：指着雪山
+    doha: 'gaze',      // 多哈：海滨背影
+    wuhan: 'sit',      // 武汉：江边长椅坐着
+    wuhai: 'wave',     // 乌海：沙丘上朝镜头挥手
+    kl: 'gaze',        // 吉隆坡：仰头看双塔
+    iceland: 'hold'    // 冰岛：牵手
+  };
+
   function renderTravelPhoto(ctx, W, H, mapId, spotLabel) {
     var d = TravelMaps.get(mapId);
     if (!d) { renderTownPhoto(ctx, W, H); return; }
@@ -3952,10 +4316,19 @@ window.Game = (function () {
     var cyp = toPx(cxw, d.spawn.y).y;
     var footY = Math.min(H * 0.85, Math.max(H * 0.60, cyp));
 
-    photoPerson(ctx, W * 0.435, footY, 3.05 * k,
-      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }), false, 1);
-    photoPerson(ctx, W * 0.545, footY + 4 * k, 3.05 * k,
-      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }), true, -1);
+    /* v4.6.0：姿势来自「这张地图的这个打卡点」。
+       没写 pose 的旧数据 / 新加的地图都会退回按地图 id 取一个合适的默认姿势，
+       绝不会出现「所有地图同一张」。 */
+    var spotIdx = 0;
+    if (spotLabel && d.spots) {
+      for (var si = 0; si < d.spots.length; si++) {
+        if (d.spots[si].label === spotLabel) { spotIdx = si; break; }
+      }
+    }
+    var pose = (d.spots && d.spots[spotIdx] && d.spots[spotIdx].pose) || TRAVEL_POSE[d.id] || 'stand';
+    photoCouple(ctx, W, footY, k, pose,
+      Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }),
+      Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }));
 
     /* 暖光 + 飘落物（夜里/雪地才加，白天少一点） */
     var warm = ctx.createRadialGradient(W * 0.5, footY, 40 * k, W * 0.5, footY, 620 * k);
@@ -4236,7 +4609,8 @@ window.Game = (function () {
     S.quest.found[m.id] = 1;
     burst(S.self.x, S.self.y - 50, 'spark', 6);
     Snd.sfx('collect');
-    updateQuest();
+    /* updateQuest 挪到事务成功之后（见下）：现在本地镜像以云端为准，
+       提前写本地会被下一次 onData 覆盖掉，白白闪一下。 */
     var isMap = !!m.map;
     var pl = isMap && T() ? T().get(m.id) : null;
     mutate(function (w) {
@@ -4264,14 +4638,20 @@ window.Game = (function () {
       w.addr = w.addr || {};
       if (T() && T().has(m.id) && !w.addr[m.id]) w.addr[m.id] = Date.now();
       return w;
-    }).then(function () {
+    }).then(function (ok) {
+      if (ok) updateQuest();      // 回忆落盘之后再判章节，避免用本地乐观值推章
       refreshHUD();
+      /* v4.6.0：每条都报一下「第几段 / 共几段」。
+         以前只说「收进册子了」，玩家不知道还剩多少，就只能靠把整张地图走一遍。 */
+      var got = Object.keys(S.quest.found || {}).length;
+      var all = (window.Memories || []).length;
+      var tail = '（' + got + ' / ' + all + ' 段）';
       if (pl) {
-        toast('💭 收进回忆册 · ✉️ 信里还有 ' + pl.icon + ' ' + pl.item + ' 和 ' + pl.name + ' 的地址', 5200);
+        toast('💭 收进回忆册 · ✉️ 信里还有 ' + pl.icon + ' ' + pl.item + ' 和 ' + pl.name + ' 的地址 ' + tail, 5600);
       } else if (m.room) {
-        toast('💭 收进回忆册了 · 旧物里还夹着一件手工小礼物 🎁 +1', 3600);
+        toast('💭 收进回忆册了 · 旧物里还夹着一件手工小礼物 🎁 +1 ' + tail, 4200);
       } else {
-        toast('💭 收进回忆册了 · 这段回忆化作一颗种子 🌱', 3200);
+        toast('💭 收进回忆册了 · 这段回忆化作一颗种子 🌱 ' + tail, 4000);
       }
       var w2 = curWorld() || {};
       if (w2.addr && w2.addr[m.id]) {
@@ -5080,6 +5460,73 @@ window.Game = (function () {
     if (ac && !ac.dataset.bound) { ac.dataset.bound = '1'; ac.addEventListener('click', function () { closeAllPanels(); }); }
   }
 
+  /* ---------- v4.6.0：车票的第二条路 —— 纪念品兑换 ----------
+   * 车票仍然可以「玩到位」免费拿（条件写在 maps.js 的 ticket.cond 里）。
+   * 这里给另一条路：把路上带回来的东西攒着，到车站换。
+   *   • 特产只是「门槛」，兑换**不消耗**特产 —— 物产册 42 件是收集成果，
+   *     扣掉会让人心疼，而且会让「收齐」这件事变得反直觉。
+   *   • 真正消耗的是木材 / 鲜花 / 手工礼物，也就是「自己种自己做的」那些。
+   *   • 冰岛仍受 hidden 保护：没满足条件前，连这张票都不出现在列表里。
+   */
+  var TICKET_REDEEM = {
+    tibet: { spec: 1, wood: 8, materials: 1 },
+    doha: { spec: 2, wood: 12, flowers: 8 },
+    wuhan: { spec: 3, wood: 16, materials: 2 },
+    wuhai: { spec: 5, wood: 20, materials: 3 },
+    kl: { spec: 7, wood: 24, materials: 4 },
+    iceland: { spec: 10, wood: 30, materials: 6, flowers: 20 }
+  };
+  function redeemCostText(id) {
+    var c = TICKET_REDEEM[id];
+    if (!c) return '';
+    var out = [];
+    if (c.spec) out.push('🌏 特产 ' + c.spec + ' 件');
+    if (c.wood) out.push('🪵 ' + c.wood);
+    if (c.flowers) out.push('🌸 ' + c.flowers);
+    if (c.materials) out.push('🎁 ' + c.materials);
+    return out.join(' · ');
+  }
+  function redeemReady(id) {
+    var c = TICKET_REDEEM[id];
+    if (!c) return false;
+    if (specCount() < (c.spec || 0)) return false;
+    var r = worldRes();
+    if ((r.wood || 0) < (c.wood || 0)) return false;
+    if ((r.flowers || 0) < (c.flowers || 0)) return false;
+    if ((r.materials || 0) < (c.materials || 0)) return false;
+    return true;
+  }
+  function redeemTicket(id) {
+    if (hasTicket(id)) return;
+    var c = TICKET_REDEEM[id];
+    if (!c) { toast('这张票只能靠自己走过去拿', 3000); return; }
+    if (!redeemReady(id)) {
+      toast('还差点：' + redeemCostText(id) + '（特产不消耗，只是要带够）', 4400);
+      return;
+    }
+    mutate(function (w) {
+      w.tickets = w.tickets || {};
+      if (w.tickets[id]) return w;                   // 对方刚换过
+      w.res = w.res || {};
+      if ((w.res.wood || 0) < (c.wood || 0)) return undefined;
+      if ((w.res.flowers || 0) < (c.flowers || 0)) return undefined;
+      if ((w.res.materials || 0) < (c.materials || 0)) return undefined;
+      if (Object.keys(w.spec || {}).length < (c.spec || 0)) return undefined;
+      if (c.wood) w.res.wood -= c.wood;
+      if (c.flowers) w.res.flowers -= c.flowers;
+      if (c.materials) w.res.materials -= c.materials;
+      w.tickets[id] = Date.now();
+      return w;
+    }).then(function (ok) {
+      if (!ok) { toast('没换成：可能对方刚好换过，或者材料被用掉了', 4000); refreshHUD(); openStationPanel(); return; }
+      Snd.sfx('ding');
+      var d = TravelMaps.get(id);
+      toast('🎫 换到「' + (d ? d.name : id) + '」的车票了！', 4200);
+      refreshHUD();
+      openStationPanel();
+    });
+  }
+
   function openStationPanel() {
     var list = $('#station-list');
     if (!list || !window.TravelMaps) return;
@@ -5137,6 +5584,36 @@ window.Game = (function () {
       note.textContent = n >= total
         ? total + ' 张票都到手了。想去哪儿，就挑一张。'
         : '有票的方向才能上车。剩下的那些，先把小镇上的日子过得再热闹一点。';
+    }
+
+    /* ---- v4.6.0：纪念品兑换（第二条路）---- */
+    var rd = $('#station-redeem');
+    if (rd) {
+      var rows = [];
+      TravelMaps.list().forEach(function (d) {
+        if (hasTicket(d.id)) return;
+        if (d.ticket && d.ticket.hidden) return;      // 冰岛仍然不提前露脸
+        var c = TICKET_REDEEM[d.id];
+        if (!c) return;
+        var ok = redeemReady(d.id);
+        rows.push('<div class="tk-row' + (ok ? '' : ' is-lack') + '">' +
+          '<span class="tk-no">' + ((d.ticket && d.ticket.no) || '--') + '</span>' +
+          '<span class="tk-name">' + esc(d.name) + '</span>' +
+          '<span class="tk-cost">' + redeemCostText(d.id) + '</span>' +
+          (ok
+            ? '<button class="btn ghost small" type="button" data-redeem="' + d.id + '">换票</button>'
+            : '<span class="tk-state" style="color:rgba(232,220,200,.55)">还差</span>') +
+          '</div>');
+      });
+      rd.innerHTML = rows.length
+        ? ('<div class="panel-name" style="font-size:13px;margin:12px 0 7px">🎁 用纪念品换票 <span class="panel-sub">特产不消耗，只作门槛</span></div>' + rows.join(''))
+        : '';
+      rd.querySelectorAll('[data-redeem]').forEach(function (b) {
+        b.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          redeemTicket(b.getAttribute('data-redeem'));
+        });
+      });
     }
     $('#station-panel').classList.remove('hidden');
     pause();
@@ -5271,7 +5748,8 @@ window.Game = (function () {
   /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
   var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
     '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
-    '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel', '#party-panel'];
+    '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel', '#party-panel',
+    '#lottery-panel'];
 
   /* 所有「离开面板」的路径最后都落到这两个函数上（✕ / 关闭按钮 / 点遮罩 / ESC /
      切到别的面板 / 进照片 / 结局开场……）。所以管理员会话的失效就挂在这里：
@@ -5342,12 +5820,329 @@ window.Game = (function () {
     } else closeAllPanels();
   }
   function openOutfit() {
-    var cur = (S.data && S.data.slots && S.data.slots[S.mySlot] && S.data.slots[S.mySlot].outfit) || 'winter';
-    document.querySelectorAll('#outfit-list .outfit-btn').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.outfit === cur);
+    var list = $('#outfit-list');
+    if (!list) return;
+    var cur = getOutfit(S.mySlot, 'winter');
+    var r = worldRes();
+    var owned = 0;
+    OUTFITS.forEach(function (d) { if (outfitOwned(d.id)) owned++; });
+
+    var wallet = $('#outfit-wallet');
+    if (wallet) {
+      wallet.innerHTML =
+        '<b>🪵 ' + (r.wood || 0) + '</b><b>🌸 ' + (r.flowers || 0) + '</b><b>🎁 ' + (r.materials || 0) + '</b>' +
+        '<b>🌾 ' + (r.hay || 0) + '</b><b>🥛 ' + (r.milk || 0) + '</b><b>📄 ' + (r.paper || 0) + '</b>' +
+        '<span style="margin-left:auto;color:rgba(232,220,200,.6)">已有 ' + owned + ' / ' + OUTFITS.length + ' 套</span>';
+    }
+
+    list.innerHTML = '';
+    OUTFITS.forEach(function (d) {
+      var has = outfitOwned(d.id);
+      var worn = d.id === cur;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'outfit-btn' + (worn ? ' is-worn' : (has ? ' is-owned' : ' is-locked'));
+      b.setAttribute('data-outfit', d.id);
+      var state;
+      if (worn) state = '✓ 穿着中';
+      else if (has) state = '可换';
+      else if (d.unlock) state = '🔒 未解锁';
+      else state = outfitCostText(d.cost);
+      b.innerHTML = '<span class="ob-ico">' + d.icon + '</span>' +
+        '<span class="ob-name">' + esc(d.name) + '<i>' + esc(d.note) + '</i></span>' +
+        '<span class="ob-state">' + state + '</span>';
+      list.appendChild(b);
     });
     $('#outfit-modal').classList.remove('hidden');
     pause();
+  }
+
+  /* 换装 / 购买：一件衣服只在这里生效，别处不再直接写 outfit 字段 */
+  function wearOutfit(id) {
+    if (S.data && S.data.slots && S.data.slots[S.mySlot]) S.data.slots[S.mySlot].outfit = id;
+    if (S.backend && S.backend.setOutfit) {
+      S.backend.setOutfit(id).then(function () { refreshHUD(); }).catch(function (e) {
+        toast('换装没同步上：' + ((e && e.message) || '网络不稳'), 3200);
+      });
+    }
+    refreshHUD();
+  }
+  /* ============================================================
+   * v4.6.0 · 抽奖券（彩票）
+   * ------------------------------------------------------------
+   * 设计原则（针对「不要用随机掉落拖延进度」）：
+   *   • 券只能「做事情」拿到，不能买：每天进小镇 1 张、交一次委托 1 张、
+   *     圣诞树每升一阶 2 张。抽不到也不会卡住主线。
+   *   • 奖池里全是现有资源与现有收集品（木材/鲜花/种子/纸/干草/礼盒/
+   *     衣服/车票/地址/特产），不新增任何"只能在抽奖里拿到"的东西。
+   *   • 10 抽保底一件稀有（pity 计数存在共享存档里，两个人共用同一个计数器，
+   *     不会靠反复刷新重开刷保底）。
+   *   • 抽到的衣服/车票会走和正常获得完全相同的写入路径，双端立刻同步。
+   * ============================================================ */
+  var LOT_POOL = [
+    { id: 'wood', tier: 'c', icon: '🪵', name: '木材', res: 'wood', n: [2, 4] },
+    { id: 'flower', tier: 'c', icon: '🌸', name: '鲜花', res: 'flowers', n: [3, 5] },
+    { id: 'seed', tier: 'c', icon: '🌱', name: '种子', res: 'seeds', n: [2, 3] },
+    { id: 'paper', tier: 'c', icon: '📄', name: '信纸', res: 'paper', n: [1, 2] },
+    { id: 'hay', tier: 'c', icon: '🌾', name: '干草', res: 'hay', n: [2, 3] },
+    { id: 'box', tier: 'c', icon: '📦', name: '寄件礼盒', res: 'giftbox', n: [1, 1] },
+    { id: 'mat', tier: 'c', icon: '🎁', name: '手工礼物', res: 'materials', n: [1, 1] },
+    { id: 'bigwood', tier: 'r', icon: '🪵', name: '一大捆木材', res: 'wood', n: [10, 12] },
+    { id: 'bigflower', tier: 'r', icon: '🌸', name: '一大捧鲜花', res: 'flowers', n: [10, 12] },
+    { id: 'cloth', tier: 'r', icon: '👗', name: '一件新衣服', kind: 'outfit' },
+    { id: 'ticket', tier: 'r', icon: '🎫', name: '一张远方车票', kind: 'ticket' },
+    { id: 'addr', tier: 'r', icon: '✉️', name: '一个远方地址', kind: 'addr' },
+    { id: 'spec', tier: 'r', icon: '🌏', name: '一件远方特产', kind: 'spec' }
+  ];
+  var lotDrawPending = false, lotSpinT = null;
+
+  function lotteryState() {
+    var w = curWorld() || {};
+    var l = w.lottery || {};
+    return {
+      tickets: l.tickets || 0, pity: l.pity || 0, day: l.day || '',
+      total: l.total || 0, last: l.last || []
+    };
+  }
+  function lotTicketCount() { return lotteryState().tickets; }
+
+  /* 发券：唯一入口，全走事务（防止两台设备各发一次） */
+  function grantLottery(n, why) {
+    if (!curWorld() || !(n > 0)) return Promise.resolve(false);
+    return mutate(function (w) {
+      w.lottery = w.lottery || { tickets: 0, pity: 0, day: '', total: 0 };
+      w.lottery.tickets = (w.lottery.tickets || 0) + n;
+      return w;
+    }).then(function (ok) {
+      if (ok) {
+        refreshHUD();
+        if (why) toast('🎟️ ' + why + '：抽奖券 +' + n, 3600);
+      }
+      return ok;
+    });
+  }
+
+  /* 每天进小镇送 1 张（只判断一次，不做签到墙、不惩罚断签） */
+  function grantLotteryDaily() {
+    var w = curWorld();
+    if (!w) return;
+    var today = dayStr();
+    if (w.lottery && w.lottery.day === today) return;
+    mutate(function (x) {
+      x.lottery = x.lottery || { tickets: 0, pity: 0, day: '', total: 0 };
+      if (x.lottery.day === today) return x;
+      x.lottery.day = today;
+      x.lottery.tickets = (x.lottery.tickets || 0) + 1;
+      return x;
+    }).then(function (ok) {
+      if (ok) { toast('🎟️ 今日抽奖券 +1 · 右下角 🎟️ 试试手气', 4200); refreshHUD(); }
+    });
+  }
+
+  /* 稀有奖的可得性：都基于当前存档，抽不到就顺位到别的，不会给空奖 */
+  function lotAvailable(p, w) {
+    if (p.kind === 'outfit') {
+      var got = (w.outfits || {});
+      return OUTFITS.some(function (d) { return !d.unlock && d.id !== 'winter' && !got[d.id]; });
+    }
+    if (p.kind === 'ticket') {
+      if (!window.TravelMaps) return false;
+      var tk = w.tickets || {};
+      return TravelMaps.list().some(function (d) { return !tk[d.id]; });
+    }
+    if (p.kind === 'addr') {
+      if (!T()) return false;
+      var ad = w.addr || {};
+      return T().list.some(function (x) { return !ad[x.id]; });
+    }
+    if (p.kind === 'spec') {
+      if (!T()) return false;
+      var ad2 = w.addr || {}, sp = w.spec || {};
+      return T().list.some(function (x) { return ad2[x.id] && !sp[x.id]; });
+    }
+    return true;
+  }
+  function lotRoll(w) {
+    var pity = (w.lottery && w.lottery.pity) || 0;
+    var rare = pity >= 9 || Math.random() < 0.14;
+    var pool = LOT_POOL.filter(function (p) { return p.tier === (rare ? 'r' : 'c') && lotAvailable(p, w); });
+    if (!pool.length) pool = LOT_POOL.filter(function (p) { return p.tier === 'c'; });
+    return pool[Math.floor(Math.random() * pool.length)] || LOT_POOL[0];
+  }
+  /* 把奖发进事务里的 w，并返回给界面显示的文字 */
+  function lotApply(w, p) {
+    var n = 0;
+    if (p.res) {
+      n = p.n[0] + Math.floor(Math.random() * (p.n[1] - p.n[0] + 1));
+      w.res = w.res || {};
+      w.res[p.res] = (w.res[p.res] || 0) + n;
+      return { tier: p.tier, icon: p.icon, text: p.name + ' ×' + n };
+    }
+    if (p.kind === 'outfit') {
+      var got = w.outfits || (w.outfits = {});
+      var cand = OUTFITS.filter(function (d) { return !d.unlock && d.id !== 'winter' && !got[d.id]; });
+      if (!cand.length) { w.res.flowers = (w.res.flowers || 0) + 6; return { tier: p.tier, icon: '🌸', text: '鲜花 ×6（衣服已全收）' }; }
+      var d = cand[Math.floor(Math.random() * cand.length)];
+      got[d.id] = Date.now();
+      return { tier: p.tier, icon: d.icon, text: '新衣服「' + d.name + '」', outfit: d.id };
+    }
+    if (p.kind === 'ticket') {
+      var tk = w.tickets || (w.tickets = {});
+      var left = TravelMaps.list().filter(function (x) { return !tk[x.id]; });
+      if (!left.length) { w.res.materials = (w.res.materials || 0) + 2; return { tier: p.tier, icon: '🎁', text: '手工礼物 ×2（车票已全收）' }; }
+      var t1 = left[Math.floor(Math.random() * left.length)];
+      tk[t1.id] = Date.now();
+      return { tier: p.tier, icon: '🎫', text: '车票「' + t1.name + '」' };
+    }
+    if (p.kind === 'addr') {
+      var ad = w.addr || (w.addr = {});
+      var leftA = T().list.filter(function (x) { return !ad[x.id]; });
+      if (!leftA.length) { w.res.paper = (w.res.paper || 0) + 2; return { tier: p.tier, icon: '📄', text: '信纸 ×2（地址已全收）' }; }
+      var a1 = leftA[Math.floor(Math.random() * leftA.length)];
+      ad[a1.id] = Date.now();
+      return { tier: p.tier, icon: '✉️', text: '地址「' + a1.name + '」' };
+    }
+    if (p.kind === 'spec') {
+      var ad2 = w.addr || {}, sp = w.spec || (w.spec = {});
+      var leftS = T().list.filter(function (x) { return ad2[x.id] && !sp[x.id]; });
+      if (!leftS.length) { w.res.giftbox = (w.res.giftbox || 0) + 1; return { tier: p.tier, icon: '📦', text: '寄件礼盒 ×1（暂时没有可收的特产）' }; }
+      var s1 = leftS[Math.floor(Math.random() * leftS.length)];
+      sp[s1.id] = Date.now();
+      return { tier: p.tier, icon: s1.icon || '🌏', text: '特产「' + s1.item + '」（' + s1.name + '）' };
+    }
+    w.res.wood = (w.res.wood || 0) + 2;
+    return { tier: p.tier, icon: '🪵', text: '木材 ×2' };
+  }
+
+  function lotterySpin(ms) {
+    var reel = $('#lottery-reel');
+    if (!reel) return;
+    var cells = reel.querySelectorAll('.lot-cell');
+    if (!cells.length) return;
+    clearTimeout(lotSpinT);
+    var i = 0;
+    var tick = function () {
+      cells.forEach(function (c) { c.classList.remove('on'); });
+      cells[i % cells.length].classList.add('on');
+      i++;
+      lotSpinT = setTimeout(tick, 62);
+    };
+    tick();
+    setTimeout(function () { clearTimeout(lotSpinT); }, ms + 120);
+  }
+
+  function drawLottery(times) {
+    times = Math.max(1, Math.min(5, times | 0 || 1));
+    if (lotDrawPending) return;
+    var st = lotteryState();
+    if (st.tickets < times) {
+      toast(times > 1 ? ('券不够：连抽 ' + times + ' 张要 ' + times + ' 张，你现在有 ' + st.tickets + ' 张')
+        : ('还没有抽奖券：每天进小镇送 1 张，交委托也能拿', 4200), 4200);
+      return;
+    }
+    lotDrawPending = true;
+    lotterySpin(620);
+    var btn = $('#lottery-draw');
+    if (btn) btn.disabled = true;
+    mutate(function (w) {
+      w.lottery = w.lottery || { tickets: 0, pity: 0, day: '', total: 0 };
+      if (w.lottery.tickets < times) return undefined;   // 另一端刚抽过 → 放弃
+      w.lottery.tickets -= times;
+      var out = [];
+      for (var i = 0; i < times; i++) {
+        var p = lotRoll(w);
+        var res = lotApply(w, p);
+        out.push(res);
+        w.lottery.pity = (res.tier === 'r') ? 0 : ((w.lottery.pity || 0) + 1);
+      }
+      w.lottery.last = out;
+      w.lottery.total = (w.lottery.total || 0) + times;
+      return w;
+    }).then(function (ok) {
+      lotDrawPending = false;
+      if (btn) btn.disabled = false;
+      if (!ok) {
+        toast('这张券没用成：可能另一端刚好抽掉了，券还在，再点一次。', 4000);
+        refreshHUD(); openLottery(); return;
+      }
+      var got = (curWorld() && curWorld().lottery && curWorld().lottery.last) || [];
+      Snd.sfx('ding');
+      var rare = got.filter(function (g) { return g.tier === 'r'; });
+      toast(rare.length
+        ? ('✨ ' + rare.map(function (g) { return g.icon + g.text; }).join('　') + (got.length > 1 ? '（共 ' + got.length + ' 件）' : ''))
+        : ('🎟️ ' + got.map(function (g) { return g.icon + g.text; }).join('　')), 5200);
+      refreshHUD();
+      openLottery(true);
+    }).catch(function () {
+      lotDrawPending = false;
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  function openLottery(keepLog) {
+    var st = lotteryState();
+    var top = $('#lottery-top');
+    if (top) {
+      top.innerHTML = '<span>手里有 <b>' + st.tickets + '</b> 张券</span>' +
+        '<span class="lot-pity">保底 ' + Math.max(0, 10 - st.pity) + ' 抽内出稀有 · 已抽 ' + st.total + ' 次</span>';
+    }
+    var reel = $('#lottery-reel');
+    if (reel) {
+      /* 转盘上的九个格子就是奖池本身（不藏概率）：让人一眼看到「可能抽到什么」 */
+      var show = LOT_POOL.filter(function (p) { return p.tier === 'c'; }).slice(0, 6)
+        .concat(LOT_POOL.filter(function (p) { return p.tier === 'r'; }).slice(0, 3));
+      reel.innerHTML = show.map(function (p) {
+        return '<div class="lot-cell"><span>' + p.icon + '</span><i>' + (p.tier === 'r' ? '稀有' : '素材') + '</i></div>';
+      }).join('');
+    }
+    var log = $('#lottery-log');
+    if (log) {
+      var last = st.last || [];
+      log.innerHTML = last.length
+        ? last.map(function (g) {
+          return '<li class="' + (g.tier === 'r' ? 'rare' : '') + '">' +
+            '<span class="ll-ico">' + g.icon + '</span><b>' + esc(g.text) + '</b></li>';
+        }).join('')
+        : '<li class="lot-empty" style="border:0;background:none;padding:2px">还没抽过。券在手上不会过期，想抽再抽。</li>';
+    }
+    var d1 = $('#lottery-draw');
+    if (d1) { d1.disabled = st.tickets < 1; d1.textContent = st.tickets > 0 ? ('🎟️ 抽一张（剩 ' + st.tickets + '）') : '🎟️ 没有券了'; }
+    $('#lottery-panel').classList.remove('hidden');
+    pause();
+  }
+
+  function pickOutfit(id) {
+    var d = outfitDef(id);
+    var cur = getOutfit(S.mySlot, 'winter');
+    if (id === cur) { toast('已经穿着这一套了 ✨', 2000); return; }
+    if (outfitOwned(id)) { Snd.sfx('ding'); wearOutfit(id); openOutfit(); return; }
+    if (d.unlock) { toast('还差一步：' + d.note, 3400); return; }
+    if (!outfitCanPay(d.cost)) {
+      toast('资源还不够：' + outfitCostText(d.cost) + '（去温室种一轮花树就有了）', 4200);
+      return;
+    }
+    mutate(function (w) {
+      w.res = w.res || {};
+      w.outfits = w.outfits || {};
+      /* 对方刚好买过 → 直接算已拥有，不扣第二次钱 */
+      if (w.outfits[id]) return w;
+      for (var k in d.cost) {
+        if (!d.cost.hasOwnProperty(k)) continue;
+        if ((w.res[k] || 0) < d.cost[k]) return undefined;
+      }
+      for (var k2 in d.cost) if (d.cost.hasOwnProperty(k2)) w.res[k2] = (w.res[k2] || 0) - d.cost[k2];
+      w.outfits[id] = Date.now();
+      return w;
+    }).then(function (ok) {
+      if (!ok) {
+        toast('没买成：可能对方刚好买过、或资源被用掉了。看一眼衣柜再试。', 4200);
+        refreshHUD(); openOutfit(); return;
+      }
+      Snd.sfx('ding');
+      toast('🎁 解锁「' + d.name + '」！已经为你换上', 3600);
+      wearOutfit(id);
+      openOutfit();
+    });
   }
   function openTreePanel() {
     var stage = treeStage();
@@ -5386,7 +6181,9 @@ window.Game = (function () {
   }
   function toggleMenu() {
     var m = $('#menu-panel');
-    if (m.classList.contains('hidden')) { m.classList.remove('hidden'); pause(); }
+    /* v4.6.0：以前在别的面板开着时点 ☰ 会把菜单叠在那个面板上面（两个都算"开着"），
+       遮罩判断也只看有没有面板开着。现在先静默收起别的面板，只留菜单。 */
+    if (m.classList.contains('hidden')) { closeAllPanelsSilent(); m.classList.remove('hidden'); pause(); }
     else { m.classList.add('hidden'); unpause(); }
   }
 
@@ -5595,10 +6392,15 @@ window.Game = (function () {
     }
 
     var cnt = $('#book-count');
-    if (cnt) cnt.textContent = (foundList.length || sps.length || spGot.length)
-      ? ('回忆 ' + foundList.length + ' 段' + (sps.length ? ' · 合影 ' + sps.length + ' 张' : '') +
-         (spGot.length ? ' · 特产 ' + spGot.length : ''))
-      : '';
+    if (cnt) {
+      /* v4.6.0：显示「已收 / 总数」，玩家一眼知道还差几段，
+         而不是只能靠把地图每个角落走一遍去确认。 */
+      var allN = all.length;
+      cnt.textContent = (foundList.length || sps.length || spGot.length)
+        ? ('回忆 ' + foundList.length + ' / ' + allN + ' 段' + (sps.length ? ' · 合影 ' + sps.length + ' 张' : '') +
+           (spGot.length ? ' · 特产 ' + spGot.length : ''))
+        : '';
+    }
     $('#book-panel').classList.remove('hidden');
     pause();
   }
@@ -5672,6 +6474,81 @@ window.Game = (function () {
     if (!p) return 'none';
     return p.readyAt <= Date.now() ? 'ready' : 'fly';
   }
+  /* ---------- v4.6.0：批量寄件 + 邮差加急（减少重复点击与重复等待）----------
+   * 这两个功能针对的是「后期 42 个地方、每个都要点一次、等两小时」的机械劳动。
+   * 注意：**没有缩短任何真实时长** —— PACK_MS 还是 2 小时，
+   * 加急只是「一天一次把某一件在途包裹的完成时间提前 90 分钟」，
+   * 等价于现实里「邮差答应你今天多跑一趟」，不是把 2 小时改成 2 分钟。 */
+  function packBatchCandidates() {
+    var t = T();
+    if (!t) return [];
+    var r = worldRes();
+    var box = r.giftbox || 0;
+    var out = [];
+    t.list.forEach(function (p) {
+      if (out.length >= 3 || out.length >= box) return;
+      if (!hasAddr(p.id)) return;
+      if (parcelState(p.id) !== 'none') return;
+      if (hasSpec(p.id)) return;
+      /* 有空地才收，已经收过特产的地方没必要再寄 */
+      out.push(p.id);
+    });
+    return out;
+  }
+  function sendMany() {
+    var ids = packBatchCandidates();
+    if (!ids.length) {
+      toast('没有可以一起寄的地方：要么礼盒不够，要么该寄的都已经在路上 / 收过了', 4200);
+      return;
+    }
+    var sentN = 0;
+    mutate(function (w) {
+      w.res = w.res || {}; w.parcels = w.parcels || {};
+      var done = 0;
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        if (w.parcels[id]) continue;
+        if ((w.res.giftbox || 0) < 1) break;
+        w.res.giftbox -= 1;
+        w.parcels[id] = { at: Date.now(), readyAt: Date.now() + packMs() };
+        w.sent = (w.sent || 0) + 1;
+        done++;
+      }
+      sentN = done;
+      return done ? w : undefined;
+    }).then(function (ok) {
+      if (!ok) { toast('一件都没寄出去：可能对方刚用过礼盒', 3600); refreshHUD(); openPackPanel(); return; }
+      Snd.sfx('craft');
+      toast('📮 一次寄出 ' + sentN + ' 件 · 大概 ' + fmtRemain(packMs()) + '后陆续回来', 4600);
+      refreshHUD(); openPackPanel();
+    });
+  }
+  function expressParcel() {
+    var w = curWorld() || {};
+    if (w.expressDay === dayStr()) { toast('今天的加急已经用过了，明天再来 ⚡', 3200); return; }
+    var ps = w.parcels || {};
+    var fly = Object.keys(ps).filter(function (id) { return ps[id] && ps[id].readyAt > Date.now(); });
+    if (!fly.length) { toast('现在没有在路上的包裹，寄出去再来加急', 3200); return; }
+    fly.sort(function (a, b) { return ps[a].readyAt - ps[b].readyAt; });
+    var id = fly[0];
+    var pl = T() && T().get(id);
+    mutate(function (x) {
+      x.parcels = x.parcels || {};
+      if (x.expressDay === dayStr()) return x;
+      var p = x.parcels[id];
+      if (!p || p.readyAt <= Date.now()) return x;
+      /* 提前 90 分钟，但不会「一按就到」——最多提前到此刻 */
+      p.readyAt = Math.max(Date.now(), p.readyAt - 90 * 60 * 1000);
+      x.expressDay = dayStr();
+      return x;
+    }).then(function (ok) {
+      if (!ok) { toast('加急没成：可能今天已经用过了', 3200); return; }
+      Snd.sfx('ding');
+      toast('⚡ 邮差加急跑了一趟：' + (pl ? pl.name : id) + ' 的包裹提前 90 分钟到', 4600);
+      refreshHUD(); openPackPanel();
+    });
+  }
+
   function openPackPanel() {
     var t = T();
     if (!t) return;
@@ -5718,7 +6595,18 @@ window.Game = (function () {
       var unknown = t.count - known.length;
       if (unknown > 0) html += '<p class="muted small-note">还有 ' + unknown + ' 个地方没有地址——去镇上找回忆，或者找阿信。</p>';
     }
-    list.innerHTML = html;
+    /* v4.6.0：批量寄件 / 邮差加急。面板每次重开都重建 DOM，所以在这里直接绑，
+       不会像「永久挂在 document 上」那样越绑越多。 */
+    var batchN = packBatchCandidates().length;
+    var head = '<div class="pack-actions-row">' +
+      (batchN ? ('<button class="btn primary small" type="button" id="pack-batch">📮 一次寄出 ' + batchN + ' 件</button>') : '') +
+      '<button class="btn ghost small" type="button" id="pack-express">⚡ 邮差加急（每天一次）</button>' +
+      '</div>';
+    list.innerHTML = head + html;
+    var pb = $('#pack-batch');
+    if (pb) pb.addEventListener('click', function (e) { e.preventDefault(); sendMany(); });
+    var pe = $('#pack-express');
+    if (pe) pe.addEventListener('click', function (e) { e.preventDefault(); expressParcel(); });
     $('#pack-panel').classList.remove('hidden');
     pause();
   }
@@ -6094,6 +6982,55 @@ window.Game = (function () {
     ctx.fillText(text, x, y);
   }
 
+  /* ============================================================
+   * v4.6.0 · 服装目录（衣柜 / 小铺）
+   * ------------------------------------------------------------
+   * 存档约定（刻意拆成两处，避免双人互相覆盖）：
+   *   world.outfits = { id: 解锁时间戳 }   ← 衣柜是两个人共用的
+   *   slots.a.outfit / slots.b.outfit      ← 各穿各的
+   * 所以「她买了极光大衣」= 两人都解锁了，但只有她穿着。
+   *
+   * cost 的键与 world.res 完全一致（wood/flowers/materials/hay/milk/paper），
+   * 定价原则：价格 = 一次「种一轮 + 做一件」的量，不用刷几十轮。
+   * 不设随机掉落、不设限时，买不起就先去种花。
+   * ============================================================ */
+  var OUTFITS = [
+    { id: 'winter', name: '冬日暖装', icon: '🧣', cost: null, note: '一开始就有' },
+    { id: 'santa', name: '圣诞装', icon: '🎅', cost: { materials: 1, flowers: 4 }, note: '手工礼物 1 · 鲜花 4' },
+    { id: 'home', name: '居家睡衣', icon: '🌙', cost: { wood: 6, flowers: 6 }, note: '木材 6 · 鲜花 6' },
+    { id: 'spring', name: '春日出行', icon: '🌷', cost: { flowers: 12 }, note: '鲜花 12' },
+    { id: 'rain', name: '雨夜风衣', icon: '☔', cost: { materials: 2, paper: 2 }, note: '手工礼物 2 · 信纸 2' },
+    { id: 'snow', name: '雪地探险', icon: '🎿', cost: { wood: 10, hay: 2 }, note: '木材 10 · 干草 2' },
+    { id: 'carpenter', name: '木匠围裙', icon: '🔨', cost: { wood: 16 }, note: '木材 16' },
+    { id: 'party', name: '派对礼服', icon: '✨', cost: { materials: 3, milk: 1 }, note: '手工礼物 3 · 牛奶 1' },
+    { id: 'iceland', name: '极光大衣', icon: '🌌', cost: null, unlock: 'ticket:iceland', note: '拿到冰岛车票后自动解锁' }
+  ];
+  function outfitDef(id) {
+    for (var i = 0; i < OUTFITS.length; i++) if (OUTFITS[i].id === id) return OUTFITS[i];
+    return OUTFITS[0];
+  }
+  function outfitOwned(id) {
+    if (id === 'winter') return true;
+    var w = curWorld() || {};
+    if (w.outfits && w.outfits[id]) return true;
+    var d = outfitDef(id);
+    /* 条件解锁（车票类）是「派生状态」，不额外写存档 */
+    if (d.unlock && /^ticket:/.test(d.unlock)) return hasTicket(d.unlock.slice(7));
+    return false;
+  }
+  function outfitCostText(cost) {
+    if (!cost) return '免费';
+    var N = { wood: '🪵', flowers: '🌸', materials: '🎁', hay: '🌾', milk: '🥛', paper: '📄' };
+    return Object.keys(cost).map(function (k) { return (N[k] || k) + cost[k]; }).join(' · ');
+  }
+  function outfitCanPay(cost) {
+    if (!cost) return true;
+    var r = worldRes();
+    for (var k in cost) if (cost.hasOwnProperty(k) && (r[k] || 0) < cost[k]) return false;
+    return true;
+  }
+  function outfitWornBy(slot) { return getOutfit(slot, 'winter'); }
+
   function getOutfit(slot, def) {
     var d = S.data;
     return (d && d.slots && d.slots[slot] && d.slots[slot].outfit) || def;
@@ -6341,6 +7278,18 @@ window.Game = (function () {
     devAddr: function () { takeAddrToday(); },
     devComm: function () { return commsToday(); },
     devCommDone: function () { return commDone(0) && commDone(1); },
-    devSpecIds: function () { return Object.keys(specMap()); }
+    devSpecIds: function () { return Object.keys(specMap()); },
+    /* v4.6.0 新系统的只读/受控入口（都过了 devHook 闸门，正式站上 ?dev=1 无效） */
+    devLottery: function () {
+      if (!devHook()) return null;
+      var st = lotteryState();
+      st.pool = LOT_POOL.length;
+      st.ticketGot = st.tickets;
+      return st;
+    },
+    devLotGrant: function (n) { if (!devHook()) return Promise.resolve(false); return grantLottery(n || 1, '测试'); },
+    devLotDraw: function (n) { if (!devHook()) return false; drawLottery(n || 1); return true; },
+    devStageShot: function (n) { if (!devHook()) return false; showStageShot(n | 0); return true; },
+    devStageShots: function () { return devHook() ? JSON.parse(JSON.stringify((curWorld() || {}).stageShots || {})) : null; }
   };
 })();

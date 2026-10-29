@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.5.0d" />
+  <link rel="stylesheet" href="style.css?v=4.6.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -198,10 +198,12 @@
       <!-- 交互按钮 -->
       <button id="btn-interact" class="hidden">互动</button>
 
-      <!-- 右下角快捷按钮：换装 / 合影 -->
+      <!-- 右下角快捷按钮：换装 / 抽奖券
+           v4.6.0：原来的独立「📸 合影」已移除（它只是同一张固定构图，
+           真正有价值的合影在每张旅行地图的打卡点和圣诞树升级纪念照里）。 -->
       <div id="hud-quick">
         <button id="btn-outfit" class="quick-btn" type="button" aria-label="换装">👗</button>
-        <button id="btn-photo" class="quick-btn" type="button" aria-label="合影">📸</button>
+        <button id="btn-lottery" class="quick-btn" type="button" aria-label="抽奖券">🎟️</button>
       </div>
 
       <!-- 虚拟摇杆 -->
@@ -270,21 +272,36 @@
         </div>
       </div>
 
-      <!-- 换装面板 -->
+      <!-- 换装 / 服装小铺（v4.6.0：衣柜 + 购买，解锁写共享存档） -->
       <div id="outfit-modal" class="panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
-          <div class="panel-name">👗 圣诞小铺 · 换装</div>
+          <div class="panel-name">👗 圣诞小铺 · 衣柜</div>
           <button class="panel-x" data-close="outfit-modal" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body">
-          <p class="muted">选一套吧，对方会实时看到你的新造型。</p>
-          <div class="outfits" id="outfit-list">
-            <button class="outfit-btn" data-outfit="winter">🧣 冬日暖装</button>
-            <button class="outfit-btn" data-outfit="santa">🎅 圣诞装</button>
-            <button class="outfit-btn" data-outfit="home">🌙 居家睡衣</button>
-          </div>
+          <div id="outfit-wallet" class="shop-wallet"></div>
+          <p class="shop-hint">点一件就能换。还没做的衣服会显示价格——够了就当场穿上。<br>解锁是两个人共用的，穿哪件各算各的。</p>
+          <div class="outfits" id="outfit-list"></div>
         </div>
         <div class="panel-actions"><button id="outfit-close" class="btn ghost small">关闭</button></div>
+      </div>
+
+      <!-- 抽奖券（v4.6.0）：券来自每日一张 / 委托 / 树升级，奖池全是现有资源 -->
+      <div id="lottery-panel" class="panel hidden" role="dialog" aria-modal="true">
+        <div class="panel-head">
+          <div class="panel-name">🎟️ 小镇抽奖</div>
+          <button class="panel-x" data-close="lottery-panel" aria-label="关闭">✕</button>
+        </div>
+        <div class="panel-body">
+          <div id="lottery-top" class="lot-top"></div>
+          <div id="lottery-reel" class="lot-reel"></div>
+          <ul id="lottery-log" class="lot-log"></ul>
+          <p class="lot-tip">券是抽的、不是买的：每天进小镇送 1 张，交一次村民委托 +1 张，树每升一阶 +2 张。<br>抽到的东西直接进家当，不占格子。10 张之内必出一件稀有（衣服 / 车票 / 特产）。</p>
+        </div>
+        <div class="panel-actions">
+          <button id="lottery-draw" class="btn primary">🎟️ 抽一张</button>
+          <button id="lottery-draw5" class="btn ghost small">连抽 5 张</button>
+        </div>
       </div>
 
       <!-- 回忆卡片 -->
@@ -309,6 +326,7 @@
         </div>
         <div class="panel-body">
           <div id="station-list" class="station-list"></div>
+          <div id="station-redeem" class="station-redeem"></div>
           <p id="station-note" class="muted small-note">选一个方向，和 Julie 一起过去看看。到了以后，找找那里留下的一件小东西。</p>
         </div>
         <div class="panel-actions">
@@ -523,6 +541,7 @@
         </div>
         <div class="panel-body">
           <button id="menu-outfit" class="menu-item">👗 换装</button>
+          <button id="menu-lottery" class="menu-item">🎟️ 抽奖券</button>
           <button id="menu-tree" class="menu-item">🎄 圣诞树</button>
           <button id="menu-book" class="menu-item">📖 旅行回忆册</button>
           <button id="menu-res" class="menu-item">🎒 我们的家当</button>
@@ -569,15 +588,15 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js?v=4.5.0d"></script>
-  <script src="memories.js?v=4.5.0d"></script>
-  <script src="chars.js?v=4.5.0d"></script>
-  <script src="sprites.js?v=4.5.0d"></script>
-  <script src="world.js?v=4.5.0d"></script>
-  <script src="maps.js?v=4.5.0d"></script>
-  <script src="specialties.js?v=4.5.0d"></script>
-  <script src="game.js?v=4.5.0d"></script>
-  <script src="app.js?v=4.5.0d"></script>
+  <script src="firebase-config.js?v=4.6.0"></script>
+  <script src="memories.js?v=4.6.0"></script>
+  <script src="chars.js?v=4.6.0"></script>
+  <script src="sprites.js?v=4.6.0"></script>
+  <script src="world.js?v=4.6.0"></script>
+  <script src="maps.js?v=4.6.0"></script>
+  <script src="specialties.js?v=4.6.0"></script>
+  <script src="game.js?v=4.6.0"></script>
+  <script src="app.js?v=4.6.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

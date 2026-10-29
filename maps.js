@@ -495,8 +495,9 @@ window.TravelMaps = (function () {
       cond: [{ type: 'free' }],
       hint: '走到车站，第一张票就在你手上。' },
     spots: [
-      { x: 860, y: 1030, r: 86, label: '📷 在栈道上合影' },
-      { x: 700, y: 1012, r: 86, label: '📷 在湖边合影' }
+      { x: 860, y: 1030, r: 86, label: '📷 在栈道上合影', pose: 'gaze' },
+      { x: 700, y: 1012, r: 86, label: '📷 在湖边合影', pose: 'lean' },
+      { x: 1050, y: 1046, r: 86, label: '📷 坐在栈道尽头合影', pose: 'sit' }
     ],
     obstacles: [
       { x: 976, y: 752, w: 366, h: 116 },
@@ -783,11 +784,12 @@ window.TravelMaps = (function () {
     },
     eggPos: { x: 352, y: 884 },
     ticket: { no: '02', code: 'TBT', color: '#b8452f', ink: '#3a1410', paper: '#f7ece4',
-      cond: [{ type: 'mem', n: 2 }, { type: 'talk', n: 2 }],
+      cond: [{ type: 'mem', n: 4 }, { type: 'craft', n: 2 }],
       hint: '再收两段回忆，或者和镇上的两个人多说说话。' },
     spots: [
-      { x: 700, y: 950, r: 86, label: '📷 在经幡前合影' },
-      { x: 878, y: 1002, r: 86, label: '📷 在山路转弯处合影' }
+      { x: 700, y: 950, r: 86, label: '📷 在经幡前合影', pose: 'wave' },
+      { x: 878, y: 1002, r: 86, label: '📷 在山路转弯处合影', pose: 'point' },
+      { x: 1040, y: 1010, r: 86, label: '📷 在雪山下合影', pose: 'gaze' }
     ],
     obstacles: [
       { x: 1150, y: 660, w: 232, h: 130 },
@@ -1049,11 +1051,12 @@ window.TravelMaps = (function () {
     },
     eggPos: { x: 1124, y: 908 },
     ticket: { no: '03', code: 'DOH', color: '#c08b4a', ink: '#3a2410', paper: '#faf1e2',
-      cond: [{ type: 'cocoa', n: 1 }, { type: 'mem', n: 4 }],
+      cond: [{ type: 'mem', n: 6 }, { type: 'cocoa', n: 2 }],
       hint: '去咖啡店喝一杯热可可，或者把回忆册再收厚一点。' },
     spots: [
-      { x: 962, y: 962, r: 86, label: '📷 在海滨步道合影' },
-      { x: 1078, y: 992, r: 86, label: '📷 在棕榈树下合影' }
+      { x: 962, y: 962, r: 86, label: '📷 在海滨步道合影', pose: 'gaze' },
+      { x: 1078, y: 992, r: 86, label: '📷 在棕榈树下合影', pose: 'front' },
+      { x: 840, y: 1002, r: 86, label: '📷 在海边栏杆旁合影', pose: 'wave' }
     ],
     obstacles: [
       { x: 1096, y: 906, w: 96, h: 40 },
@@ -1305,11 +1308,12 @@ window.TravelMaps = (function () {
     },
     eggPos: { x: 656, y: 962 },
     ticket: { no: '04', code: 'WUH', color: '#2c4a72', ink: '#0d1c30', paper: '#e9edf5',
-      cond: [{ type: 'mem', n: 5 }, { type: 'craft', n: 1 }],
+      cond: [{ type: 'mem', n: 8 }, { type: 'tree', n: 3 }],
       hint: '回忆册再厚一点，或者在工坊里做一件小东西。' },
     spots: [
-      { x: 762, y: 1020, r: 86, label: '📷 在桥景前合影' },
-      { x: 556, y: 1022, r: 86, label: '📷 在江边长椅旁合影' }
+      { x: 762, y: 1020, r: 86, label: '📷 在桥景前合影', pose: 'point' },
+      { x: 556, y: 1022, r: 86, label: '📷 在江边长椅旁合影', pose: 'sit' },
+      { x: 920, y: 1030, r: 86, label: '📷 在江边台阶上合影', pose: 'front' }
     ],
     obstacles: [
       { x: 612, y: 960, w: 96, h: 40 },
@@ -1558,11 +1562,12 @@ window.TravelMaps = (function () {
     },
     eggPos: { x: 1058, y: 938 },
     ticket: { no: '05', code: 'WHI', color: '#b07a3c', ink: '#3a2610', paper: '#f9efdd',
-      cond: [{ type: 'mem', n: 7 }, { type: 'tree', n: 4 }],
+      cond: [{ type: 'mem', n: 10 }, { type: 'craft', n: 4 }],
       hint: '把回忆册攒到七段，或者让小镇的大树再长一阶。' },
     spots: [
-      { x: 520, y: 992, r: 86, label: '📷 在越野车旁合影' },
-      { x: 1310, y: 1092, r: 86, label: '📷 在沙丘上合影' }
+      { x: 520, y: 992, r: 86, label: '📷 在越野车旁合影', pose: 'wave' },
+      { x: 1310, y: 1092, r: 86, label: '📷 在沙丘上合影', pose: 'point' },
+      { x: 900, y: 1044, r: 86, label: '📷 在日落里合影', pose: 'hold' }
     ],
     obstacles: [
       { x: 408, y: 884, w: 232, h: 74 },   // 越野车（车头朝湖，挡着别穿过去）
@@ -1821,11 +1826,12 @@ window.TravelMaps = (function () {
     },
     eggPos: { x: 616, y: 962 },
     ticket: { no: '06', code: 'KUL', color: '#2f6b52', ink: '#0c2618', paper: '#eaf3ec',
-      cond: [{ type: 'mem', n: 9 }, { type: 'visit', n: 3 }],
+      cond: [{ type: 'mem', n: 12 }, { type: 'visit', n: 4 }],
       hint: '收满九段回忆，或者先坐三次车去别的地方。' },
     spots: [
-      { x: 1100, y: 980, r: 86, label: '📷 在双子塔前合影' },
-      { x: 432, y: 1022, r: 86, label: '📷 在公园喷泉旁合影' }
+      { x: 1100, y: 980, r: 86, label: '📷 在双子塔前合影', pose: 'gaze' },
+      { x: 432, y: 1022, r: 86, label: '📷 在公园喷泉旁合影', pose: 'lean' },
+      { x: 760, y: 1030, r: 86, label: '📷 在长椅上歇一会儿', pose: 'sit' }
     ],
     obstacles: [
       { x: 570, y: 960, w: 96, h: 40 },
@@ -2699,14 +2705,15 @@ window.TravelMaps = (function () {
       all: true,
       /* v4.5：树改成六阶段，这里跟着改刻度（5 = 完全点亮，即树到顶）。
          仍然是 AND：只满足树、或只去过几个地方，都换不出这张票。 */
-      cond: [{ type: 'visit', n: 4 }, { type: 'tree', n: 5 }],
+      cond: [{ type: 'visit', n: 4 }, { type: 'tree', n: 5 }, { type: 'mem', n: 14 }],
       /* 没拿到之前，车站和车票册里连这张灰卡都不显示（连「还有第 7 张」都不提示） */
       hidden: true,
       hint: '去过的地方够多了，树也长得像样了——两样都齐了，车站才会多出这一张。'
     },
     spots: [
-      { x: 508, y: 950, r: 88, label: '📷 在冰湖边合影' },
-      { x: 962, y: 992, r: 88, label: '📷 在冰块前合影' }
+      { x: 508, y: 950, r: 88, label: '📷 在冰湖边合影', pose: 'gaze' },
+      { x: 962, y: 992, r: 88, label: '📷 在冰块前合影', pose: 'hold' },
+      { x: 740, y: 1032, r: 86, label: '📷 指着极光合影', pose: 'point' }
     ],
     obstacles: [
       { x: 382, y: 918, w: 96, h: 44 },      // 岸边那块玄武岩

@@ -89,11 +89,130 @@ window.Chars = (function () {
         scarf: '#fbf3e7', scarfDark: '#e0d2c0',
         glove: '#f0d9c2', accent: '#f0a83c'
       }
+    },
+    /* ---------- v4.6.0 新增 ----------
+       只覆盖调色板里与衣服/配饰有关的键，骨架、五官、步态、比例全部沿用同一套。
+       所以新增一套衣服不会让两个人「长得不像自己」，只是换了那身行头。 */
+    spring: {
+      m: {
+        coat: '#7fb8a4', coatMid: '#6ba390', coatDark: '#547f70', coatHi: '#9fd0bd',
+        trim: '#fbf6ea', trimDark: '#e0d5c2',
+        pants: '#6f8f7c', pantsDark: '#57735f',
+        boot: '#9a7a55', bootDark: '#775c3d',
+        scarf: '#f7e9d2', scarfDark: '#dfcdb2',
+        glove: '#f7e9d2', accent: '#e8a0b4'
+      },
+      f: {
+        coat: '#e8a0b4', coatMid: '#d38ba1', coatDark: '#b3718a', coatHi: '#f6bccb',
+        trim: '#fff7ef', trimDark: '#e8d8c8',
+        pants: '#c98fa4', pantsDark: '#a87588',
+        boot: '#b08a68', bootDark: '#8a6a4c',
+        beanie: '#f6bccb', beanieMid: '#e8a0b4', beanieDark: '#c98299',
+        scarf: '#fff7ef', scarfDark: '#e6d6c6',
+        glove: '#fff7ef', accent: '#7fb8a4'
+      }
+    },
+    rain: {
+      m: {
+        coat: '#33506e', coatMid: '#2b455f', coatDark: '#22384e', coatHi: '#4a6d8e',
+        trim: '#d8c27a', trimDark: '#b9a463',
+        pants: '#2a3446', pantsDark: '#1e2633',
+        boot: '#232a33', bootDark: '#171c22',
+        scarf: '#d8c27a', scarfDark: '#b9a463',
+        glove: '#d8c27a', accent: '#f0c040'
+      },
+      f: {
+        coat: '#4a4a7a', coatMid: '#3f3f69', coatDark: '#333357', coatHi: '#66669a',
+        trim: '#e6d49a', trimDark: '#c7b47c',
+        pants: '#34345a', pantsDark: '#282845',
+        boot: '#2a2a3a', bootDark: '#1d1d29',
+        beanie: '#e6d49a', beanieMid: '#d0bd86', beanieDark: '#ad9c6c',
+        scarf: '#e6d49a', scarfDark: '#c7b47c',
+        glove: '#e6d49a', accent: '#f0c040'
+      }
+    },
+    snow: {
+      m: {
+        coat: '#c2553a', coatMid: '#a8482f', coatDark: '#8b3a25', coatHi: '#dd7458',
+        trim: '#fbf3e6', trimDark: '#e0d2bd',
+        pants: '#4a4238', pantsDark: '#352f28',
+        boot: '#5a4632', bootDark: '#413224',
+        scarf: '#fbf3e6', scarfDark: '#dfd2bd',
+        glove: '#3a2f26', accent: '#f2c14b'
+      },
+      f: {
+        coat: '#c2506a', coatMid: '#a8425a', coatDark: '#8b354a', coatHi: '#dd7590',
+        trim: '#fdf5ec', trimDark: '#e3d6c5',
+        pants: '#5a4048', pantsDark: '#42303a',
+        boot: '#6a5038', bootDark: '#4d3a28',
+        beanie: '#fdf5ec', beanieMid: '#e8dccb', beanieDark: '#cbbca6',
+        scarf: '#fdf5ec', scarfDark: '#e3d6c5',
+        glove: '#4a3a34', accent: '#f2c14b'
+      }
+    },
+    carpenter: {
+      m: {
+        coat: '#8a6a45', coatMid: '#775b3b', coatDark: '#5f4830', coatHi: '#a8845c',
+        trim: '#d9c6a8', trimDark: '#bda98b',
+        pants: '#5f5344', pantsDark: '#483e32',
+        boot: '#4a3a2a', bootDark: '#35281c',
+        scarf: '#c9a86f', scarfDark: '#a8894f',
+        glove: '#c9a86f', accent: '#c98a3a'
+      },
+      f: {
+        coat: '#a87c52', coatMid: '#916a45', coatDark: '#765636', coatHi: '#c39a6f',
+        trim: '#e6d5bb', trimDark: '#c9b699',
+        pants: '#6d5c48', pantsDark: '#544636',
+        boot: '#5a4632', bootDark: '#413224',
+        beanie: '#c9a86f', beanieMid: '#b2915a', beanieDark: '#8f7446',
+        scarf: '#e6d5bb', scarfDark: '#c9b699',
+        glove: '#c9a86f', accent: '#c98a3a'
+      }
+    },
+    party: {
+      m: {
+        coat: '#2a2a3a', coatMid: '#232331', coatDark: '#1b1b26', coatHi: '#43435c',
+        trim: '#f0c040', trimDark: '#cba332',
+        pants: '#1f1f2b', pantsDark: '#15151d',
+        boot: '#14141a', bootDark: '#0d0d11',
+        scarf: '#f0c040', scarfDark: '#cba332',
+        glove: '#f7f2e8', accent: '#f0c040'
+      },
+      f: {
+        coat: '#8a2a48', coatMid: '#74223c', coatDark: '#5c1a2f', coatHi: '#a64163',
+        trim: '#f0c040', trimDark: '#cba332',
+        pants: '#5c1a2f', pantsDark: '#481327',
+        boot: '#2a1a20', bootDark: '#1c1116',
+        beanie: '#f0c040', beanieMid: '#d3a836', beanieDark: '#a9862a',
+        scarf: '#f0c040', scarfDark: '#cba332',
+        glove: '#fbf6ea', accent: '#f0c040'
+      }
+    },
+    iceland: {
+      m: {
+        coat: '#1f4a4a', coatMid: '#194040', coatDark: '#123333', coatHi: '#2f6a67',
+        trim: '#cfe9e0', trimDark: '#aecdc4',
+        pants: '#22383c', pantsDark: '#182a2d',
+        boot: '#1a2628', bootDark: '#111b1c',
+        scarf: '#6fe3c4', scarfDark: '#4fbfa4',
+        glove: '#6fe3c4', accent: '#6fe3c4'
+      },
+      f: {
+        coat: '#3a2f5a', coatMid: '#302649', coatDark: '#251d39', coatHi: '#54467f',
+        trim: '#d8e9e2', trimDark: '#b7cdc4',
+        pants: '#2c2444', pantsDark: '#201a33',
+        boot: '#241d33', bootDark: '#181224',
+        beanie: '#6fe3c4', beanieMid: '#4fbfa4', beanieDark: '#399a84',
+        scarf: '#d8e9e2', scarfDark: '#b7cdc4',
+        glove: '#6fe3c4', accent: '#8ef0d6'
+      }
     }
   };
   var PAL_CACHE = {};
   function palFor(g, outfit) {
-    var name = (outfit === 'santa' || outfit === 'home') ? outfit : 'winter';
+    /* v4.6.0：认得所有新衣服；没登记的 id 一律退回 winter（老存档里
+       如果存过一个已删除的衣服名，不会变成透明人） */
+    var name = OUTFIT_PAL[outfit] ? outfit : 'winter';
     var key = g + ':' + name;
     if (PAL_CACHE[key]) return PAL_CACHE[key];
     var out = {}, k;
@@ -101,7 +220,8 @@ window.Chars = (function () {
     var ov = OUTFIT_PAL[name] && OUTFIT_PAL[name][g];
     if (ov) for (k in ov) out[k] = ov[k];
     out.outfit = name;
-    out.noHat = (name === 'home');          // 居家：不戴帽子，头发露出来
+    /* 帽子：居家/春游/木匠/派对不戴，其余保留（冬季帽形不变，只换颜色） */
+    out.noHat = (name === 'home' || name === 'spring' || name === 'carpenter' || name === 'party');
     out.slippers = (name === 'home');       // 居家：靴子换成拖鞋配色
     PAL_CACHE[key] = out;
     return out;

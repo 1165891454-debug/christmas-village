@@ -1125,3 +1125,111 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
 /* 两个按钮都要够手指点：小屏上次按钮也不能低于 44px（Apple HIG 最小触控区） */
 .party-panel #party-go,
 .party-panel #party-later { min-height: 44px; }
+
+/* ============================================================
+ * v4.6.0 · 点击响应 / 服装小铺 / 抽奖券 / 树纪念照
+ * ============================================================ */
+
+/* ---- 1) 点击响应 ----
+ * 这是「菜单/右下角按钮要点两三次」的真正原因：
+ * #hud-top 是 z-index 10、#hud-quick 是 11，而 #panel-scrim 是 19。
+ * 只要有一个面板开着（对话 / 菜单 / 回忆卡 / 结局），第一下点击就被
+ * 遮罩吃掉（等于「关闭面板」），第二下才落到按钮上。
+ * 把这两块提到遮罩之上后，点一次就直达；点其它空白处仍然关面板。 */
+#hud-top, #hud-quick { z-index: 21; }
+#hud-quick .quick-btn { pointer-events: auto; }
+
+/* ---- 2) 服装小铺 ---- */
+.shop-wallet {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 0 0 10px; padding: 8px 10px; border-radius: 10px;
+  background: rgba(255,240,215,.06); border: 1px solid rgba(240,192,64,.2);
+  font-size: 12.5px; color: #efe3cb; font-variant-numeric: tabular-nums;
+}
+.shop-wallet b { color: #ffd98a; font-weight: 600; }
+.shop-hint { margin: 0 0 9px; font-size: 11.5px; line-height: 1.65; color: rgba(232,220,200,.6); }
+#outfit-list { display: grid; gap: 8px; grid-template-columns: 1fr; }
+.outfit-btn {
+  display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px;
+  min-height: 52px; padding: 8px 12px; border-radius: 12px;
+  background: rgba(255,240,215,.05); border: 1px solid rgba(240,192,64,.2);
+  color: #f4ead8; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+}
+.outfit-btn .ob-ico { font-size: 20px; line-height: 1; }
+.outfit-btn .ob-name { display: flex; flex-direction: column; gap: 2px; }
+.outfit-btn .ob-name i { font-style: normal; font-size: 11px; color: rgba(232,220,200,.55); }
+.outfit-btn .ob-state { font-size: 11.5px; color: #ffd98a; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.outfit-btn.is-owned { border-color: rgba(240,192,64,.38); }
+.outfit-btn.is-worn { border-color: rgba(120,200,150,.7); background: rgba(120,200,150,.12); }
+.outfit-btn.is-worn .ob-state { color: #9fe0b4; }
+.outfit-btn.is-locked { opacity: .78; }
+.outfit-btn.is-locked .ob-state { color: rgba(232,220,200,.6); }
+.outfit-btn:active { transform: scale(.985); }
+.outfit-btn[disabled] { cursor: not-allowed; }
+
+/* ---- 3) 抽奖券 ---- */
+.lot-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 9px; padding: 9px 11px; border-radius: 11px;
+  background: rgba(255,240,215,.06); border: 1px solid rgba(240,192,64,.22);
+  font-size: 13px; color: #f4ead8;
+}
+.lot-top b { color: #ffe08a; font-variant-numeric: tabular-nums; }
+.lot-pity { font-size: 11px; color: rgba(232,220,200,.62); }
+.lot-reel {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px;
+  margin: 4px 0 10px;
+}
+.lot-cell {
+  aspect-ratio: 1 / 1; display: grid; place-items: center; gap: 1px;
+  border-radius: 11px; background: rgba(255,240,215,.045);
+  border: 1px solid rgba(240,192,64,.16);
+  font-size: 19px; line-height: 1; color: #f4ead8;
+  transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+.lot-cell i { font-style: normal; font-size: 9.5px; color: rgba(232,220,200,.55); }
+.lot-cell.on { background: rgba(240,192,64,.24); border-color: #ffd98a; transform: scale(1.06); }
+.lot-cell.win { background: rgba(120,200,150,.2); border-color: #9fe0b4; }
+.lot-log { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.lot-log li {
+  display: flex; align-items: center; gap: 8px; font-size: 12.5px;
+  padding: 6px 9px; border-radius: 9px; background: rgba(255,240,215,.05);
+  border-left: 3px solid rgba(240,192,64,.5);
+}
+.lot-log li.rare { border-left-color: #9fe0b4; background: rgba(120,200,150,.1); }
+.lot-log li b { color: #ffe08a; }
+.lot-log .ll-ico { font-size: 15px; }
+.lot-empty { margin: 4px 0; font-size: 12px; color: rgba(232,220,200,.55); }
+.lot-tip { margin: 8px 0 0; font-size: 11px; line-height: 1.6; color: rgba(232,220,200,.5); }
+
+/* ---- 4) 车站车票兑换 ---- */
+.tk-row {
+  display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 11px;
+  background: rgba(255,240,215,.05); border: 1px solid rgba(240,192,64,.18);
+  margin-bottom: 7px; font-size: 12.5px;
+}
+.tk-row .tk-no { font-size: 11px; color: rgba(232,220,200,.5); font-variant-numeric: tabular-nums; }
+.tk-row .tk-name { flex: 1 1 auto; min-width: 0; color: #f4ead8; }
+.tk-row .tk-cost { font-size: 11.5px; color: #ffd98a; white-space: nowrap; }
+.tk-row .tk-state { font-size: 11.5px; color: #9fe0b4; white-space: nowrap; }
+.tk-row.is-owned { border-color: rgba(120,200,150,.4); background: rgba(120,200,150,.08); }
+.tk-row.is-lack .tk-cost { color: rgba(232,220,200,.55); }
+
+/* v4.6.0 · 寄件台的批量按钮行 */
+.pack-actions-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
+.pack-actions-row .btn { flex: 1 1 auto; min-height: 40px; }
+/* v4.6.0 · 车站兑换区 */
+.station-redeem { margin-top: 4px; }
+
+/* v4.6.0 · 右下角抽奖券按钮的张数角标（没有券时压暗，不隐藏入口） */
+#btn-lottery { position: relative; }
+#btn-lottery[data-n]:not([data-n="0"])::after {
+  content: attr(data-n);
+  position: absolute; top: -4px; right: -4px;
+  min-width: 17px; height: 17px; padding: 0 3px;
+  border-radius: 9px; background: #f0c040; color: #2b1d10;
+  font: 700 10.5px/17px system-ui, -apple-system, sans-serif;
+  text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.42);
+  pointer-events: none;
+}
+#btn-lottery.is-empty { opacity: .55; }

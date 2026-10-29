@@ -27,6 +27,32 @@ window.Sprites = (function () {
     home: {
       m: { top: '#5a7a8c', trim: '#4a6a7c', legs: '#4a6a7c', boots: '#8a9aa8', scarf: null, hat: null },
       f: { top: '#b784a9', trim: '#d9b9cf', legs: '#a06f94', boots: '#c9a5b8', scarf: null, hat: null }
+    },
+    /* v4.6.0：cli 渲染层（chars.js 缺失时的兜底）也认得新衣服，
+       保证「没有 chars.js 的极端情况」下不会所有人的颜色都一样。 */
+    spring: {
+      m: { top: '#7fb8a4', trim: '#fbf6ea', legs: '#6f8f7c', boots: '#9a7a55', scarf: '#f7e9d2', hat: null },
+      f: { top: '#e8a0b4', trim: '#fff7ef', legs: '#c98fa4', boots: '#b08a68', scarf: '#fff7ef', hat: 'beanie' }
+    },
+    rain: {
+      m: { top: '#33506e', trim: '#d8c27a', legs: '#2a3446', boots: '#232a33', scarf: '#d8c27a', hat: null },
+      f: { top: '#4a4a7a', trim: '#e6d49a', legs: '#34345a', boots: '#2a2a3a', scarf: '#e6d49a', hat: 'beanie' }
+    },
+    snow: {
+      m: { top: '#c2553a', trim: '#fbf3e6', legs: '#4a4238', boots: '#5a4632', scarf: '#fbf3e6', hat: null },
+      f: { top: '#c2506a', trim: '#fdf5ec', legs: '#5a4048', boots: '#6a5038', scarf: '#fdf5ec', hat: 'beanie' }
+    },
+    carpenter: {
+      m: { top: '#8a6a45', trim: '#d9c6a8', legs: '#5f5344', boots: '#4a3a2a', scarf: '#c9a86f', hat: null },
+      f: { top: '#a87c52', trim: '#e6d5bb', legs: '#6d5c48', boots: '#5a4632', scarf: '#e6d5bb', hat: 'beanie' }
+    },
+    party: {
+      m: { top: '#2a2a3a', trim: '#f0c040', legs: '#1f1f2b', boots: '#14141a', scarf: '#f0c040', hat: null },
+      f: { top: '#8a2a48', trim: '#f0c040', legs: '#5c1a2f', boots: '#2a1a20', scarf: '#f0c040', hat: 'beanie' }
+    },
+    iceland: {
+      m: { top: '#1f4a4a', trim: '#cfe9e0', legs: '#22383c', boots: '#1a2628', scarf: '#6fe3c4', hat: null },
+      f: { top: '#3a2f5a', trim: '#d8e9e2', legs: '#2c2444', boots: '#241d33', scarf: '#d8e9e2', hat: 'beanie' }
     }
   };
 
