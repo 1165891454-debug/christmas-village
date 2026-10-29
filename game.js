@@ -11,6 +11,16 @@
  *  7. WebAudio 合成音乐与音效（可开关，无外部文件）。
  *  8. ?dev=1 测试模式：生长 5 秒、日期门放开。
  * 依赖：Sprites / World / Memories（memories.js）
+ *
+ * ---- v4.5.0d（2026-10-29）三处修正，其余一律未动 ----
+ *  1. ?dev=1 不再是「开了开发模式」的开关，只是「申请」。真正生效需要
+ *     ?demo=1 的本地演示后端（grantDevMode）；正式 Firebase 后台上单独写
+ *     ?dev=1 只会在控制台留一行警告，不缩短计时、不开日期门、不绕管理员口令。
+ *     tools/ 下的双端脚本另有本机回环专用钥匙 ?devroom=1，只开搭场景/读存档接口。
+ *  2. mutate() 事务失败不再「写本机副本并返回成功」：失败就是失败，
+ *     给明确提示、不改存档、不合并、不覆盖云端。
+ *  3. claimParcel() 在「包裹不在了 / 还没到」时放弃事务（以前会算提交成功，
+ *     于是另一端刚领走的那次这边照样弹「回信到了」）。
  */
 window.Game = (function () {
   'use strict';
@@ -33,7 +43,29 @@ window.Game = (function () {
     online: null,   // null=未知；true/false 由 app.js 的 .info/connected 推过来（管理员提示用）
     ending: null, ended: false, photo: false, lastQuestText: '',
     endHintShown: false, plotIdx: 0,
-    dev: (typeof location !== 'undefined') && /[?&#]dev=1/.test(location.search + location.hash)
+    /* ---------- 开发模式（v4.5.0d 重做）----------
+     * 以前这里是 `dev: /[?&#]dev=1/.test(location.search)`——也就是说，
+     * 任何人在正式网站上多打一个 ?dev=1，就能把生长缩到 6 秒、把日期门打开、
+     * 并绕过管理员口令。地址栏不是权限。
+     *
+     * 现在拆成两层，URL 只是「申请」，不是「授权」：
+     *   devUrl   ?dev=1          —— 申请（单独使用不赋予任何能力）
+     *   dev      申请 + 本地演示后端（?demo=1）—— 完整开发模式：
+     *            缩短计时 / 日期门放开 / dev 接口 / 管理员绕过
+     *   harness  申请 + 本地回环地址 + ?devroom=1（且不是 demo）
+     *            —— 只给 tools/ 下的双端脚本开放「搭场景 / 读存档」接口，
+     *               不缩短计时、不放开日期门、不绕管理员口令。
+     *               发布出去的站点永远不是回环地址，所以这条拿不到。
+     * 判定统一在 grantDevMode()（enter 时才知道后端是什么）。 */
+    devUrl: (typeof location !== 'undefined') && /[?&#]dev=1/.test(location.search + location.hash),
+    devRoom: (typeof location !== 'undefined') && /[?&#]devroom=1/.test(location.search + location.hash),
+    dev: false,
+    harness: false,
+    demoBackend: false,
+    devWarned: false,
+    /* 上一次 mutate 失败的原因（用来看「是网络/权限失败」还是「业务规则放弃」） */
+    lastMutFailAt: 0,
+    lastMutErr: ''
   };
 
   var SPEED = 166;
@@ -44,11 +76,27 @@ window.Game = (function () {
   };
 
   /* ---------- 养成配置 ---------- */
+  /* 真实时长：花 30 分钟、树 6 小时。开发用的缩短值（6 秒 / 10 秒）现在由 S.dev 决定，
+     而 S.dev 只有「?dev=1 + 本地演示后端」同时成立才为 true（见 grantDevMode）。
+     用 getter 而不是「加载时改一次」：模块顶层执行时还不知道后端是什么，
+     改成每次读取时现算，就不存在「先缩短、后来才知道是正式后端」的窗口。 */
   var GROW = {
-    flower: { ms: 30 * 60 * 1000, yield: 3, label: '花种 🌱', need: '30 分钟' },
-    tree: { ms: 6 * 60 * 60 * 1000, yield: 5, label: '树种 🌲', need: '6 小时' }
+    flower: { yield: 3, label: '花种 🌱' },
+    tree: { yield: 5, label: '树种 🌲' }
   };
-  if (S.dev) { GROW.flower.ms = 6000; GROW.tree.ms = 10000; GROW.flower.need = '6 秒(dev)'; GROW.tree.need = '10 秒(dev)'; }
+  function devMs(realMs, fastMs) { return S.dev ? fastMs : realMs; }
+  Object.defineProperty(GROW.flower, 'ms', {
+    enumerable: true, get: function () { return devMs(30 * 60 * 1000, 6000); }
+  });
+  Object.defineProperty(GROW.flower, 'need', {
+    enumerable: true, get: function () { return S.dev ? '6 秒(dev)' : '30 分钟'; }
+  });
+  Object.defineProperty(GROW.tree, 'ms', {
+    enumerable: true, get: function () { return devMs(6 * 60 * 60 * 1000, 10000); }
+  });
+  Object.defineProperty(GROW.tree, 'need', {
+    enumerable: true, get: function () { return S.dev ? '10 秒(dev)' : '6 小时'; }
+  });
 
   /* ---------- 圣诞树：六个阶段（v4.5）----------
    * 以前只有 4 个值（0..3），而 1→3 画的是同一棵满高的树，
@@ -82,9 +130,40 @@ window.Game = (function () {
     { id: 'paper', name: '一沓信纸', wood: 2, flowers: 0, out: { paper: 3 }, desc: '把木头刨薄、压平、裁齐，就是写信用的纸。' },
     { id: 'giftbox', name: '寄件礼盒', wood: 2, flowers: 2, need: { paper: 1 }, out: { giftbox: 1 }, desc: '钉一个木盒，铺上干花，系上麻绳——寄出去该有的样子。' }
   ];
-  /* 寄一封信要等多久：真实 2 小时；?dev=1 下 20 秒，方便验收 */
+  /* 寄一封信要等多久：真实 2 小时；?dev=1 + 本地演示后端下 20 秒，方便验收。
+     这里用函数而不是在加载时改常量，理由同上：时长只在你真正处在演示环境时才变。 */
   var PACK_MS = 2 * 60 * 60 * 1000;
-  if (S.dev) PACK_MS = 20 * 1000;
+  function packMs() { return devMs(PACK_MS, 20 * 1000); }
+
+  /* 本机回环地址（tools/ 下的双端脚本都跑在这里） */
+  function isLoopback() {
+    try {
+      if (location.protocol === 'file:') return true;
+      var h = location.hostname;
+      return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
+    } catch (e) { return false; }
+  }
+
+  /* 开发模式的唯一授权点：enter() 拿到 backend 之后调一次。
+   * 这是「地址栏说想要」→「环境说可以给」的合流处，改这里一处，
+   * 缩短计时 / 日期门 / 管理员绕过 / dev 接口 会一起生效或一起失效。 */
+  function grantDevMode() {
+    var demo = !!(S.backend && S.backend.mode === 'demo');
+    S.demoBackend = demo;
+    S.dev = !!S.devUrl && demo;
+    S.harness = !!S.devUrl && !!S.devRoom && !demo && isLoopback();
+    if (S.devUrl && !S.dev && !S.harness && !S.devWarned) {
+      S.devWarned = true;
+      toast('🛠️ ?dev=1 只在本地演示（?demo=1）里生效，正式房间已忽略该参数', 5600);
+      if (window.console) console.warn('[dev] ?dev=1 ignored: backend=' + ((S.backend && S.backend.mode) || 'none') + ', loopback=' + isLoopback());
+    }
+    return S.dev;
+  }
+  /* dev 系测试接口的闸门：完整开发模式，或本机测试台 */
+  function devHook() { return !!(S.dev || S.harness); }
+  /* 改存档 / 绕过口令这类敏感操作的闸门：只认「完整开发模式」或真实管理员会话。
+     注意这里**没有** harness —— 真后端上的测试台也必须先输口令。 */
+  function devOrAdmin() { return !!(adminOk || S.dev); }
 
   function dayStr() {
     var d = new Date();
@@ -363,33 +442,42 @@ window.Game = (function () {
       w.parcels = w.parcels || {};
       if (w.parcels[placeId]) return undefined;
       w.res.giftbox -= 1;
-      w.parcels[placeId] = { at: Date.now(), readyAt: Date.now() + PACK_MS };
+      w.parcels[placeId] = { at: Date.now(), readyAt: Date.now() + packMs() };
       w.sent = (w.sent || 0) + 1;
       return w;
     }).then(function (ok) {
       if (!ok) {
         /* 事务被拒：要么对方先寄了同一件，要么礼盒刚好被用掉——都不是"没反应"，
-           按真实原因说一句。 */
+           按真实原因说一句。但网络/权限失败已经由 mutate 提示过了，别再说错原因。 */
+        if (mutNetFail()) { refreshHUD(); return; }
         if (parcelOf(placeId)) toast('📮 已经有一件寄往' + pl.name + '了，先等它回来', 3200);
         else toast('没寄出去：礼盒不够了，再做一个（纸×1 + 木材×2 + 鲜花×2）', 4200);
         refreshHUD();
         return;
       }
       Snd.sfx('craft');
-      toast('📮 包裹寄往' + pl.name + '了 · 大概 ' + fmtRemain(PACK_MS) + '后回来', 4200);
+      toast('📮 包裹寄往' + pl.name + '了 · 大概 ' + fmtRemain(packMs()) + '后回来', 4200);
       refreshHUD();
       if (S.interId === 'workshop') openPackPanel();
     });
   }
 
-  /* 领回信：不消耗任何东西，特产是「一件」，重复领不到第二件 */
+  /* 领回信：不消耗任何东西，特产是「一件」，重复领不到第二件。
+   *
+   * v4.5.0d：以前这里在「包裹不存在 / 还没到」时 `return w` —— 事务算提交成功，
+   * 于是另一端刚领走的那次，这边会照样播音效、弹「回信到了」、还去开信袋面板。
+   * 现在改成 `return undefined`（放弃本次事务），并且记住原因：
+   * 不存在 = 已被另一端领走；未到点 = 还没送到。奖品一分不受影响。 */
   function claimParcel(placeId) {
     var t = T(), pl = t && t.get(placeId);
     if (!pl) return;
+    var why = '';
     mutate(function (w) {
       w.parcels = w.parcels || {};
       var p = w.parcels[placeId];
-      if (!p || p.readyAt > Date.now()) return w;
+      if (!p) { why = 'gone'; return undefined; }
+      if (p.readyAt > Date.now()) { why = 'early'; return undefined; }
+      why = 'ok';
       delete w.parcels[placeId];
       w.spec = w.spec || {};
       w.spec[placeId] = w.spec[placeId] || Date.now();
@@ -407,7 +495,16 @@ window.Game = (function () {
       }
       return w;
     }).then(function (ok) {
-      if (!ok) return;
+      if (!ok) {
+        /* 事务被拒：说清是哪一种，而不是假装成功。
+           （网络原因已经在 mutate 里提示过了，这里不再叠一条。） */
+        if (!mutNetFail()) {
+          if (why === 'gone') toast('📭 这件已经拆过了——另一端刚领走，物产册里已经有了', 4400);
+          else if (why === 'early') toast('⏳ 这件还在路上，再等一会儿', 3600);
+        }
+        if (why === 'gone' || why === 'early') openMailPanel();
+        return;
+      }
       Snd.sfx('harvest');
       burst(S.self.x, S.self.y - 46, 'spark', 6);
       toast('✉️ ' + pl.name + '的回信到了 · ' + pl.icon + ' ' + pl.item + ' 已收进物产册' +
@@ -698,40 +795,52 @@ window.Game = (function () {
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
   /* mutate(fn)：fn(w) 原地修改并返回 w；返回 undefined 表示放弃。
-   * Firebase 模式走 transaction（双设备防重复）；失败/无权限 → 本机降级。 */
+   *
+   * Firebase 模式走 transaction（双设备防重复）。
+   *
+   * ---- v4.5.0d 修正 ----
+   * 旧实现在 catch 里做了三件错事：把 worldFallback 置 true、把同一次改动重放到
+   * 本机副本、然后 return true。结果是「云端一个字都没写，界面却说你成功了」，
+   * 而且从这一秒起所有写入都跑本机，两台设备永久分叉，玩家要等下次刷新才发现。
+   *
+   * 现在的规则只有三种出口：
+   *   事务提交成功            → true   （唯一的成功）
+   *   fn 返回 undefined       → false  （业务规则放弃：已有作物 / 包裹已被领走 / 资源不够）
+   *   事务抛错、被规则拒绝     → false  （不动本机、不动存档、不合并、不覆盖云端）
+   * 失败时给一条明确提示，玩家再点一次同一个按钮即可重试 —— fn 是「读旧值写新值」的
+   * 纯改写，重放本身是安全的，所以不需要我们自己造重试队列。
+   */
   function mutate(fn) {
     if (!S.backend || !S.backend.worldTransact) return Promise.resolve(false);
-    if (S.worldFallback) {
-      var base = S.localWorld || defaultWorld();
-      var next = fn(base);
-      if (next === undefined) return Promise.resolve(false);
-      S.localWorld = next; S.world = next;
-      refreshHUD(); absorbQuest(next);
-      return Promise.resolve(true);
-    }
     return S.backend.worldTransact(function (cur) {
       var w = cur || defaultWorld();
       return fn(w);
     }).then(function (r) {
-      if (r && r.committed) {
+      var ok = !!(r && r.committed);
+      if (ok) {
+        /* 成功一次就把「刚才失败过」的记号清掉：
+           否则紧接着的一次业务拒绝（包裹已被另一端领走）会被误判成网络问题，
+           提示语该说「已经拆过了」的时候被吞掉。 */
+        S.lastMutFailAt = 0;
         S.world = r.value;
         refreshHUD(); absorbQuest(r.value);
       }
-      return !!(r && r.committed);
+      return ok;
     }).catch(function (err) {
-      // 通常是 Firebase 规则尚未放行 rooms/{id}/world → 降级本机保存
-      S.worldFallback = true;
-      S.localWorld = clone(curWorld() || defaultWorld());
-      var next = fn(S.localWorld);
-      if (next !== undefined) { S.localWorld = next; S.world = next; }
-      refreshHUD(); absorbQuest(S.localWorld);
-      if (!S.worldErrShown) {
-        S.worldErrShown = true;
-        toast('⚠️ 共享进度暂存在本机：云端 world 节点还没放行（见 README「v2 规则更新」）。换设备游玩前请先完成那一步。', 6500);
-      }
-      return true;
+      /* 事务失败 = 这次真的没写成。绝不在这里写本机副本，也不返回 true。 */
+      S.lastMutFailAt = Date.now();
+      S.lastMutErr = (err && (err.code || err.message)) || 'transaction-failed';
+      if (window.console) console.error('[mutate] 云端事务失败，本次改动没有生效：', err);
+      toast(netDown()
+        ? '⚠️ 网络断了，这一步没写进云端，存档没有变化。网络恢复后再点一次就好。'
+        : '⚠️ 这一步没写进云端（权限或服务异常），存档没有变化。稍后再点一次。', 6200);
+      return false;
     });
   }
+
+  /* 上一次 mutate 是不是「云端失败」（而不是业务规则放弃）。
+   * 用来避免把网络问题说成「种子不够」「礼盒不够」这种错的原因。 */
+  function mutNetFail() { return (Date.now() - (S.lastMutFailAt || 0)) < 2500; }
 
   function refreshHUD() {
     var r = worldRes();
@@ -995,9 +1104,155 @@ window.Game = (function () {
     return h + ' 小时 ' + (m % 60) + ' 分';
   }
 
+  /* ---------- v4.5.1：统一的倒计时格式（mm:ss / h:mm:ss）----------
+   * 只负责「把真实剩余毫秒格式化成一行字」，不参与任何状态判断。
+   * 判断永远是 Date.now() >= 完成时间戳；这里只是显示层。
+   * 向上取整：还剩 1ms 显示 0:01（而不是 0:00 卡住），到点直接走「已成熟」分支，
+   * 所以不会出现「0:00 停着」或者「-00:01」。 */
+  function fmtCountdown(ms) {
+    var s = Math.max(0, Math.ceil(Number(ms) / 1000));
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return h > 0 ? (h + ':' + p2(m) + ':' + p2(ss)) : (m + ':' + p2(ss));
+  }
+
+  /* ---------- v4.5.1：真实时间机制总清单（只读）----------
+   * 一处集中「现在有哪些东西在等」，供管理员时间状态面板和测试脚本使用。
+   *
+   * 这里**不维护任何副本状态**：每一项都是当场从 curWorld() 的时间戳算出来的
+   * （garden[p].plantedAt + GROW[kind].ms、parcels[id].readyAt、按天重置的 day 字段）。
+   * 所以刷新 / 关页面 / 换设备看到的是同一份真值。
+   *
+   * 返回项：{ kind, icon, name, at, target, remain, status, done, place, note }
+   *   kind   : 'flower' | 'tree' | 'parcel' | 'day' | 'date'
+   *   at     : 开始时间戳（没有则为 null）
+   *   target : 完成时间戳（按天重置 / 日期门用「下一个 00:00」）
+   *   remain : 剩余毫秒（已完成则 0）
+   */
+  /* 「这段时长用一句话怎么说」（只给说明文字用，不参与判断） */
+  function durText(ms) {
+    var s = Math.round(Number(ms) / 1000);
+    if (s < 60) return s + ' 秒';
+    var m = Math.round(s / 60);
+    if (m < 60) return m + ' 分钟';
+    var h = m / 60;
+    return (h % 1 ? h.toFixed(1) : h) + ' 小时';
+  }
+  function nextDayStart(from) {
+    var d = new Date(from || Date.now());
+    d.setHours(24, 0, 0, 0);
+    return d.getTime();
+  }
+  function timeEvents() {
+    var now = Date.now();
+    var w = curWorld() || {};
+    var out = [];
+
+    /* 1. 温室两块地：花 30 分钟 / 树 6 小时（真实时间，不依赖页面是否开着） */
+    var g = w.garden || {};
+    for (var i = 1; i <= 6; i++) {
+      var p = g['p' + i];
+      if (!p) continue;
+      var conf = GROW[p.kind] || GROW.flower;
+      var planted = p.plantedAt || 0;
+      var target = planted + conf.ms;
+      var remain = Math.max(0, target - now);
+      var isTree = p.kind === 'tree';
+      out.push({
+        kind: isTree ? 'tree' : 'flower',
+        icon: isTree ? '🌳' : '🌸',
+        name: (isTree ? '小树（树种）' : '花（花种）') + ' · 第 ' + i + ' 块地',
+        at: planted, target: target, remain: remain,
+        done: remain <= 0,
+        status: remain <= 0 ? '✓ 已成熟' : (isTree ? '成长中' : '生长中'),
+        note: durText(conf.ms) + ' · 收成 ' + (isTree ? '🪵×' + GROW.tree.yield : '🌸×' + GROW.flower.yield)
+      });
+    }
+
+    /* 2. 邮寄：真实 2 小时（?dev=1 时 20 秒，这是原有配置，本章不动） */
+    var ps = w.parcels || {};
+    var t = (typeof T === 'function') ? T() : null;
+    for (var pid in ps) {
+      if (!ps.hasOwnProperty(pid) || !ps[pid]) continue;
+      var pa = ps[pid];
+      var readyAt = pa.readyAt || 0;
+      var left = Math.max(0, readyAt - now);
+      var pl = t && t.get ? t.get(pid) : null;
+      out.push({
+        kind: 'parcel', icon: '📮',
+        name: (pl ? pl.name : pid) + ' 包裹',
+        at: pa.at || 0, target: readyAt, remain: left,
+        done: left <= 0,
+        status: left <= 0 ? '✓ 已送达（等你去取）' : '运输中',
+        note: (pa.fast ? '加急代寄 · 全程 ' : '普通寄件 · 全程 ') + durText(packMs())
+      });
+    }
+
+    /* 3. 按天重置的每日额度（没有「等多久」的进度条，但确实要等到明天 00:00） */
+    var today = dayStr();
+    var midnight = nextDayStart(now);
+    function dayRow(icon, name, usedToday, note) {
+      var leftMs = usedToday ? Math.max(0, midnight - now) : 0;
+      out.push({
+        kind: 'day', icon: icon, name: name,
+        at: null, target: usedToday ? midnight : null, remain: leftMs,
+        done: !usedToday,
+        status: usedToday ? ('今天已用完 · 明天 00:00 重置') : '现在就可以做',
+        note: note || '按自然日重置'
+      });
+    }
+    dayRow('🎁', '温室每日补给', !!(w.daily && w.daily.day === today), '种子 ×2 · 木材 ×1 · 鲜花 ×1');
+    dayRow('☕', '热可可（每天一杯）', !!(w.cocoa && w.cocoa.lastDay === today), '吧台免费');
+    dayRow('📬', '向阿信领今天的地址', w.addrDay === today, '每天一个地址 + 一张信纸');
+    dayRow('📮', '换地址（📄3 🎁1）', w.addrTradeDay === today, '每天一次');
+    dayRow('🚴', '加急代寄（📄1）', w.expressDay === today, '当天带回一件已有地址的特产');
+    dayRow('🪵', '老木匠的边角料 +3', w.carpenterDay === today, '每天一次');
+    dayRow('🌾', '牧场干草垛（抱 3 捆）', !!(w.ranch && w.ranch.hayDay === today), '每天一次');
+
+    /* 4. 牧场：喂一次 → 第二天来收 */
+    var ids = ['cow', 'sheep', 'hen'];
+    var RN = { cow: '奶牛', sheep: '绵羊', hen: '母鸡' };
+    ids.forEach(function (a) {
+      var e = (w.ranch && w.ranch[a]) || {};
+      if (!e.fed) {
+        out.push({
+          kind: 'day', icon: '🐾', name: RN[a] + ' · 牧场',
+          at: null, target: null, remain: 0, done: false,
+          status: '还没喂（喂完第二天来收）', note: '需要 🌾 干草 ×1'
+        });
+        return;
+      }
+      var ready = e.ready || '';
+      var isReady = !!ready && ready <= today;
+      out.push({
+        kind: 'day', icon: isReady ? '✅' : '🐾', name: RN[a] + ' · 牧场',
+        at: null, target: isReady ? null : new Date(ready + 'T00:00:00').getTime(),
+        remain: isReady ? 0 : Math.max(0, new Date(ready + 'T00:00:00').getTime() - now),
+        done: isReady,
+        status: isReady ? '✓ 可以收了' : ('喂过了 · ' + ready + ' 早上收'),
+        note: '喂一次管一天'
+      });
+    });
+
+    /* 5. 日期门：最终庆典要等圣诞夜（2026-12-25）——不是倒计时条，而是「还差几天」 */
+    var xmas = new Date(2026, 11, 25).getTime();
+    out.push({
+      kind: 'date', icon: '🎄', name: '圣诞夜（庆典日期门）',
+      at: null, target: xmas, remain: Math.max(0, xmas - now),
+      done: now >= xmas,
+      status: now >= xmas ? '✓ 已经是圣诞夜' : ('还有 ' + Math.max(0, daysToChristmas()) + ' 天'),
+      note: '日期门按本机日期判断（原有逻辑）'
+    });
+
+    return out;
+  }
+
   /* ---------- 进入游戏 ---------- */
   function enter(code, backend, opts) {
     S.code = code; S.backend = backend; S.opts = opts || {};
+    /* 先定开发模式：此刻才知道 backend 是本地演示还是真 Firebase。
+       这一行必须在任何用到 GROW / PACK_MS / 日期门 的逻辑之前。 */
+    grantDevMode();
     S.mySlot = backend.mySlot();
     S.otherSlot = S.mySlot === 'a' ? 'b' : 'a';
     S.canvas = $('#game-canvas');
@@ -1034,6 +1289,9 @@ window.Game = (function () {
     S.partyBase = null;
     S.partyPlayed = -1;
     S.partyReady = false; S.adminPreview = false;
+    /* 换房间 / 换槽位 / 重新进游戏 → 管理员授权一律作废（它本来就只在内存里） */
+    adminOk = false;
+    adminStopClock();
     S.world = null; S.localWorld = null;
 
     if (S.data && S.data.world) absorbQuest(S.data.world);
@@ -1690,6 +1948,7 @@ window.Game = (function () {
       w.garden[id] = { kind: kind, plantedAt: Date.now() };
       return w;
     }).then(function (ok) {
+      if (mutNetFail()) return;   // 云端没写成 —— mutate 已经提示过，别误报成「种子不够」
       var w = curWorld();
       var planted = w && w.garden && w.garden['p' + (i + 1)];
       if (planted) {
@@ -1717,6 +1976,7 @@ window.Game = (function () {
       else w.res.flowers = (w.res.flowers || 0) + conf.yield;
       return w;
     }).then(function (ok) {
+      if (mutNetFail()) return;   // 同上：网络失败时不要谎报「还没长好」
       var w = curWorld();
       var still = w && w.garden && w.garden['p' + (i + 1)];
       if (still) {
@@ -4161,7 +4421,40 @@ window.Game = (function () {
    *   这里所有写操作都仍然老老实实经过原来的 world 事务与规则校验。
    * ============================================================ */
   var ADMIN_HASH = 1786157946;   // djb2('omo' + PIN)，口令本身不写进源码
+  /* ---------- v4.5.1：管理员授权改成「一次性会话」----------
+   * 以前 adminOk 就是一个页面级布尔量，输对一次以后**永远保持 true**：
+   * 关掉「小镇维护」再点开，PIN 输入框根本不会出现（这就是「一次输入永久保持」）。
+   *
+   * 现在的约定：
+   *   - 只在内存里（就是下面这个变量），不写 localStorage / sessionStorage /
+   *     Firebase world / 玩家存档 / URL —— 刷新、重开浏览器、换房间都会自然清空；
+   *   - 每次真正离开「小镇维护」（关闭面板、点遮罩、按 ESC、切到别的面板、
+   *     换房间）都会立刻置回 false，下次进来必须重新输口令；
+   *   - 面板内部操作（补车票 / 加素材 / 恢复备份 / 时间推进）属于同一次会话，
+   *     不会中断授权。
+   */
   var adminOk = false;
+  var adminClock = null;         // 「时间状态」每秒刷新的定时器（关面板就停）
+
+  function adminEndSession() {
+    if (!adminOk) return;
+    adminOk = false;
+    adminStopClock();
+    /* 回到口令页：把已经渲染出来的管理内容一起收起来，
+       避免「下次进来先闪一下上一位管理员的界面」。 */
+    var wrap = $('#admin-pin-wrap'), body = $('#admin-body');
+    if (wrap) wrap.classList.remove('hidden');
+    if (body) body.classList.add('hidden');
+    var pin = $('#admin-pin');
+    if (pin) pin.value = '';
+    var err = $('#admin-pin-err');
+    if (err) err.classList.add('hidden');
+    /* 把上一次会话渲染出来的内容也清掉：下次输口令前不该看到上一位的进度快照 */
+    ['#admin-status', '#admin-time', '#admin-mats'].forEach(function (s) {
+      var el = $(s);
+      if (el) el.innerHTML = '';
+    });
+  }
 
   function djb2(str) {
     var h = 5381;
@@ -4242,6 +4535,103 @@ window.Game = (function () {
     return backupWorld();
   }
 
+  /* ---------- v4.5.1：时间状态（管理员）----------
+   * 只做两件事：把 timeEvents() 渲染成一行行，以及每秒重算一次。
+   * 不缓存、不递减本地计时器——每次刷新都重新用「完成时间戳 - Date.now()」算，
+   * 所以刷新、切后台、两个人同时看，显示的都是同一份真值。 */
+  function adminTimeRow(it) {
+    /* 只有「真的在等一个时间点」的才显示倒计时：
+       - 已完成 → ✓ 已成熟 / ✓ 已送达
+       - 日期门（还有 57 天）→ 直接给天数，不显示 1359:01:42 这种怪数字
+       - 还没开始 / 今天没用过 → 显示状态说明，不要出现「剩余 0:00」卡着 */
+    var hasCd = !!it.target && !it.done && it.kind !== 'date';
+    var right = it.done
+      ? '<b class="at-done">' + esc(it.status) + '</b>'
+      : (hasCd ? '<b class="at-left">剩余 ' + fmtCountdown(it.remain) + '</b>'
+        : '<b class="at-note">' + esc(it.status) + '</b>');
+    return '<div class="at-row' + (it.done ? ' is-done' : '') + '">' +
+      '<span class="at-ic">' + it.icon + '</span>' +
+      '<span class="at-name">' + esc(it.name) +
+      '<i>' + esc(it.note || '') + '</i></span>' +
+      '<span class="at-right">' + right + '</span></div>';
+  }
+  function adminTimeGroupsHTML(list) {
+    var groups = [
+      { k: 'flower', t: '🌸 花朵' },
+      { k: 'tree', t: '🌳 果树' },
+      { k: 'parcel', t: '📮 邮件' },
+      { k: 'day', t: '📅 每日额度' },
+      { k: 'date', t: '🎄 日期门' }
+    ];
+    var html = '';
+    groups.forEach(function (g) {
+      var rows = list.filter(function (x) { return x.kind === g.k; });
+      if (!rows.length) return;
+      html += '<div class="at-group"><div class="at-head">' + g.t + '</div>' +
+        rows.map(adminTimeRow).join('') + '</div>';
+    });
+    if (!html) html = '<p class="muted small-note">现在没有正在进行的等待。</p>';
+    return html;
+  }
+  function renderAdminTime() {
+    var el = $('#admin-time');
+    if (!el) return;
+    var list = timeEvents();
+    var now = new Date();
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    el.innerHTML =
+      '<p class="at-now">查询时刻 ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()) +
+      '　·　全部由完成时间戳现算（每秒刷新）</p>' + adminTimeGroupsHTML(list);
+  }
+  function adminStartClock() {
+    renderAdminTime();
+    adminStopClock();
+    adminClock = setInterval(function () {
+      var p = $('#admin-panel');
+      if (!p || p.classList.contains('hidden') || !adminOk) { adminStopClock(); return; }
+      renderAdminTime();
+    }, 1000);
+  }
+  function adminStopClock() {
+    if (adminClock) { clearInterval(adminClock); adminClock = null; }
+  }
+
+  /* ---------- 测试时间推进（只在管理员会话里可用）----------
+   * 做法：把「已经开始的那些等待」的原点往前拨，等价于「时间过去了 X」。
+   *   garden[x].plantedAt -= ms
+   *   parcels[x].at / readyAt -= ms
+   * 完全不改 GROW / PACK_MS 这些时长配置，也不另开一套时钟，
+   * 所以普通玩家的 30 分钟 / 6 小时 / 2 小时一秒都没变。
+   * 因为它改的是房间共享存档，两台设备会同时看到结果——这一点会在界面上写明。 */
+  var timeAdvPending = false;
+  function timeAdvance(ms) {
+    ms = Math.floor(Number(ms) || 0);
+    if (!devOrAdmin()) return Promise.resolve(false);
+    if (ms <= 0 || timeAdvPending) return Promise.resolve(false);
+    timeAdvPending = true;
+    backupWorldThrottled(30000);
+    return mutate(function (w) {
+      var g = w.garden || {};
+      for (var id in g) {
+        if (g.hasOwnProperty(id) && g[id] && typeof g[id].plantedAt === 'number') g[id].plantedAt -= ms;
+      }
+      var ps = w.parcels || {};
+      for (var pid in ps) {
+        if (!ps.hasOwnProperty(pid) || !ps[pid]) continue;
+        if (typeof ps[pid].at === 'number') ps[pid].at -= ms;
+        if (typeof ps[pid].readyAt === 'number') ps[pid].readyAt -= ms;
+      }
+      return w;
+    }).then(function (ok) {
+      timeAdvPending = false;
+      logAdmin('测试时间推进', String(ms) + 'ms', null, null, !!ok);
+      renderAdminTime();
+      toast(ok ? ('🧪 测试时间推进 +' + fmtRemain(ms) + '（只改本房间的进行中倒计时，时长配置没动）')
+        : '时间没推进成功，再试一次', 4200);
+      return !!ok;
+    }, function () { timeAdvPending = false; return false; });
+  }
+
   function openAdminGate() {
     var p = $('#admin-panel');
     if (!p) return;
@@ -4253,6 +4643,7 @@ window.Game = (function () {
       wrap.classList.add('hidden');
       body.classList.remove('hidden');
       renderAdminStatus();
+      adminStartClock();
     } else {
       wrap.classList.remove('hidden');
       body.classList.add('hidden');
@@ -4265,6 +4656,10 @@ window.Game = (function () {
     var el = $('#admin-status');
     if (!el) return;
     var lines = [];
+    /* 授权状态摆第一行：让人一眼看出「这次是刚输过口令的一次性会话」。 */
+    lines.push('<div class="admin-sec admin-sec-auth"><b>授权</b><span>' +
+      (adminOk ? '✓ 本次维护已解锁 · 关闭维护面板后立即失效' : '✗ 未解锁（请输入口令）') +
+      '</span></div>');
     var owned = [], locked = [];
     if (window.TravelMaps) {
       TravelMaps.list().forEach(function (d) { (hasTicket(d.id) ? owned : locked).push(d.name); });
@@ -4475,6 +4870,9 @@ window.Game = (function () {
   };
 
   function adminDo(kind) {
+    /* 没有有效会话就什么都不做（正常路径根本进不来，这里只是兜底：
+       以前 adminOk 一旦为 true 永不回退，任何残留调用都还能改存档）。 */
+    if (!devOrAdmin()) return;
     if (kind === 'gifts') { adminGifts(); return; }   // 带自己的确认文案与前后计数
     if (kind && kind.indexOf('mat:') === 0) { addMat(kind.slice(4), null); return; }
     /* 恢复备份必须最先分出去：以前它跟着「先备份再操作」的通用流程走，
@@ -4538,8 +4936,8 @@ window.Game = (function () {
   }
 
   /* 管理员写完之后到底写进哪儿了？界面必须说实话：
-   *   ok=false            → 连事务都没提交
-   *   S.worldFallback     → 云端拒绝（规则/权限），mutate 把改动存到本机了
+   *   ok=false            → 连事务都没提交（v4.5.0d：失败不再降级本机，所以只剩这一种失败）
+   *   S.worldFallback     → 保留的老字段，现在不会被置位；留着是为了旧存档/旧日志读得动
    *   S.online === false  → 断网：改动排进了 Firebase 待同步队列，联网才会真正落盘
    * 只有三种都不是，才算「真的写进云端了」。 */
   function netDown() {
@@ -4633,9 +5031,11 @@ window.Game = (function () {
         var v = (pinEl.value || '').trim();
         if (djb2('omo' + v) === ADMIN_HASH) {
           adminOk = true;
+          pinEl.value = '';
           $('#admin-pin-wrap').classList.add('hidden');
           $('#admin-body').classList.remove('hidden');
           renderAdminStatus();
+          adminStartClock();
         } else {
           /* 只告诉对方「不对」，不透露位数、不透露任何内部信息 */
           $('#admin-pin-err').classList.remove('hidden');
@@ -4650,6 +5050,31 @@ window.Game = (function () {
       if (ab[i].dataset.bound) continue;
       ab[i].dataset.bound = '1';
       ab[i].addEventListener('click', function () { adminDo(this.getAttribute('data-admin')); });
+    }
+    /* 测试时间推进的四个按钮（只有进了管理员会话才点得到，面板关了就消失） */
+    var tb = document.querySelectorAll('[data-time-adv]');
+    for (var j = 0; j < tb.length; j++) {
+      if (tb[j].dataset.bound) continue;
+      tb[j].dataset.bound = '1';
+      tb[j].addEventListener('click', function () {
+        if (!devOrAdmin()) return;
+        var ms = parseInt(this.getAttribute('data-time-adv'), 10) || 0;
+        if (!window.confirm('测试时间推进 +' + fmtRemain(ms) + '？\n\n' +
+          '这会把本房间「正在进行的」倒计时原点往前拨，两台设备会同时看到结果。\n' +
+          '不会修改 30 分钟 / 6 小时 / 2 小时这些真实时长，也不影响别的房间。')) return;
+        timeAdvance(ms);
+      });
+    }
+    /* 明确的「退出管理员模式」：清会话 → 回普通设置 */
+    var ex = $('#admin-exit');
+    if (ex && !ex.dataset.bound) {
+      ex.dataset.bound = '1';
+      ex.addEventListener('click', function () {
+        adminEndSession();
+        closeAllPanels();
+        openSettings();
+        toast('🔒 已退出管理员模式，下次进「小镇维护」要重新输口令', 3600);
+      });
     }
     var ac = $('#admin-close');
     if (ac && !ac.dataset.bound) { ac.dataset.bound = '1'; ac.addEventListener('click', function () { closeAllPanels(); }); }
@@ -4848,14 +5273,29 @@ window.Game = (function () {
     '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
     '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel', '#party-panel'];
 
+  /* 所有「离开面板」的路径最后都落到这两个函数上（✕ / 关闭按钮 / 点遮罩 / ESC /
+     切到别的面板 / 进照片 / 结局开场……）。所以管理员会话的失效就挂在这里：
+     只要维护界面被收起来，授权立刻作废，下次必须重新输口令。
+     注意 openAdminGate() 是在**把维护面板显示出来之前**先调 closeAllPanelsSilent()，
+     那时 admin 面板还是 hidden，所以不会被误清。 */
+  function adminPanelVisible() {
+    var p = $('#admin-panel');
+    return !!(p && !p.classList.contains('hidden'));
+  }
   function closeAllPanels() {
+    adminLeave();                       // 必须在隐藏之前判断，否则永远看到 hidden
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
     unpause();
     syncPanelChrome();
   }
   function closeAllPanelsSilent() {
+    adminLeave();
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
     syncPanelChrome();
+  }
+  /* 「维护界面正在被收起」→ 会话作废（面板本来就没开时什么都不做） */
+  function adminLeave() {
+    if (adminPanelVisible()) adminEndSession();
   }
 
   /* 面板打开时：加遮罩、隐藏摇杆与交互按钮（避免遮挡和误触）。
@@ -4954,9 +5394,12 @@ window.Game = (function () {
   function openResPanel() {
     var r = worldRes();
     var g = (curWorld() && curWorld().garden) || {};
-    var planted = 0, ready = 0;
+    var planted = 0, ready = 0, nextCd = 0;
     for (var i = 1; i <= 6; i++) { if (g['p' + i]) planted++; }
-    plotStates().forEach(function (s) { if (s.ready) ready++; });
+    plotStates().forEach(function (s) {
+      if (s.ready) ready++;
+      else if (s.remain > 0 && (!nextCd || s.remain < nextCd)) nextCd = s.remain;
+    });
     var body = $('#res-body');
     if (!body) return;
     body.innerHTML =
@@ -4968,7 +5411,8 @@ window.Game = (function () {
       '<div class="res-line"><b>🥛 牛奶 · 🧶 羊毛 · 🥚 鸡蛋</b><span>' + (r.milk || 0) + ' / ' + (r.wool || 0) + ' / ' + (r.egg || 0) + ' · 牧场每天收</span></div>' +
       '<div class="res-line"><b>📄 信纸 · 📦 礼盒</b><span>' + (r.paper || 0) + ' / ' + (r.giftbox || 0) + ' · 工坊制作（寄包裹要用礼盒）</span></div>' +
       '<div class="res-line"><b>✉️ 地址 · ' + '🌏 特产</b><span>' + addrCount() + ' / ' + ((T() && T().count) || 41) + ' 个地方 · 已收 ' + specCount() + ' 种特产</span></div>' +
-      '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') + '</span></div>' +
+      '<div class="res-line"><b>🌿 温室</b><span>' + planted + ' / 6 块地有作物' + (ready ? ' · ' + ready + ' 块可收获' : '') +
+      (nextCd ? ' · 下一块成熟还需 <b class="cd">' + fmtCountdown(nextCd) + '</b>' : '') + '</span></div>' +
       '<div class="res-line"><b>✨ 旅行回忆</b><span>' + foundCount() + ' 段已收进册子</span></div>' +
       '<div class="res-line"><b>🎄 圣诞树</b><span>' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）</span></div>';
     $('#res-panel').classList.remove('hidden');
@@ -5180,8 +5624,11 @@ window.Game = (function () {
       bhv.classList.remove('hidden');
     } else {
       var label = st.kind === 'tree' ? GROW.tree.label : GROW.flower.label;
+      /* v4.5.1：给出可以直接对表的倒计时（成熟还需 28:43），
+         数字来自 plantedAt + 时长，不是本地计时器。 */
       body.innerHTML = '<p class="plot-tip">正在生长：' + label + '</p>' +
-        '<p class="plot-sub">大约还需 ' + fmtRemain(st.remain) + '（真实时间，关掉游戏也会继续长）</p>';
+        '<p class="plot-sub"><b class="cd">成熟还需 ' + fmtCountdown(st.remain) + '</b>' +
+        '（真实时间，关掉游戏也会继续长）</p>';
     }
     $('#plot-panel').classList.remove('hidden');
     pause();
@@ -5237,7 +5684,7 @@ window.Game = (function () {
       flyEl.innerHTML = fly.length
         ? '🚚 在路上：' + fly.map(function (id) {
           var pl = t.get(id);
-          return '<b>' + esc(pl ? pl.name : id) + '</b>（还有 ' + fmtRemain(parcelLeftMs(id)) + '）';
+          return '<b>' + esc(pl ? pl.name : id) + '</b>（预计还有 ' + fmtCountdown(parcelLeftMs(id)) + '）';
         }).join('　·　')
         : '<span class="muted">现在没有在路上的包裹。</span>';
     }
@@ -5259,7 +5706,7 @@ window.Game = (function () {
           var got = hasSpec(p.id);
           var cls = 'pack-chip' + (st === 'fly' ? ' is-fly' : '') + (st === 'ready' ? ' is-ready' : '') + (got ? ' is-got' : '');
           var tail = got ? '✓ 已收 ' + p.icon
-            : (st === 'fly' ? '在途 ' + fmtRemain(parcelLeftMs(p.id))
+            : (st === 'fly' ? '在途 ' + fmtCountdown(parcelLeftMs(p.id))
               : (st === 'ready' ? '✉️ 取回信' : '寄一个'));
           html += '<button class="' + cls + '" data-send="' + p.id + '">' +
             '<span class="pc-name">' + esc(p.name) + '</span>' +
@@ -5308,6 +5755,20 @@ window.Game = (function () {
         if (!pl) return;
         html += '<div class="mail-item"><span>' + pl.icon + ' 来自 <b>' + esc(pl.name) + '</b></span><em>' +
           esc(pl.item) + '</em><button class="btn primary small" data-claim="' + id + '">拆开</button></div>';
+      });
+    }
+
+    /* v4.5.1：在路上的包裹也给个明确倒计时——
+       不用特意跑回工坊的寄件台才知道还要等多久。 */
+    var fly = flyingParcels();
+    if (fly.length) {
+      html += '<div class="book-sec">在路上（' + fly.length + '）</div>';
+      fly.forEach(function (id) {
+        var pl = t.get(id);
+        if (!pl) return;
+        html += '<div class="mail-item"><span>' + pl.icon + ' 寄往 <b>' + esc(pl.name) + '</b></span>' +
+          '<em>预计还有 ' + fmtCountdown(parcelLeftMs(id)) + '</em>' +
+          '<span class="mail-dim">运输中</span></div>';
       });
     }
 
@@ -5642,7 +6103,7 @@ window.Game = (function () {
      以及把角色放回指定坐标，避免测速时撞到建筑导致误判。
      不参与游戏逻辑，正式环境全部是空操作。 */
   function devPlace(x, y) {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     S.self.x = x; S.self.y = y;
     /* 瞬移也要让对方看见：正常走路时位置是边走边发的，
        直接改坐标不发的话，对方屏幕上会一直停在旧位置。 */
@@ -5660,12 +6121,12 @@ window.Game = (function () {
     } catch (e) { }
   }
   function devWave(ms) {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     S.self.waveUntil = performance.now() + (ms || 3000);
     return true;
   }
   function devState() {
-    if (!S.dev) return null;
+    if (!devHook()) return null;
     return {
       x: S.self.x, y: S.self.y, dir: S.self.dir, frame: S.self.frame,
       dt: S.dt, t: S.simT, paused: !!S.paused, inter: S.interId || 0,
@@ -5689,29 +6150,29 @@ window.Game = (function () {
 
   /* 调试口：直接进/出某张地图（验收脚本用；?dev=1 之外是空操作） */
   function devEnterMap(id) {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     if (id) { enterMap(id); return true; }
     leaveMap(); return true;
   }
   function devStation() {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     openStationPanel(); return true;
   }
   function devInteract() {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     S.curInteract = findInteract();
     doInteract();
     return S.curInteract ? S.curInteract.type : null;
   }
   /* 调试口：直接进某间屋子（只为了截图验收，不改存档、不触发奖励之外的行为） */
   function devIndoor(id) {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     if (!id) { leaveIndoor(); return true; }
     enterIndoor(id); return true;
   }
   /* 调试口：把镜头挪到世界某点，方便截树 / 截建筑 */
   function devLook(wx, wy) {
-    if (!S.dev) return false;
+    if (!devHook()) return false;
     S.cam.x = wx - S.view.w / zoomNow() / 2;
     S.cam.y = wy - S.view.h / zoomNow() / 2;
     return true;
@@ -5721,30 +6182,45 @@ window.Game = (function () {
     enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave,
     devEnterMap: devEnterMap, devStation: devStation, devInteract: devInteract,
     devIndoor: devIndoor, devLook: devLook,
-    devHit: function (x, y) { return S.dev ? hits(x, y) : null; },
+    devHit: function (x, y) { return devHook() ? hits(x, y) : null; },
     devNear: function () {
-      if (!S.dev) return null;
+      if (!devHook()) return null;
       var it = findInteract();
       return it ? { type: it.type, label: it.label, id: (it.ref && (it.ref.id || it.ref.name)) || null } : null;
     },
     /* v4.1 给验收脚本用的口子（只在 ?dev=1 时有意义，但本身不改变游戏行为） */
     devTicketBook: function () { openTicketBook(); },
     devBook: function () { openBook(); },
-    devAdmin: function () { if (!S.dev && !adminOk) return false; openAdminGate(); return true; },
+    devAdmin: function () { if (!devHook() && !adminOk) return false; openAdminGate(); return true; },
     /* app.js 的连接监听推过来的真实在线状态（只读给 UI 用，不改任何进度） */
     setOnline: function (on) { S.online = !!on; return S.online; },
     devAdminUnlock: function (pin) { return djb2('omo' + (pin || '')) === ADMIN_HASH; },
     /* 写入口加一道闸：只有 ?dev=1 的验收页面，或者已经在上界面里输对过口令，
        才肯执行——控制台里喊一句 devAdminAct('tickets') 不再直接生效。 */
     devAdminAct: function (k) { if (!S.dev && !adminOk) return false; adminDo(k); return true; },
+    /* v4.5.1 时间机制：只读快照（正式环境也能读，界面上本来就要显示）。
+       它不写任何东西，所以不算后门；写入的时间推进单独闸在管理员会话上。 */
+    timeState: function () { return timeEvents(); },
+    timeConfig: function () {
+      return {
+        flowerMs: GROW.flower.ms, treeMs: GROW.tree.ms, packMs: packMs(),
+        flowerNeed: GROW.flower.need, treeNeed: GROW.tree.need,
+        dev: !!S.dev, harness: !!S.harness,
+        backend: (S.backend && S.backend.mode) || null
+      };
+    },
+    devAdminSession: function () { return { ok: !!adminOk, clock: !!adminClock }; },
+    /* 时间推进：正常入口只认管理员会话；?dev=1 的验收页也允许（等价于「管理员测试模式」） */
+    timeAdvance: function (ms) { return timeAdvance(ms); },
+    adminTimeAdvance: function (ms) { if (!adminOk) return Promise.resolve(false); return timeAdvance(ms); },
     /* v4.5 双人庆典：只读快照 + 三个「和玩家按同一个按钮」的动作。
        它们不绕过任何判定——条件不够时和真人点下去的结果一样（什么都不发生）。 */
     devParty: function () { return partySnapshot(); },
-    devDecorate: function () { if (!S.dev) return false; decorateTree(); return true; },
-    devTreePanel: function () { if (!S.dev) return false; openTreePanel(); return true; },
-    devTalkSanta: function () { if (!S.dev) return false; talkSanta(); return true; },
-    devPartyGo: function () { if (!S.dev) return false; startParty(); return true; },
-    devPartyLater: function () { if (!S.dev) return false; closeAllPanels(); return true; },
+    devDecorate: function () { if (!devHook()) return false; decorateTree(); return true; },
+    devTreePanel: function () { if (!devHook()) return false; openTreePanel(); return true; },
+    devTalkSanta: function () { if (!devHook()) return false; talkSanta(); return true; },
+    devPartyGo: function () { if (!devHook()) return false; startParty(); return true; },
+    devPartyLater: function () { if (!devHook()) return false; closeAllPanels(); return true; },
     devGiftSources: function () {
       var w = curWorld() || {};
       return {
@@ -5760,9 +6236,9 @@ window.Game = (function () {
     },
     devAdminLog: function () { return adminLog(); },
     /* 只读：整份共享存档 + 房间/槽位。验收脚本对账用，不写任何东西。 */
-    devWorldRaw: function () { return S.dev ? JSON.parse(JSON.stringify(curWorld() || {})) : null; },
+    devWorldRaw: function () { return devHook() ? JSON.parse(JSON.stringify(curWorld() || {})) : null; },
     devRoom: function () {
-      if (!S.dev) return null;
+      if (!devHook()) return null;
       return { code: S.code || null, slot: S.mySlot, other: S.otherSlot, fallback: !!S.worldFallback,
                online: (S.online === null ? null : !!S.online), navOnline: (typeof navigator !== 'undefined' ? !!navigator.onLine : null),
                mode: (S.backend && S.backend.mode) || null };
@@ -5782,7 +6258,7 @@ window.Game = (function () {
     devPhoto: function (opt) { openPhoto(opt); },
     /* 最终结局的验收入口：只在 ?dev=1 下有效，不改变玩家看到的任何东西 */
     devFinale: function (act, arg) {
-      if (!S.dev) return null;
+      if (!devHook()) return null;
       function snap() {
         return {
           t: finState.t, phase: finState.phase, beat: finState.beat,
@@ -5826,7 +6302,7 @@ window.Game = (function () {
                addr: addrCount(), spec: specCount(), mail: mailCount() };
     },
     devPatchWorld: function (patch) {
-      if (!S.dev) return false;
+      if (!devHook()) return false;
       var w = curWorld(); if (!w) return false;
       for (var k in patch) if (patch.hasOwnProperty(k)) w[k] = patch[k];
       return true;
@@ -5834,7 +6310,7 @@ window.Game = (function () {
     /* 和 devPatchWorld 的区别：这个走 mutate() 真正落盘，
        所以能触发依赖存档的异步流程（寄包裹 / 章节推进）——验收脚本要用这个。 */
     devPatchPersist: function (patch) {
-      if (!S.dev) return Promise.resolve(false);
+      if (!devHook()) return Promise.resolve(false);
       return mutate(function (w) {
         for (var k in patch) if (patch.hasOwnProperty(k)) w[k] = patch[k];
         /* 夹具写的是「六阶段刻度」，别让老存档迁移把它再折一次 */
@@ -5842,7 +6318,7 @@ window.Game = (function () {
         return w;
       });
     },
-    devLeaveMap: function () { if (!S.dev) return false; leaveMap(); return true; },
+    devLeaveMap: function () { if (!devHook()) return false; leaveMap(); return true; },
     devOpenCraft: function () { openCraftPanel(); },
     devQuestPanel: function () { openQuestPanel(); },
     devPack: function () { openPackPanel(); },

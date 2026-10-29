@@ -912,6 +912,39 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
 }
 .admin-mat .btn[disabled] { opacity: .55; }
 
+/* v4.5.1：时间状态查看器（管理员 · 每秒刷新） */
+.admin-time { display: flex; flex-direction: column; gap: 9px; margin-bottom: 7px; }
+.admin-time .at-now {
+  margin: 0; font-size: 11px; letter-spacing: .2px;
+  color: rgba(232,220,200,.6); font-variant-numeric: tabular-nums;
+}
+.at-group { display: flex; flex-direction: column; gap: 5px; }
+.at-head { font-size: 11.5px; color: #ffd98a; letter-spacing: .4px; }
+.at-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; border-radius: 10px;
+  background: rgba(255,240,215,.05);
+  border: 1px solid rgba(240,192,64,.16);
+}
+.at-row.is-done { border-color: rgba(120,200,150,.35); background: rgba(120,200,150,.07); }
+.at-ic { flex: 0 0 auto; font-size: 14px; line-height: 1; }
+.at-name {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px; color: #f4ead8; word-break: break-word;
+}
+.at-name i { font-style: normal; font-size: 10.5px; color: rgba(232,220,200,.55); }
+.at-right { flex: 0 0 auto; font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.at-left { color: #ffe08a; }
+.at-note { color: #e8dcc8; font-weight: 400; }
+.at-done { color: #9fe0b4; }
+/* 普通玩家也能看到的倒计时：数字用等宽，读起来不跳 */
+.cd { color: #ffe08a; font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+
+/* 时间推进按钮：2×2，不要被 .admin-actions 的 last-child 拉成一整行 */
+.admin-actions.adv { grid-template-columns: 1fr 1fr; }
+.admin-actions.adv .btn:last-child { grid-column: auto; }
+.admin-sec-auth { border-left-color: rgba(120,200,150,.75); }
+
 /* 横版照片：别再被 480px 的卡片挤成缩略图 */
 #photo-card { max-width: min(780px, 96vw); }
 #photo-canvas, #photo-img {

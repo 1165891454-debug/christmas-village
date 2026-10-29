@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.5.0" />
+  <link rel="stylesheet" href="style.css?v=4.5.0d" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -366,10 +366,29 @@
               <div class="admin-block-head">🧺 补充素材 <span class="admin-block-sub">点一次 +5，写进共享背包</span></div>
               <div id="admin-mats" class="admin-mats"></div>
             </div>
+            <!-- v4.5.1：时间状态（真实时间戳现算，每秒刷新）+ 测试时间推进 -->
+            <div class="admin-block">
+              <div class="admin-block-head">⏱ 时间状态 <span class="admin-block-sub">全部由完成时间戳现算</span></div>
+              <div id="admin-time" class="admin-time"><p class="muted small-note">读取中…</p></div>
+              <p class="muted small-note">倒计时 = 完成时间戳 − 此刻，所以刷新、关页面、手机休眠都不会暂停；两台设备看到的是同一份。</p>
+            </div>
+            <div class="admin-block">
+              <div class="admin-block-head">🧪 测试时间推进 <span class="admin-block-sub">只拨本房间进行中的倒计时</span></div>
+              <div class="admin-actions adv">
+                <button class="btn ghost small" data-time-adv="300000" type="button">+5 分钟</button>
+                <button class="btn ghost small" data-time-adv="1800000" type="button">+30 分钟</button>
+                <button class="btn ghost small" data-time-adv="7200000" type="button">+2 小时</button>
+                <button class="btn ghost small" data-time-adv="21600000" type="button">+6 小时</button>
+              </div>
+              <p class="muted small-note">⚠️ 这是测试工具：只把「已经开始的」花 / 树 / 包裹倒计时原点往前拨，<b>不会</b>修改 30 分钟 / 6 小时 / 2 小时这些真实时长，也不会改别的房间。结果会同步到本房间两台设备。</p>
+            </div>
             <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。<br />素材 +5 每 60 秒最多存一次完整备份，避免连点把存档撑大；每次操作都会记进本机日志。</p>
           </div>
         </div>
-        <div class="panel-actions"><button id="admin-close" class="btn ghost small">关闭</button></div>
+        <div class="panel-actions">
+          <button id="admin-exit" class="btn ghost small" type="button">🔒 退出管理员模式</button>
+          <button id="admin-close" class="btn ghost small" type="button">关闭</button>
+        </div>
       </div>
 
       <!-- 旅行回忆册 -->
@@ -550,15 +569,15 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="firebase-config.js?v=4.5.0"></script>
-  <script src="memories.js?v=4.5.0"></script>
-  <script src="chars.js?v=4.5.0"></script>
-  <script src="sprites.js?v=4.5.0"></script>
-  <script src="world.js?v=4.5.0"></script>
-  <script src="maps.js?v=4.5.0"></script>
-  <script src="specialties.js?v=4.5.0"></script>
-  <script src="game.js?v=4.5.0"></script>
-  <script src="app.js?v=4.5.0"></script>
+  <script src="firebase-config.js?v=4.5.0d"></script>
+  <script src="memories.js?v=4.5.0d"></script>
+  <script src="chars.js?v=4.5.0d"></script>
+  <script src="sprites.js?v=4.5.0d"></script>
+  <script src="world.js?v=4.5.0d"></script>
+  <script src="maps.js?v=4.5.0d"></script>
+  <script src="specialties.js?v=4.5.0d"></script>
+  <script src="game.js?v=4.5.0d"></script>
+  <script src="app.js?v=4.5.0d"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

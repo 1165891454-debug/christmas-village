@@ -3,23 +3,27 @@
  * 版本号变更（CACHE 名）即可强制刷新全部缓存。
  *
  * 2026-10-28 紧急修复（寄件台点了没反应 / 阿信托付的事交不了）：
- *   版本号仍然是 v4.5.0（index.html 里的 ?v=4.5.0 未动），但缓存名必须换一个，
+ *   版本号仍然是 v4.5.0（index.html 里的 ?v=4.5.0d 未动），但缓存名必须换一个，
  *   否则已经打开过 v4.5.0 的手机还会用旧缓存的 game.js，修复等于没上传。
+ *
+ * 2026-10-29 v4.5.0d（管理员一次性会话 + 时间状态查看器）：
+ *   ?v= 与缓存名一起抬到 4.5.0d。静态资源是「缓存优先」、键里带 ?v=，
+ *   两处一起换最稳，老手机一定会重新取 game.js。
  */
-var CACHE = 'omo-v4.5.0b';
+var CACHE = 'omo-v4.5.0d';
 var CORE = [
   './',
   './index.html',
-  './style.css?v=4.5.0',
-  './firebase-config.js?v=4.5.0',
-  './memories.js?v=4.5.0',
-  './chars.js?v=4.5.0',
-  './sprites.js?v=4.5.0',
-  './world.js?v=4.5.0',
-  './maps.js?v=4.5.0',
-  './specialties.js?v=4.5.0',
-  './game.js?v=4.5.0',
-  './app.js?v=4.5.0',
+  './style.css?v=4.5.0d',
+  './firebase-config.js?v=4.5.0d',
+  './memories.js?v=4.5.0d',
+  './chars.js?v=4.5.0d',
+  './sprites.js?v=4.5.0d',
+  './world.js?v=4.5.0d',
+  './maps.js?v=4.5.0d',
+  './specialties.js?v=4.5.0d',
+  './game.js?v=4.5.0d',
+  './app.js?v=4.5.0d',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
