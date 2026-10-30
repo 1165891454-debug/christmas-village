@@ -146,6 +146,13 @@ body.playing #screen-game { border-radius: 0; }
   width: 46px; height: 46px; border-radius: 12px; border: none;
   background: rgba(10,20,40,.6); color: var(--text); font-size: 20px;
   backdrop-filter: blur(4px); cursor: pointer;
+  /* v4.6.1：HUD 按钮不吃浏览器的默认手势——
+     manipulation 关掉双击缩放判定，long-press 不弹选择，
+     点按瞬间也不出现灰色高亮块（那一下会被误认为「点到了但没反应」）。 */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none; user-select: none;
 }
 .hud-btn:active { transform: scale(.94); }
 
@@ -159,6 +166,10 @@ body.playing #screen-game { border-radius: 0; }
   box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 18px rgba(255,120,90,.35);
   max-width: 62vw;
   animation: interact-pulse 1.6s ease-in-out infinite;
+  /* v4.6.1：和 ☰ / 🎟️ 一样，按下即动作，不吃浏览器的手势判定 */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none; user-select: none;
 }
 #btn-interact:active { transform: scale(.94); }
 
@@ -168,6 +179,9 @@ body.playing #screen-game { border-radius: 0; }
   display: flex; gap: 8px; z-index: 11;
 }
 .quick-btn {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none; user-select: none;
   width: 46px; height: 46px; border-radius: 50%;
   display: grid; place-items: center;
   font-size: 20px; line-height: 1; cursor: pointer;
@@ -683,7 +697,11 @@ body.playing #screen-game { border-radius: 0; }
 #joy-base, #btn-interact, .quest-chip, .res-chip { transition: opacity .16s ease; }
 
 /* 任务 / 资源角标改为可点按钮 */
-.quest-chip, .res-chip { pointer-events: auto; cursor: pointer; font-family: inherit; }
+.quest-chip, .res-chip {
+  pointer-events: auto; cursor: pointer; font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none; user-select: none;
+}
 .quest-chip { text-align: left; }
 .quest-chip:active, .res-chip:active { filter: brightness(1.18); }
 

@@ -1542,6 +1542,45 @@ window.Game = (function () {
   }
 
   /* ---------- 输入 ---------- */
+  /* ============================================================
+   * v4.6.1 · HUD 按钮：一次按压 = 一次动作（不再依赖 click）
+   * ------------------------------------------------------------
+   * 实测出来的根因（tools/scenarios/menu-probe3.js 可复现）：
+   *   浏览器只有在「一次静止的单指轻点」结束时才会合成 click。
+   *   · 拇指点按 46px 的角标，手指几乎必然移动 5~15px；
+   *     位移超过触摸阈值后，这次触摸会被判定成「拖动」→ 不产生 click。
+   *   · 玩家一边用左手推摇杆、一边用右手点右上角菜单时，两根手指同时按在屏幕上，
+   *     浏览器按「多指手势」处理 → 两只手指都不会产生 click。
+   *   结果就是：站着不动、手指刚好没抖，一次能点开；只要在走、或者手稍微一带，
+   *   就要连点三四次才撞上那一次「合格的点击」。z-index 那次修复解决的是
+   *   「面板开着时第一下被遮罩吃掉」，是另一个场景，所以没有解决这一条。
+   *
+   * Pointer Events 是按「指针」逐个派发的，不受上面两种判定影响：
+   * 手指一按下去就到了。所以这里统一用 pointerdown 触发，
+   * 再把紧随其后的那一次兼容 click 吞掉，保证一次按压只动作一次
+   * （不是「补一次点击」，也不是延时打开——按下就是唯一的那一次）。
+   * ============================================================ */
+  function bindPress(el, fn) {
+    if (!el) return;
+    var lastPress = 0;
+    el.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;   // 只认左键 / 手指
+      lastPress = Date.now();
+      fn(e);
+    });
+    /* 老环境没有 Pointer Events 时仍然能点；有的话这一下是同一次按压的尾巴。
+       用 e.detail 区分「真实点击」与「代码调用的 .click()」：
+       手指/鼠标产生的 click 一定有 detail>=1；element.click() 与键盘激活是 0，
+       那两种情况没有被 pointerdown 处理过，必须照常执行。 */
+    el.addEventListener('click', function (e) {
+      if (e.detail >= 1 && Date.now() - lastPress < 800) {
+        lastPress = 0;
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      fn(e);
+    });
+  }
+
   function bindInput() {
     if (S.inputBound) return;   // 防止重复 enter 时把监听器叠一层（重复监听会让摇杆/按键被处理多次）
     S.inputBound = true;
@@ -1651,29 +1690,27 @@ window.Game = (function () {
     base.addEventListener('lostpointercapture', joyEnd);
 
     bindAdmin();   // 管理员入口（设置最底部的「小镇维护」），不占界面任何位置
-    $('#btn-interact').addEventListener('click', function () { doInteract(); });
-    $('#btn-menu').addEventListener('click', function () { toggleMenu(); });
-    $('#menu-close').addEventListener('click', function () { closeAllPanels(); });
-    var mo = $('#menu-outfit');
-    if (mo) mo.addEventListener('click', function () { closeAllPanels(); openOutfit(); });
-    $('#menu-tree').addEventListener('click', function () { closeAllPanels(); openTreePanel(); });
-    $('#menu-invite').addEventListener('click', function () { closeAllPanels(); S.opts.invite && S.opts.invite(); });
-    $('#menu-photo').addEventListener('click', function () { closeAllPanels(); openPhoto(); });
-    $('#menu-book').addEventListener('click', function () { closeAllPanels(); openBook(); });
-    $('#menu-res').addEventListener('click', function () { closeAllPanels(); openResPanel(); });
-    $('#menu-quest').addEventListener('click', function () { closeAllPanels(); openQuestPanel(); });
-    $('#menu-settings').addEventListener('click', function () { closeAllPanels(); openSettings(); });
+    bindPress($('#btn-interact'), function () { doInteract(); });
+    bindPress($('#btn-menu'), function () { toggleMenu(); });
+    /* 菜单里的每一项也走「按下即动作」：菜单是整块面板，玩家常常一只手托着手机
+       另一只手点，手指同样会带几像素抖动 —— 用 click 的话这些项一样会丢。 */
+    bindPress($('#menu-close'), function () { closeAllPanels(); });
+    bindPress($('#menu-outfit'), function () { closeAllPanels(); openOutfit(); });
+    bindPress($('#menu-tree'), function () { closeAllPanels(); openTreePanel(); });
+    bindPress($('#menu-invite'), function () { closeAllPanels(); S.opts.invite && S.opts.invite(); });
+    bindPress($('#menu-photo'), function () { closeAllPanels(); openPhoto(); });
+    bindPress($('#menu-book'), function () { closeAllPanels(); openBook(); });
+    bindPress($('#menu-res'), function () { closeAllPanels(); openResPanel(); });
+    bindPress($('#menu-quest'), function () { closeAllPanels(); openQuestPanel(); });
+    bindPress($('#menu-settings'), function () { closeAllPanels(); openSettings(); });
 
     /* 右下角快捷按钮：换装 / 抽奖券（和菜单里走同一条逻辑）
        v4.6.0：原来的「📸 合影」快捷入口已移除——
        它只生成同一张固定构图，真正的合影在每张旅行地图的打卡点，
        以及圣诞树每次升级自动生成的纪念照里。 */
-    var qOutfit = $('#btn-outfit');
-    if (qOutfit) qOutfit.addEventListener('click', function () { closeAllPanels(); openOutfit(); });
-    var qLot = $('#btn-lottery');
-    if (qLot) qLot.addEventListener('click', function () { closeAllPanels(); openLottery(); });
-    var mLot = $('#menu-lottery');
-    if (mLot) mLot.addEventListener('click', function () { closeAllPanels(); openLottery(); });
+    bindPress($('#btn-outfit'), function () { closeAllPanels(); openOutfit(); });
+    bindPress($('#btn-lottery'), function () { closeAllPanels(); openLottery(); });
+    bindPress($('#menu-lottery'), function () { closeAllPanels(); openLottery(); });
     var lotDraw = $('#lottery-draw');
     if (lotDraw) lotDraw.addEventListener('click', function () { drawLottery(1); });
     var lotDraw5 = $('#lottery-draw5');
@@ -1758,11 +1795,9 @@ window.Game = (function () {
     var mFast = $('#mail-fast');
     if (mFast) mFast.addEventListener('click', function () { expressClaim(); });
 
-    // 任务 / 资源角标：点开对应面板
-    var qc = $('#quest-chip');
-    if (qc) qc.addEventListener('click', function () { openQuestPanel(); });
-    var rc = $('#res-chip');
-    if (rc) rc.addEventListener('click', function () { openResPanel(); });
+    // 任务 / 资源角标：点开对应面板（同样按「按下即动作」处理）
+    bindPress($('#quest-chip'), function () { openQuestPanel(); });
+    bindPress($('#res-chip'), function () { openResPanel(); });
     function toggleMusic() {
       var nowOn = Snd.toggle();
       var m1 = $('#menu-music');
@@ -1775,17 +1810,16 @@ window.Game = (function () {
       }
       toast(nowOn ? '音乐已开启 🎵' : '音乐已关闭');
     }
-    var mMusic = $('#menu-music');
-    if (mMusic) mMusic.addEventListener('click', toggleMusic);
+    bindPress($('#menu-music'), toggleMusic);
     var setMusic = $('#set-music');
     if (setMusic) setMusic.addEventListener('click', toggleMusic);
     var setInvite = $('#set-invite');
     if (setInvite) setInvite.addEventListener('click', function () { closeAllPanels(); S.opts.invite && S.opts.invite(); });
     var setLeave = $('#set-leave');
     if (setLeave) setLeave.addEventListener('click', function () { S.opts.onLeave && S.opts.onLeave(); });
-    $('#menu-leave').addEventListener('click', function () { S.opts.onLeave && S.opts.onLeave(); });
-    $('#dlg-close').addEventListener('click', function () { closeAllPanels(); });
-    $('#dlg-next').addEventListener('click', function () { dlgNext(); });
+    bindPress($('#menu-leave'), function () { S.opts.onLeave && S.opts.onLeave(); });
+    bindPress($('#dlg-close'), function () { closeAllPanels(); });
+    bindPress($('#dlg-next'), function () { dlgNext(); });
     var tdeco = $('#tree-deco');
     if (tdeco) tdeco.addEventListener('click', function () { decorateTree(); });
     /* 庆典面板：一个「开 Party」，一个「再准备一下」 */

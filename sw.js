@@ -5,6 +5,11 @@
  * 2026-10-28 紧急修复（寄件台点了没反应 / 阿信托付的事交不了）：
  *   那一版只换了缓存名、?v= 没动；从 v4.6.0 起两处已经重新对齐。
  *
+ * 2026-10-30 v4.6.1（HUD 按钮改「按下即动作」）：
+ *   只改了 game.js / style.css。菜单、换装、抽奖券、任务角标、家当角标、互动按钮
+ *   不再依赖浏览器合成的 click —— 手指带抖动、或一只手推摇杆另一只手点按钮时，
+ *   click 根本不会产生，所以以前要点三四次。缓存名必须一起换，否则手机还是旧 game.js。
+ *
  * 2026-10-29 v4.6.0（管理员一次性会话 + 时间状态查看器）：
  *   ?v= 与缓存名一起抬到 4.6.0。静态资源是「缓存优先」、键里带 ?v=，
  *   两处一起换最稳，老手机一定会重新取 game.js。
@@ -13,20 +18,20 @@
  *   同一版本号内的功能补齐，缓存名不变（仍是 omo-v4.6.0）——这一版是首次上线，
  *   还没有手机缓存过它，所以不需要再换名。
  */
-var CACHE = 'omo-v4.6.0';
+var CACHE = 'omo-v4.6.1';
 var CORE = [
   './',
   './index.html',
-  './style.css?v=4.6.0',
-  './firebase-config.js?v=4.6.0',
-  './memories.js?v=4.6.0',
-  './chars.js?v=4.6.0',
-  './sprites.js?v=4.6.0',
-  './world.js?v=4.6.0',
-  './maps.js?v=4.6.0',
-  './specialties.js?v=4.6.0',
-  './game.js?v=4.6.0',
-  './app.js?v=4.6.0',
+  './style.css?v=4.6.1',
+  './firebase-config.js?v=4.6.1',
+  './memories.js?v=4.6.1',
+  './chars.js?v=4.6.1',
+  './sprites.js?v=4.6.1',
+  './world.js?v=4.6.1',
+  './maps.js?v=4.6.1',
+  './specialties.js?v=4.6.1',
+  './game.js?v=4.6.1',
+  './app.js?v=4.6.1',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
