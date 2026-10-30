@@ -1534,6 +1534,9 @@ window.Game = (function () {
       }
     }
     S.prevPresence = online;
+    /* v4.7.0：把「对方在不在线」留一份给生活系统用（对方的最后一次位置会一直留着，
+       但离线的幽灵不该触发双人互动）。只是复用上一步已经算出来的结论，没有新增同步字段。 */
+    S.remoteOnline = online;
     var p = $('#partner-presence');
     if (p) {
       p.querySelector('.dot').className = 'dot ' + (online ? 'on' : 'off');
@@ -2028,6 +2031,18 @@ window.Game = (function () {
     if (S.remote.inter === hereKey()) {
       S.remote.x += (S.remote.tx - S.remote.x) * Math.min(1, dt * 8);
       S.remote.y += (S.remote.ty - S.remote.y) * Math.min(1, dt * 8);
+    }
+
+    /* v4.7.0 · 小镇生命力（life.js）
+       昼夜 / 天气 / NPC 自主活动 / 双人自然互动 / 脚印，全部在这一句里推进。
+       注意：它只读 S.self 与 S.remote、只改 World.npcs 的展示坐标，
+       不写存档、不写 Firebase、不接管输入，所以不会影响既有的任何系统。 */
+    if (window.TownLife) {
+      TownLife.tick(dt, ts, {
+        self: S.self, remote: S.remote, remoteOnline: S.remoteOnline,
+        inTown: (!S.interId && !S.mapId && !S.ending),
+        treeStage: treeStage()
+      });
     }
 
     // 双人互动（爱心 / 树下星光）
@@ -6829,6 +6844,8 @@ window.Game = (function () {
       ctx.fillRect(0, 0, md.w, md.h * 0.62);
     } else {
       World.drawGround(ctx, { x: S.cam.x, y: S.cam.y, w: S.view.w, h: S.view.h });
+      /* v4.7.0：雪地脚印压在地面之上、所有立体物件之下 */
+      if (window.TownLife) TownLife.drawFootprints(ctx, { x: S.cam.x, y: S.cam.y, w: S.view.w, h: S.view.h });
       World.drawIceRink(ctx);
       World.drawPond(ctx);
       World.drawBridge(ctx);
@@ -6839,7 +6856,16 @@ window.Game = (function () {
       World.drawBorderTrees(ctx, ts);
       World.drawEggs(ctx, ts, S.self, S.quest.found);
 
-      World.buildings.forEach(function (b) { drawables.push({ y: b.y + b.h, fn: function () { World.drawBuilding(ctx, b, ts); } }); });
+      World.buildings.forEach(function (b) { drawables.push({ y: b.y + b.h, fn: function () {
+        World.drawBuilding(ctx, b, ts);
+        /* v4.7.0：烟囱的烟（夜里更明显），纯按时间戳算，不存粒子 */
+        if (window.TownLife) TownLife.drawBuildingLife(ctx, b, ts);
+      } }); });
+      /* v4.7.0：树的背光要先画（y 给一个很小的值让它排在最前面），
+         这样只在树的外缘透出一圈暖光，树本身不会被糊白 */
+      if (window.TownLife) {
+        drawables.push({ y: -9999, fn: function () { TownLife.drawTreeHalo(ctx, World.tree, treeStage()); } });
+      }
       drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
       World.benches.forEach(function (b) { drawables.push({ y: b.y, fn: function () { World.drawBench(ctx, b); } }); });
       World.lamps.forEach(function (l) { drawables.push({ y: l.y, fn: function () { World.drawLamp(ctx, l, ts); } }); });
@@ -6849,43 +6875,65 @@ window.Game = (function () {
         });
       }
 
+      /* v4.7.0：双人自然互动的「画法」—— 朝向彼此、一起看树、一起坐下。
+         只改怎么画，S.self / S.remote 的真实坐标与输入完全不受影响，
+         所以不存在「一方强制控制另一方」或「锁摇杆」。 */
+      var cpv = window.TownLife ? TownLife.coupleView() : null;
+      var coupleOn = !!(cpv && cpv.on);
+      var drawCharLayer = function (isSelf) {
+        var on = !!(cpv && cpv.on);
+        var x = on ? (isSelf ? cpv.ax : cpv.bx) : (isSelf ? S.self.x : S.remote.x);
+        var y = on ? (isSelf ? cpv.ay : cpv.by) : (isSelf ? S.self.y : S.remote.y);
+        var dir = on ? (isSelf ? cpv.dirA : cpv.dirB) : (isSelf ? S.self.dir : S.remote.dir);
+        var slot = isSelf ? S.mySlot : S.otherSlot;
+        var frame = isSelf ? S.self.frame : (S.remote.moving ? Math.floor(ts / 140) % 4 : 0);
+        var waving = ts < (isSelf ? S.self.waveUntil : S.remote.waveUntil);
+        ctx.save();
+        if (on && cpv.sit) TownLife.seatTransform(ctx, x, y);
+        Sprites.drawCharacter(ctx, x, y, dir, frame,
+          Object.assign({}, CHAROPT[slot], { outfit: isSelf ? myOutfit : theirOutfit }), waving, ts);
+        ctx.restore();
+        nameTag(ctx, x, y - (on && cpv.sit ? 64 : 78), NAME[slot] + (isSelf ? '（你）' : ''), isSelf);
+      };
+
       if (showRemote) {
-        drawables.push({ y: S.remote.y, fn: function () {
-          var waving = ts < S.remote.waveUntil;
-          Sprites.drawCharacter(ctx, S.remote.x, S.remote.y, S.remote.dir, S.remote.moving ? Math.floor(ts / 140) % 4 : 0,
-            Object.assign({}, CHAROPT[S.otherSlot], { outfit: theirOutfit }), waving, ts);
-          nameTag(ctx, S.remote.x, S.remote.y - 78, NAME[S.otherSlot], false);
-        } });
+        drawables.push({ y: coupleOn ? cpv.by : S.remote.y, fn: function () { drawCharLayer(false); } });
       }
-      drawables.push({ y: S.self.y, fn: function () {
-        var waving = ts < S.self.waveUntil;
-        Sprites.drawCharacter(ctx, S.self.x, S.self.y, S.self.dir, S.self.frame,
-          Object.assign({}, CHAROPT[S.mySlot], { outfit: myOutfit }), waving, ts);
-        nameTag(ctx, S.self.x, S.self.y - 78, NAME[S.mySlot] + '（你）', true);
-      } });
+      drawables.push({ y: coupleOn ? cpv.ay : S.self.y, fn: function () { drawCharLayer(true); } });
 
       World.npcs.forEach(function (n) {
-        drawables.push({ y: n.y, fn: function () {
-          if (n.id === 'santa') Sprites.drawSanta(ctx, n.x, n.y, ts);
+        var v = window.TownLife ? TownLife.viewOf(n) : null;
+        var vx = v ? v.x : n.x, vy = v ? v.y : n.y;
+        drawables.push({ y: vy, fn: function () {
+          if (v) TownLife.drawNpc(ctx, n, v, ts);
+          else if (n.id === 'santa') Sprites.drawSanta(ctx, n.x, n.y, ts);
           else if (n.id === 'snowman') Sprites.drawSnowman(ctx, n.x, n.y, ts);
           else if (n.style) Sprites.drawVillager(ctx, n.x, n.y, ts, n.style, Math.floor(ts / 320) % 4);
           else if (n.id === 'elf') Sprites.drawElf(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
           else Sprites.drawBarista(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
-          nameTag(ctx, n.x, n.y - (n.id === 'santa' ? 84 : 66), n.name, false, '#ffe08a');
+          nameTag(ctx, vx, vy - (n.id === 'santa' ? 84 : (v && v.sit ? 52 : 66)), n.name, false, '#ffe08a');
         } });
       });
 
       drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
 
-      var snowBoost = 1;
-      ctx.fillStyle = 'rgba(255,255,255,.85)';
-      S.flakes.forEach(function (f) {
-        f.y += f.v * 0.016 * snowBoost; f.x += Math.sin(ts / 900 + f.ph) * 0.4 * snowBoost;
-        if (f.y > World.height) { f.y = -6; f.x = Math.random() * World.width; }
-        if (f.x > S.cam.x - 10 && f.x < S.cam.x + S.view.w + 10 && f.y > S.cam.y - 10 && f.y < S.cam.y + S.view.h + 10) {
-          ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 7); ctx.fill();
-        }
-      });
+      /* v4.7.0：环境光（昼夜）→ 暖光池（路灯 / 窗 / 树 / 脚下）→ 极光 → 说话气泡 → 两人之间的暖光 */
+      var lview = { x: S.cam.x, y: S.cam.y, w: S.view.w, h: S.view.h };
+      if (window.TownLife) {
+        TownLife.drawNight(ctx, lview, { self: S.self });
+        TownLife.drawBubbles(ctx, lview, ts);
+        TownLife.drawCoupleGlow(ctx);
+        TownLife.drawSnowfall(ctx, S.flakes, lview, World.width, World.height);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,.85)';
+        S.flakes.forEach(function (f) {
+          f.y += f.v * 0.016; f.x += Math.sin(ts / 900 + f.ph) * 0.4;
+          if (f.y > World.height) { f.y = -6; f.x = Math.random() * World.width; }
+          if (f.x > S.cam.x - 10 && f.x < S.cam.x + S.view.w + 10 && f.y > S.cam.y - 10 && f.y < S.cam.y + S.view.h + 10) {
+            ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 7); ctx.fill();
+          }
+        });
+      }
     }
 
     drawParticles(ctx);
