@@ -1558,26 +1558,120 @@ window.Game = (function () {
    *   就要连点三四次才撞上那一次「合格的点击」。z-index 那次修复解决的是
    *   「面板开着时第一下被遮罩吃掉」，是另一个场景，所以没有解决这一条。
    *
-   * Pointer Events 是按「指针」逐个派发的，不受上面两种判定影响：
-   * 手指一按下去就到了。所以这里统一用 pointerdown 触发，
-   * 再把紧随其后的那一次兼容 click 吞掉，保证一次按压只动作一次
-   * （不是「补一次点击」，也不是延时打开——按下就是唯一的那一次）。
+   * Pointer Events 是按「指针」逐个派发的，不受上面两种判定影响，
+   * 所以从 v4.6.1 起这里改用 Pointer Events 判定，不再依赖 click。
+   *
+   * ★ v4.8.1 再修：原来用的是 pointerdown（按下即触发），
+   *   代价是「手指一落到菜单上就已经进去了」—— 菜单有 11 项，
+   *   横屏时面板只有 366px 高，必须滑动才能看到「设置 / 返回大厅」，
+   *   可手指一碰任何一项就直接跳进那一项，面板看起来"不能下拉、一碰就进去"，
+   *   来回试三次才碰巧点中想要的那个。
+   *   现在改成：按下只记录，**抬起时**才算一次点击，并且
+   *   位移超过 TAP_SLOP 或浏览器接管手势（pointercancel）就一律不算 ——
+   *   拖 = 滚动，点 = 动作。依然不依赖 click，所以「多指同时按」照样有效。
    * ============================================================ */
+  var TAP_SLOP = 24;    // px：手指滑动超过这个距离就当成「拖」，不当点击
+  var TAP_MS = 900;     // ms：按住超过这个时长也不算点击（长按不误触）
+
+  /* 手指按下去时，记下最近的滚动容器当时的位置。
+     抬手时如果它滚过了，那这次手势就是「滑面板」，不是点按钮 ——
+     这条比单纯看位移可靠：拇指抖 18px 也会被当成点，而真正滚动一定会改 scrollTop。 */
+  function scrollerOf(node) {
+    while (node && node !== document.body && node !== document.documentElement) {
+      var st = getComputedStyle(node);
+      if (/(auto|scroll)/.test(st.overflowY) && node.scrollHeight > node.clientHeight + 1) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  /* 全局记录几根手指正按在屏幕上（捕获阶段先于元素自己的监听执行）。
+     用来区分两种情况：
+       · 单指 —— 可能是「点」，也可能是「滑」，必须等到抬手才知道（看位移）；
+       · 双指同时按（左手推摇杆 + 右手点菜单）—— 这在手机上本来就不该是滑动手势，
+         按下就是那一次动作，否则又要回到「要点三四次」的老毛病。 */
+  var _ptrs = {};
+  window.addEventListener('pointerdown', function (e) { _ptrs[e.pointerId] = 1; }, true);
+  window.addEventListener('pointerup', function (e) { delete _ptrs[e.pointerId]; }, true);
+  window.addEventListener('pointercancel', function (e) { delete _ptrs[e.pointerId]; }, true);
+  function pointerCount() { return Object.keys(_ptrs).length; }
+
   function bindPress(el, fn) {
     if (!el) return;
-    var lastPress = 0;
+    var down = null;
+    var handledAt = 0;
+
+    function onMove(e) {
+      if (!down || e.pointerId !== down.id) return;
+      var dx = e.clientX - down.x, dy = e.clientY - down.y;
+      if (dx * dx + dy * dy > TAP_SLOP * TAP_SLOP) down.moved = true;
+    }
+    function stopTrack() {
+      down = null;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+    }
+    /* 抬手 / 被浏览器取消 走同一套判定：
+       没怎么动 + 滚动容器没动 + 没按太久 → 算一次点击。
+       「几乎没动却被 cancel」是浏览器把轻微抖动误判成滚动的常见情况，
+       这时如果一律不触发，就回到了「点两三次才关得掉」的老问题。 */
+    function finish(e) {
+      if (!down || e.pointerId !== down.id) return;
+      var d = down;
+      stopTrack();
+      if (d.moved) return;                     // 划动 = 滚面板，不触发
+      if (d.scroller && Math.abs(d.scroller.scrollTop - d.scrollTop0) > 1) return; // 面板真的滚了
+      if (Date.now() - d.t > TAP_MS) return;   // 长按不触发
+      if (!el.isConnected) return;             // 面板已经被换掉了
+      handledAt = Date.now();
+      fn(e);
+    }
+    function onUp(e) { finish(e); }
+    /* 被浏览器取消 = 它把这个手势当成滚动/缩放手势接管了。
+       两种情况的处理不一样：
+         · 这个面板真的能滚（内容超高）→ 一律放弃，否则「想滑一下」会变成「点进某项」；
+         · 面板内容根本滚不动（一行字的对话框）→ 浏览器只是被轻微抖动惊到了，
+           这时如果也不触发，就退回到「点两三次才关得掉」的老毛病，所以照常算一次点击。 */
+    function onCancel(e) {
+      if (!down || e.pointerId !== down.id) return;
+      var d = down;
+      if (!d.canScroll && !d.moved && Date.now() - d.t <= TAP_MS && el.isConnected) {
+        stopTrack();
+        handledAt = Date.now();
+        fn(e);
+        return;
+      }
+      stopTrack();
+    }
+
     el.addEventListener('pointerdown', function (e) {
       if (e.pointerType === 'mouse' && e.button !== 0) return;   // 只认左键 / 手指
-      lastPress = Date.now();
-      fn(e);
+      if (down && Date.now() - down.t < 2000) return;            // 另一根手指正在按
+      if (pointerCount() > 1) {
+        /* 已经是第二根手指：双手操作，按下即动作（和 v4.6.1 的行为一致） */
+        handledAt = Date.now();
+        fn(e);
+        down = null;
+        return;
+      }
+      var sc = scrollerOf(el);
+      down = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), moved: false,
+        scroller: sc, scrollTop0: sc ? sc.scrollTop : 0,
+        canScroll: !!(sc && sc.scrollHeight > sc.clientHeight + 1)
+      };
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onCancel, true);
     });
     /* 老环境没有 Pointer Events 时仍然能点；有的话这一下是同一次按压的尾巴。
        用 e.detail 区分「真实点击」与「代码调用的 .click()」：
        手指/鼠标产生的 click 一定有 detail>=1；element.click() 与键盘激活是 0，
-       那两种情况没有被 pointerdown 处理过，必须照常执行。 */
+       那两种情况没有被 pointer 流程处理过，必须照常执行。 */
     el.addEventListener('click', function (e) {
-      if (e.detail >= 1 && Date.now() - lastPress < 800) {
-        lastPress = 0;
+      if (e.detail >= 1 && Date.now() - handledAt < 800) {
+        handledAt = 0;
         e.preventDefault(); e.stopPropagation(); return;
       }
       fn(e);

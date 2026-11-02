@@ -93,11 +93,40 @@
       } catch (e) { }
     }
 
-    // 匿名登录：无需注册，设备获得一个固定 UID（同一浏览器保持不变）。
-    // 安全规则用它做访问控制：只有已登录 UID 且绑定了槽位的客户端才能写数据。
+    /* 匿名登录：无需注册，设备获得一个固定 UID（同一浏览器保持不变）。
+       安全规则用它做访问控制：只有已登录 UID 且绑定了槽位的客户端才能写数据。
+
+       ★ v4.8.1 关键修复（「玩着玩着闪退，重进说房间已经满了」的根因）：
+       以前这里是「currentUser 为空就直接 signInAnonymously()」。
+       但页面刚启动时 Firebase 还在从 IndexedDB 里恢复上次的登录态，
+       这一瞬间 currentUser 就是 null —— 于是每次快速重进都会**新建一个匿名 UID**，
+       自己原来的槽位（记的是旧 UID）就变成了「别人占着」，
+       两个人各占一个 → 一刷新就「房间已满」。
+       现在必须先等 onAuthStateChanged 给出「确实没有登录态」的结论，才去新建。 */
     function ensureAuth() {
       if (auth.currentUser) return Promise.resolve(auth.currentUser);
-      return auth.signInAnonymously().then(function (cred) { return cred.user; });
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var off = auth.onAuthStateChanged(function (u) {
+          if (settled) return;
+          settled = true;
+          off();
+          if (u) { resolve(u); return; }
+          auth.signInAnonymously().then(function (cred) { resolve(cred.user); }, reject);
+        }, function (err) {
+          if (settled) return;
+          settled = true;
+          off();
+          reject(err);
+        });
+        // 万一 SDK 卡住不回调，10 秒后按「没有登录态」处理，别让玩家一直等
+        setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          try { off(); } catch (e) { }
+          auth.signInAnonymously().then(function (cred) { resolve(cred.user); }, reject);
+        }, 10000);
+      });
     }
 
     function pushLog(what) {
@@ -115,38 +144,72 @@
       });
     }
 
+    /* 占一个槽位。
+       返回 { ok:true } / { ok:false, why:'full' } / { ok:false, why:'flaky' }。
+
+       ★ v4.8.1 两处修复：
+       1) 「真满」和「网络抖了一下」被混为一谈。原来的写法是
+          事务没提交、重试 3 次用完 → 直接调 onFull() → 弹「房间已经满了」。
+          可网络不稳时事务本来就可能连续回滚，玩家看到的却是房间满了。
+          现在只有「两个槽位的 UID 都不是我」才叫满，重试失败归为 flaky，
+          界面提示的是「网络不稳，再试一次」。
+       2) 槽位只认 UID，不认设备。匿名 UID 一旦变了（清缓存 / 无痕 / 换浏览器），
+          自己那格就变成「别人的」，于是房间里明明只有两个人也进不去。
+          现在创建/占位时把 deviceId 一起写进槽位，同一台设备可以认回自己的位置。 */
     function claimSlot(code, depth, prefer) {
       depth = depth || 0;
       roomRef = db.ref('rooms/' + code);
       var uid = auth.currentUser.uid;
+      var dev = deviceId();
       // 先读当前占用情况，挑一个空槽位；再对该槽位本身做事务（规则只授权到槽位级别）
       return roomRef.child('slots').once('value').then(function (snap) {
         var cur = snap.val() || {};
         var target = null;
-        // v3：玩家在大厅选了角色时，优先坐自己选的那个位置（只在它是空位/本来就是自己的时候）
-        var preferFree = prefer && (prefer === 'a' || prefer === 'b') && (!cur[prefer] || cur[prefer].uid === uid);
-        if (cur.a && cur.a.uid === uid) target = 'a';
-        else if (cur.b && cur.b.uid === uid) target = 'b';
-        else if (preferFree) target = prefer;
+        var mineA = !!(cur.a && cur.a.uid === uid);
+        var mineB = !!(cur.b && cur.b.uid === uid);
+        var devA = !!(cur.a && cur.a.device && cur.a.device === dev);
+        var devB = !!(cur.b && cur.b.device && cur.b.device === dev);
+
+        if (mineA) target = 'a';
+        else if (mineB) target = 'b';
+        else if (devA) target = 'a';            // 同设备、UID 变了 → 认回自己那格
+        else if (devB) target = 'b';
+        else if (prefer && (prefer === 'a' || prefer === 'b') && !cur[prefer]) target = prefer;
         else if (!cur.a) target = 'a';
         else if (!cur.b) target = 'b';
-        if (!target) { onFull && onFull(); return false; } // 两个位置都被占用
+
+        if (!target) {                          // 两格都是别人的 → 真的满
+          onFull && onFull();
+          return { ok: false, why: 'full' };
+        }
 
         return roomRef.child('slots/' + target).transaction(function (leaf) {
-          if (leaf && leaf.uid !== uid) return undefined; // 被别人抢先占用了 → 中止重试
+          // 被别人抢先占用了（既不是我的 UID，也不是我这台设备）→ 中止，回去重挑
+          if (leaf && leaf.uid !== uid && !(leaf.device && leaf.device === dev)) return undefined;
           if (!leaf) {
-            return { uid: uid, joinedAt: firebase.database.ServerValue.TIMESTAMP, outfit: 'winter' };
+            return { uid: uid, device: dev, joinedAt: firebase.database.ServerValue.TIMESTAMP, outfit: 'winter' };
           }
-          return leaf; // 已经是我的
+          // 已经是我的：补上/更新 device（老房间没有这个字段），其余字段原样保留
+          var next = {
+            uid: uid,
+            device: dev,
+            joinedAt: leaf.joinedAt || firebase.database.ServerValue.TIMESTAMP,
+            outfit: leaf.outfit || 'winter'
+          };
+          if (leaf.pos) next.pos = leaf.pos;
+          if (leaf.wave) next.wave = leaf.wave;
+          return next;
         }).then(function (res) {
           if (res.committed) {
             mySlot = target;
             bindRoomListeners();
             registerPresence();
-            return true;
+            return { ok: true };
           }
-          if (depth >= 3) { onFull && onFull(); return false; }
-          return claimSlot(code, depth + 1, prefer); // 被抢 → 重新读取再试
+          /* 没提交：多半是网络抖动或正好撞车。退避重试，别急着说「房间满了」。 */
+          if (depth >= 4) return { ok: false, why: 'flaky' };
+          return new Promise(function (r) { setTimeout(r, 220 + depth * 380); })
+            .then(function () { return claimSlot(code, depth + 1, prefer); });
         });
       });
     }
@@ -160,6 +223,7 @@
           // 房间通过写入一个槽位创建（规则只允许在空槽位上这样写）
           return db.ref('rooms/' + code + '/slots/' + slot).set({
             uid: auth.currentUser.uid,
+            device: deviceId(),
             joinedAt: firebase.database.ServerValue.TIMESTAMP,
             outfit: 'winter'
           });
@@ -278,10 +342,10 @@
         else if (prefer && !data.slots[prefer]) { mySlot = prefer; data.slots[prefer] = { device: dev, joinedAt: Date.now(), outfit: 'winter' }; }
         else if (!data.slots.a) { mySlot = 'a'; data.slots.a = { device: dev, joinedAt: Date.now(), outfit: 'winter' }; }
         else if (!data.slots.b) { mySlot = 'b'; data.slots.b = { device: dev, joinedAt: Date.now(), outfit: 'winter' }; }
-        else { fullLs.forEach(function (cb) { cb(); }); return Promise.resolve(false); }
+        else { fullLs.forEach(function (cb) { cb(); }); return Promise.resolve({ ok: false, why: 'full' }); }
         data.presence[mySlot] = true;
         save();
-        return Promise.resolve(true);
+        return Promise.resolve({ ok: true });
       },
       setTreeStage: function (n) {
         data.tree = { stage: n, updatedBy: mySlot, updatedAt: Date.now() };
@@ -412,6 +476,51 @@
     } catch (e) { return ''; }
   }
 
+  /* 进房间的统一入口。
+     ★ v4.8.1：以前自动进房是用「10 秒超时 race 一个 reject」实现的 ——
+       网络一慢就直接判失败，而且 Promise 已经被 reject 掉了，
+       后面真连上也不会再进（玩家停在「进入房间失败」）。
+       现在超时不再是失败：失败分三种，各自给不同的话。
+         full  → 两格都是别人的（真的满）→ 满员界面，可以接管
+         flaky → 网络抖 / 撞车 → 自动退避重试 3 次，再不行就让玩家点一下
+       其它异常 → 原样把错误说出来，不要含糊成「满了」  */
+  var joining = false;
+  function joinRoomFlow(code, opts) {
+    opts = opts || {};
+    if (joining) return;
+    joining = true;
+    var tries = 0;
+    var maxTries = opts.tries || 3;
+
+    function attempt() {
+      tries++;
+      backend.joinRoom(code, preferSlot).then(function (r) {
+        if (r && r.ok) {
+          joining = false;
+          $('#lobby-error').classList.add('hidden');
+          afterJoined(code);
+          return;
+        }
+        if (r && r.why === 'full') {         // onFull 已经切到满员界面了
+          joining = false;
+          showScreen('screen-full');
+          return;
+        }
+        if (tries < maxTries) {
+          lobbyError('网络不太稳，正在重试…（第 ' + tries + ' 次）');
+          setTimeout(attempt, 700 + tries * 500);
+          return;
+        }
+        joining = false;
+        lobbyError('没能坐进座位：网络断了一下。等网络恢复后点「回到上次的房间」再试，进度都在云端不会丢。');
+      }).catch(function (e) {
+        joining = false;
+        lobbyError('加入失败：' + ((e && e.message) || e));
+      });
+    }
+    attempt();
+  }
+
   function startBackend() {
     backend.onConn(setConn);
     backend.onState(render);
@@ -420,8 +529,11 @@
     if (backend.mode === 'demo') {
       setConn(true);
       toast('本地演示模式：仅预览界面，未连接云端');
-      backend.joinRoom('demo', preferSlot).then(function (ok) {
-        if (ok) enterGame('demo');
+      /* 演示模式也要记住「当前尝试的房间」，否则满员界面上的「接管」点了没反应
+         （takeover 依赖 pendingRoom）。 */
+      pendingRoom = 'demo';
+      backend.joinRoom('demo', preferSlot).then(function (r) {
+        if (r && r.ok) enterGame('demo');
       });
       return;
     }
@@ -430,14 +542,7 @@
     if (room) {
       pendingRoom = room;
       toast('正在加入房间 ' + room + ' …', 3000);
-      var timeout = new Promise(function (_, rej) {
-        setTimeout(function () { rej(new Error('加入超时（10 秒），请检查网络后刷新重试')); }, 10000);
-      });
-      Promise.race([backend.joinRoom(room, preferSlot), timeout]).then(function (ok) {
-        if (ok) enterGame(room);
-      }).catch(function (e) {
-        lobbyError('进入房间失败：' + ((e && e.message) || e));
-      });
+      joinRoomFlow(room, { tries: 4 });
     } else {
       showScreen('screen-lobby');
     }
@@ -504,9 +609,7 @@
       if (!backend) initFirebaseBackend();
       $('#lobby-error').classList.add('hidden');
       pendingRoom = code;
-      backend.joinRoom(code, preferSlot).then(function (ok) {
-        if (ok) afterJoined(code);
-      }).catch(function (e) { lobbyError('加入失败：' + ((e && e.message) || e)); });
+      joinRoomFlow(code, { tries: 3 });
     }
 
     $('#btn-join').addEventListener('click', function () {
