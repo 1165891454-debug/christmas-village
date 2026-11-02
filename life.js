@@ -1,4 +1,4 @@
-/* life.js — v4.7.0「小镇生命力」
+/* life.js — v4.7.0「小镇生命力」· v4.7.1 只把一天从 15 分钟延长到 30 分钟
  * ============================================================
  * 这一版只做「让小镇自己活着」，不碰任何经济 / 任务 / 存档 / 同步：
  *
@@ -22,9 +22,14 @@ window.TownLife = (function () {
   /* ============================================================
    * 0. 常量
    * ============================================================ */
-  var DAY_MS = 900000;          // 虚拟一天 = 15 分钟真实时间（压缩的一天，不是系统时间）
+  /* v4.7.1：一天从 15 分钟延长到 30 分钟。
+     这一版**只改周期长度**：五个时段的相对比例、11 档色标、环境光渐变、
+     天气窗口、平滑追赶全部沿用 v4.7.0。EPOCH 不动 —— 周期只是分母，
+     两台设备依然用同一个原点和同一个分母算出同一个 vt，不需要任何同步。
+     天气窗口 WX_MS 是独立的 4 分钟，不跟着变（否则延长时间会把天气也拖慢）。 */
+  var DAY_MS = 1800000;         // 虚拟一天 = 30 分钟真实时间（压缩的一天，不是系统时间）
   var EPOCH = 1767225600000;    // 2026-01-01T00:00:00Z —— 全设备共用的时间原点
-  var WX_MS = 240000;           // 天气每 4 分钟换一档（不会频繁跳）
+  var WX_MS = 240000;           // 天气每 4 分钟换一档（不会频繁跳；与 DAY_MS 无关）
   var PRINT_MAX = 120;          // 脚印上限（环形复用，不留内存）
   var PRINT_LIFE = 7.0;         // 脚印淡出秒数
   var DECIDE_HZ = 4;            // NPC 决策频率
@@ -202,7 +207,13 @@ window.TownLife = (function () {
     santa: { x: 790, y: 598, w: 112, h: 108, sp: 15, sit: 1, idle: 0.55 },
     elf: { x: 1052, y: 698, w: 94, h: 54, sp: 26, sit: 0 },
     barista: { x: 1186, y: 346, w: 116, h: 86, sp: 23, sit: 0 },
-    postman: { x: 1050, y: 446, w: 132, h: 94, sp: 30, sit: 0 },
+    /* v4.7.1：邮差的活动区从车站门口的台阶挪到站房右下角。
+       车站的互动点是门（1033,430）、半径 104；原来的区域（984–1116 × 399–493）
+       整个把它盖住了，阿信一走到门口，玩家贴着门只会弹出「和阿信交谈」，
+       车站就打不开（releasecheck 抓到的真实回归）。
+       现在最近只能到离门 74px，玩家站在门口时永远是车站更近；
+       走到他脚边（离门 74+）则照样是阿信更近 —— 互动优先级一行都没改。 */
+    postman: { x: 1100, y: 462, w: 60, h: 46, sp: 26, sit: 0 },
     baker: { x: 1246, y: 432, w: 114, h: 100, sp: 25, sit: 1 },
     shepherd: { x: 356, y: 874, w: 118, h: 66, sp: 23, sit: 0 },
     carpenter: { x: 798, y: 272, w: 126, h: 66, sp: 21, sit: 0 }
@@ -461,10 +472,14 @@ window.TownLife = (function () {
   /* ============================================================
    * 6. 牧场动物（只做小范围活动 + 玩雪，不新增养成）
    * ============================================================ */
+  /* v4.7.1：三块活动区各自留出 ≥28px 的空档。
+     原来 cow 376–420 与 hen 340–378 是挨着甚至重叠的，两头会挤在一起 ——
+     不只是画面难看，玩家站在母鸡身上时「最近的可互动对象」会变成奶牛，
+     蛋就收不了（ranchwalk 里表现为「能碰到布丁 → 奶牛」）。 */
   var ANIMAL_ZONES = {
-    cow: { x: 376, y: 778, w: 44, h: 48 },
-    sheep: { x: 492, y: 780, w: 62, h: 54 },
-    hen: { x: 340, y: 790, w: 38, h: 40 }
+    cow: { x: 392, y: 776, w: 46, h: 46 },
+    sheep: { x: 486, y: 780, w: 56, h: 52 },
+    hen: { x: 330, y: 792, w: 34, h: 36 }
   };
   var critters = [];
   function buildCritters() {
@@ -1060,6 +1075,10 @@ window.TownLife = (function () {
     return {
       phase: st.phase,
       vt: +st.vt.toFixed(4),
+      /* v4.7.1：把两个周期暴露出来，验收脚本可以直接断言
+         「一天 30 分钟、天气还是 4 分钟一档」，不用去猜常量。 */
+      dayMs: DAY_MS,
+      wxMs: WX_MS,
       aa: +st.aa.toFixed(3),
       lamp: +st.lamp.toFixed(3),
       win: +st.win.toFixed(3),
@@ -1075,6 +1094,18 @@ window.TownLife = (function () {
       }),
       couple: { on: cp.on, kind: cp.kind, sit: cp.sit, dirA: cp.dirA, dirB: cp.dirB },
       prints: prints.length,
+      /* v4.7.1：把「最老的一条脚印活了多少秒」也暴露出来。
+         只数个数是不够的 —— NPC 和动物也在留脚印，个数会在平衡点附近上下浮动，
+         看不出「有没有哪条永远不消失」。寿命上限才是这条规则的真正判据。 */
+      prOld: (function () {
+        var m = 0;
+        for (var i = 0; i < prints.length; i++) {
+          var age = prints[i].max - prints[i].life;
+          if (age > m) m = age;
+        }
+        return +m.toFixed(2);
+      })(),
+      prLife: PRINT_LIFE,
       critters: critters.map(function (c) { return { id: c.id, x: +c.x.toFixed(1), y: +c.y.toFixed(1), mode: c.mode }; })
     };
   }
@@ -1136,7 +1167,7 @@ window.TownLife = (function () {
   }
 
   return {
-    version: '4.7.0',
+    version: '4.7.1',
     tick: tick,
     drawFootprints: drawFootprints,
     drawBuildingLife: drawBuildingLife,
@@ -1156,6 +1187,7 @@ window.TownLife = (function () {
     releaseWeather: releaseWeather,
     simulate: simulate,
     reset: reset,
-    zones: ZONES
+    zones: ZONES,
+    animalZones: ANIMAL_ZONES
   };
 })();

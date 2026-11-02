@@ -5873,19 +5873,22 @@ window.Game = (function () {
     if (!list) return;
     var cur = getOutfit(S.mySlot, 'winter');
     var r = worldRes();
+    /* v4.7.1：衣柜只列「当前该看见的」衣服 —— 冰岛没解锁时，
+       极光大衣连灰卡都不出现（已有 X / Y 套 的分母也跟着变）。 */
+    var shown = outfitsShown();
     var owned = 0;
-    OUTFITS.forEach(function (d) { if (outfitOwned(d.id)) owned++; });
+    shown.forEach(function (d) { if (outfitOwned(d.id)) owned++; });
 
     var wallet = $('#outfit-wallet');
     if (wallet) {
       wallet.innerHTML =
         '<b>🪵 ' + (r.wood || 0) + '</b><b>🌸 ' + (r.flowers || 0) + '</b><b>🎁 ' + (r.materials || 0) + '</b>' +
         '<b>🌾 ' + (r.hay || 0) + '</b><b>🥛 ' + (r.milk || 0) + '</b><b>📄 ' + (r.paper || 0) + '</b>' +
-        '<span style="margin-left:auto;color:rgba(232,220,200,.6)">已有 ' + owned + ' / ' + OUTFITS.length + ' 套</span>';
+        '<span style="margin-left:auto;color:rgba(232,220,200,.6)">已有 ' + owned + ' / ' + shown.length + ' 套</span>';
     }
 
     list.innerHTML = '';
-    OUTFITS.forEach(function (d) {
+    shown.forEach(function (d) {
       var has = outfitOwned(d.id);
       var worn = d.id === cur;
       var b = document.createElement('button');
@@ -5908,6 +5911,9 @@ window.Game = (function () {
 
   /* 换装 / 购买：一件衣服只在这里生效，别处不再直接写 outfit 字段 */
   function wearOutfit(id) {
+    /* v4.7.1：带显示闸门的衣服（冰岛没解锁时的极光大衣）不允许被提前穿上。
+       正常路径根本点不到它，这里只是兜底 —— 不让「别处的调用」绕过地图进度。 */
+    if (!outfitVisible(outfitDef(id))) return;
     if (S.data && S.data.slots && S.data.slots[S.mySlot]) S.data.slots[S.mySlot].outfit = id;
     if (S.backend && S.backend.setOutfit) {
       S.backend.setOutfit(id).then(function () { refreshHUD(); }).catch(function (e) {
@@ -6162,6 +6168,9 @@ window.Game = (function () {
 
   function pickOutfit(id) {
     var d = outfitDef(id);
+    /* v4.7.1：衣柜里没显示的衣服不存在「点它」这件事。
+       万一有别的入口按 id 调进来，这里也不让它绕过地图解锁。 */
+    if (!outfitVisible(d)) return;
     var cur = getOutfit(S.mySlot, 'winter');
     if (id === cur) { toast('已经穿着这一套了 ✨', 2000); return; }
     if (outfitOwned(id)) { Snd.sfx('ding'); wearOutfit(id); openOutfit(); return; }
@@ -7085,11 +7094,28 @@ window.Game = (function () {
     { id: 'snow', name: '雪地探险', icon: '🎿', cost: { wood: 10, hay: 2 }, note: '木材 10 · 干草 2' },
     { id: 'carpenter', name: '木匠围裙', icon: '🔨', cost: { wood: 16 }, note: '木材 16' },
     { id: 'party', name: '派对礼服', icon: '✨', cost: { materials: 3, milk: 1 }, note: '手工礼物 3 · 牛奶 1' },
-    { id: 'iceland', name: '极光大衣', icon: '🌌', cost: null, unlock: 'ticket:iceland', note: '拿到冰岛车票后自动解锁' }
+    /* v4.7.1：极光大衣跟着「冰岛地图解锁」走。
+       gate 与 unlock 是两件事：
+         unlock = 满足条件就自动拥有（派生状态，不写存档）；
+         gate   = 没满足条件时，**衣柜里整件都不出现**（连灰卡都不给）。
+       冰岛是藏起来的彩蛋站，如果没解锁就先在衣柜里摆一件「🔒 未解锁」的大衣，
+       等于提前剧透「还有第七个地方」。 */
+    { id: 'iceland', name: '极光大衣', icon: '🌌', cost: null, unlock: 'ticket:iceland', gate: 'ticket:iceland', note: '拿到冰岛车票后自动解锁' }
   ];
   function outfitDef(id) {
     for (var i = 0; i < OUTFITS.length; i++) if (OUTFITS[i].id === id) return OUTFITS[i];
     return OUTFITS[0];
+  }
+  /* 显示闸门：跟地图解锁绑定的衣服，没解锁就整件不显示。
+     判据复用 hasTicket（= 存档里有这张票，或此刻条件已经满足），
+     不新建任何「冰岛专用」标记，也就不可能和车站/车票册的判断打架。 */
+  function outfitVisible(d) {
+    if (!d || !d.gate) return true;
+    if (/^ticket:/.test(d.gate)) return hasTicket(d.gate.slice(7));
+    return true;
+  }
+  function outfitsShown() {
+    return OUTFITS.filter(outfitVisible);
   }
   function outfitOwned(id) {
     if (id === 'winter') return true;
