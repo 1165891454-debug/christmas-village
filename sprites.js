@@ -17,8 +17,10 @@ window.Sprites = (function () {
   // 服装配色表（Charles 与 Julie 同名服装有呼应的情侣色）
   var OUTFITS = {
     winter: {
-      m: { top: '#3b5a80', trim: '#e8dcc0', legs: '#3c4658', boots: '#5b3d29', scarf: '#e8dcc0', hat: null },
-      f: { top: '#c86b7e', trim: '#f4ead8', legs: '#8a5a68', boots: '#6b4a2f', scarf: '#f4ead8', hat: 'beanie' }
+      /* v4.8.0：跟着参考图改冬季配色（这里是 chars.js 缺失时的兜底画法，
+         颜色必须跟主绘制一致，否则「没有 chars.js」的极端情况下像换了个人） */
+      m: { top: '#32496e', trim: '#efe3ca', legs: '#2f3d52', boots: '#5a3c28', scarf: '#bd3730', hat: null },
+      f: { top: '#f1e4cd', trim: '#fffaf0', legs: '#3c3b50', boots: '#6b4a30', scarf: '#b8372f', hat: null }
     },
     santa: {
       m: { top: '#c0392b', trim: '#ffffff', legs: '#c0392b', boots: '#3a2c22', scarf: null, hat: 'santa' },

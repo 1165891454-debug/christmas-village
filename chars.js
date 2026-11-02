@@ -18,30 +18,37 @@ window.Chars = (function () {
   var SCALE = { m: 0.66, f: 0.645 };            // 逻辑单位 → 屏幕像素
   var cache = {};
 
-  /* ---------------- 调色板 ---------------- */
+  /* ---------------- 调色板 ----------------
+     v4.8.0：按参考图重定冬季配色 ——
+       Charles：深蓝冬大衣 + 正红围巾 + 近黑短发 + 黑框眼镜（眼镜单独一个颜色键，
+                不再借用暖棕描边色，否则在游戏尺寸下会读成「棕色镜框」）
+       Julie  ：米白大衣 + 红格纹围巾 + 深色裙 + 棕冬靴，头发改成近黑深棕，
+                高光用暖棕而不是原来的浅棕，避免在雪地里发灰。 */
   var PAL = {
     m: {
       skin: '#f4cba6', skinMid: '#eab894', skinShade: '#d99f79', skinHi: '#ffe4c8',
-      hair: '#2c221c', hairMid: '#3f3128', hairHi: '#5a4436',
-      coat: '#3d5c82', coatMid: '#33506f', coatDark: '#26405a', coatHi: '#5a7fa8',
+      hair: '#241b17', hairMid: '#30241d', hairHi: '#3f2f26', hairDark: '#140e0b',
+      coat: '#32496e', coatMid: '#273b5a', coatDark: '#1c2a42', coatHi: '#4b6b93',
       trim: '#efe3ca', trimDark: '#d6c3a1',
-      pants: '#3c4759', pantsDark: '#2c3543',
-      boot: '#5c3d29', bootDark: '#412a1b',
-      scarf: '#ecdfc4', scarfDark: '#cfb997',
-      glove: '#b8402f', accent: '#c0392b',
+      pants: '#2f3d52', pantsDark: '#212c3c',
+      boot: '#5a3c28', bootDark: '#3c271a',
+      scarf: '#bd3730', scarfDark: '#8d2620', scarfHi: '#d9554b',
+      glove: '#8d2620', accent: '#e8c46a',
+      glass: '#17161a',
       eye: '#3a2a20', blush: 'rgba(228,132,120,.34)'
     },
     f: {
       skin: '#fbd6b7', skinMid: '#f2c19f', skinShade: '#dfa482', skinHi: '#fff0dc',
-      hair: '#4b3225', hairMid: '#5e3f2c', hairHi: '#7d5738', hairTop: '#9a6f48', hairDark: '#38231a',
-      coat: '#c66470', coatMid: '#b2535f', coatDark: '#96414e', coatHi: '#e08b93',
-      trim: '#f8efdf', trimDark: '#e0cfb4',
-      pants: '#6f4b53', pantsDark: '#57383f',
-      boot: '#6d4b30', bootDark: '#4a3120',
-      scarf: '#f8efdf', scarfDark: '#ddc9ac',
+      hair: '#261b17', hairMid: '#34241d', hairHi: '#503b2c', hairTop: '#48351f', hairDark: '#150e0c',
+      coat: '#f1e4cd', coatMid: '#e1d1b7', coatDark: '#c8b293', coatHi: '#fffaf0',
+      trim: '#fffaf0', trimDark: '#e6d7bd',
+      pants: '#3c3b50', pantsDark: '#2b2a3a',
+      boot: '#6b4a30', bootDark: '#48301f',
+      scarf: '#b8372f', scarfDark: '#8e251f', scarfHi: '#d1554a',
+      plaid: '#f7e8d1',
       beanie: '#f9f2e4', beanieMid: '#eddfc7', beanieDark: '#d8c4a4',
-      glove: '#f8efdf', accent: '#c0392b',
-      eye: '#46301f', blush: 'rgba(236,140,136,.46)'
+      glove: '#f8efdf', accent: '#b8372f',
+      eye: '#3f2a1c', blush: 'rgba(236,140,136,.46)'
     }
   };
 
@@ -220,9 +227,15 @@ window.Chars = (function () {
     var ov = OUTFIT_PAL[name] && OUTFIT_PAL[name][g];
     if (ov) for (k in ov) out[k] = ov[k];
     out.outfit = name;
-    /* 帽子：居家/春游/木匠/派对不戴，其余保留（冬季帽形不变，只换颜色） */
-    out.noHat = (name === 'home' || name === 'spring' || name === 'carpenter' || name === 'party');
+    /* 帽子：居家/春游/木匠/派对不戴，其余保留（冬季帽形不变，只换颜色）
+       v4.8.0：Julie 的冬季造型取消毛线帽 —— 参考图里她的及腰长发是最重要的
+       识别特征，帽子会把整个发型压掉。其它服装的帽子照旧。 */
+    out.noHat = (name === 'home' || name === 'spring' || name === 'carpenter' || name === 'party' ||
+      (name === 'winter' && g === 'f'));
     out.slippers = (name === 'home');       // 居家：靴子换成拖鞋配色
+    /* 格纹只属于冬季那条红围巾，别的服装不能跟着印格 */
+    out.plaid = (name === 'winter' && g === 'f') ? PAL.f.plaid : null;
+    if (!out.glass) out.glass = '#17161a';
     PAL_CACHE[key] = out;
     return out;
   }
@@ -238,10 +251,10 @@ window.Chars = (function () {
     for (var i = 0; i < stops.length; i += 2) g.addColorStop(stops[i], stops[i + 1]);
     return g;
   }
-  function paint(ctx, fill, lw) {
+  function paint(ctx, fill, lw, stro) {
     if (fill) { ctx.fillStyle = fill; ctx.fill(); }
     if (lw !== 0) {
-      ctx.strokeStyle = OUT;
+      ctx.strokeStyle = stro || OUT;
       ctx.lineWidth = lw == null ? 2 : lw;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
@@ -362,10 +375,10 @@ window.Chars = (function () {
       var ex = pos[i];
       if (dir !== 0 && i === 1) break;
       ell(ctx, ex, 27.2, 2.7, 3.0); paint(ctx, '#fffdf6', 0);
-      ell(ctx, ex, 27.6, 1.95, 2.5);
-      paint(ctx, lg(ctx, ex, 25, ex, 30.4, [0, '#6a4a32', 0.7, P.eye, 1, '#241811']), 0);
-      ell(ctx, ex, 27.8, 1.0, 1.4); ctx.fillStyle = '#1d130d'; ctx.fill();
-      ell(ctx, ex - 0.7, 26.3, 0.8, 0.95); ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fill();
+      ell(ctx, ex, 27.7, 1.62, 2.15);
+      paint(ctx, lg(ctx, ex, 25.6, ex, 29.9, [0, '#7a5638', 0.7, P.eye, 1, '#241811']), 0);
+      ell(ctx, ex, 27.9, 0.88, 1.2); ctx.fillStyle = '#1d130d'; ctx.fill();
+      ell(ctx, ex - 0.6, 26.5, 0.72, 0.85); ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fill();
       ctx.beginPath();
       ctx.moveTo(ex - 2.8, 25.6);
       ctx.quadraticCurveTo(ex, 24.0, ex + 2.8, 25.6);
@@ -379,30 +392,34 @@ window.Chars = (function () {
     if (glasses) {
       // 镜框 + 镜片反光：侧视只画朝向侧那一只镜片（原来两只都画，
       // 在侧面会读成正面脸，和「转身」完全矛盾）
+      var GC = P.glass || '#17161a';
       var lenses = dir === 0 ? [-6.2, 6.2] : [dir === 2 ? -3.6 : 3.6];
       lenses.forEach(function (ex) {
-        rr(ctx, ex - 3.9, 24.1, 7.8, 6.6, 2.0);
-        paint(ctx, 'rgba(196,222,235,.20)', 2.2);
+        /* v4.8.0：镜片从 8.0×6.8 收到 6.4×5.4，框线 2.5 → 1.7。
+           原来的尺寸几乎盖住整张脸，游戏里会读成「墨镜」，眼睛全看不见了。 */
+        rr(ctx, ex - 3.0, 24.8, 6.0, 5.1, 1.6);
+        paint(ctx, 'rgba(206,228,240,.06)', 1.4);
+        // 镜片上一道斜反光（不能太亮，否则又是一片白）
         ctx.beginPath();
-        ctx.moveTo(ex - 3.1, 27.2);
-        ctx.lineTo(ex + 2.4, 24.9);
-        ctx.strokeStyle = 'rgba(255,255,255,.42)'; ctx.lineWidth = 1.1; ctx.stroke();
+        ctx.moveTo(ex - 2.4, 27.6);
+        ctx.lineTo(ex + 1.9, 25.2);
+        ctx.strokeStyle = 'rgba(255,255,255,.20)'; ctx.lineWidth = 0.8; ctx.stroke();
       });
       if (dir === 0) {
         ctx.beginPath();
-        ctx.moveTo(-2.4, 27.0); ctx.quadraticCurveTo(0, 25.8, 2.4, 27.0);
-        ctx.strokeStyle = OUT; ctx.lineWidth = 1.8; ctx.stroke();
+        ctx.moveTo(-2.8, 27.0); ctx.quadraticCurveTo(0, 26.1, 2.8, 27.0);
+        ctx.strokeStyle = GC; ctx.lineWidth = 1.6; ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(-10.1, 26.4); ctx.lineTo(-13.6, 25.4);
-        ctx.moveTo(10.1, 26.4); ctx.lineTo(13.6, 25.4);
-        ctx.strokeStyle = OUT; ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.moveTo(-8.5, 26.4); ctx.lineTo(-13.2, 25.2);
+        ctx.moveTo(8.5, 26.4); ctx.lineTo(13.2, 25.2);
+        ctx.strokeStyle = GC; ctx.lineWidth = 1.5; ctx.stroke();
       } else {
         // 侧视：一根镜腿沿脸侧向后
         var gs = dir === 2 ? -1 : 1;
         ctx.beginPath();
-        ctx.moveTo(gs * 7.2, 26.2);
-        ctx.lineTo(gs * 11.0, 25.0);
-        ctx.strokeStyle = OUT; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.moveTo(gs * 6.6, 26.2);
+        ctx.lineTo(gs * 11.2, 24.9);
+        ctx.strokeStyle = GC; ctx.lineWidth = 1.5; ctx.stroke();
       }
     }
   }
@@ -653,6 +670,16 @@ window.Chars = (function () {
     // 垂在身后的长发主体（先画，被身体压住中段）
     if (dir === 1) {
       // 背视：整片头发盖住后脑，到腰部收成发梢
+      /* v4.8.0：先铺一层深色底发 —— 发梢之间原来会透出米白大衣，
+         远看像头发上有几道白色的抓痕。 */
+      ctx.beginPath();
+      ctx.moveTo(-12.8, 36);
+      ctx.bezierCurveTo(-12.2, 50, -10.6, 60, -8.8, 68.6);
+      ctx.quadraticCurveTo(0, 72.4, 8.8, 68.6);
+      ctx.bezierCurveTo(10.6, 60, 12.2, 50, 12.8, 36);
+      ctx.quadraticCurveTo(0, 43, -12.8, 36);
+      ctx.closePath();
+      paint(ctx, P.hairDark, 1.4, P.hairDark);
       ctx.beginPath();
       ctx.moveTo(-14, 12);
       ctx.bezierCurveTo(-17.4, 26, -17, 48, -15.6, 64);
@@ -667,9 +694,9 @@ window.Chars = (function () {
       ctx.bezierCurveTo(17, 48, 17.4, 26, 14, 12);
       ctx.closePath();
       paint(ctx, lg(ctx, 0, 12, 0, 71,
-        [0, P.hairMid, 0.32, P.hair, 0.7, P.hairDark, 1, P.hair]), 2);
+        [0, P.hairMid, 0.32, P.hair, 0.7, P.hairDark, 1, P.hair]), 2, P.hairDark);
       // 发丝层次
-      ctx.strokeStyle = 'rgba(154,111,72,.34)';
+      ctx.strokeStyle = 'rgba(158,124,94,.36)';
       ctx.lineWidth = 0.9;
       [-8, -2.4, 3.6, 8.6].forEach(function (x) {
         ctx.beginPath();
@@ -695,15 +722,30 @@ window.Chars = (function () {
       ctx.lineTo(side * ix, len - 17.0);
       ctx.closePath();
       paint(ctx, lg(ctx, side * 4, 16, side * 15, len,
-        [0, P.hairMid, 0.26, P.hair, 0.66, P.hairDark, 1, P.hairMid]), 2);
+        [0, P.hairMid, 0.26, P.hair, 0.66, P.hairDark, 1, P.hairMid]), 2, P.hairDark);
 
       // 波浪高光（暗示卷度）
-      ctx.strokeStyle = 'rgba(168,124,80,.42)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(150,110,72,.30)';
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(side * 13.2, 24);
       ctx.bezierCurveTo(side * 12.2, 33, side * 14.8, 40, side * 13.6, 48);
       ctx.bezierCurveTo(side * 12.8, 54, side * 14.6, 58, side * 12.8, len - 4);
+      ctx.stroke();
+      /* v4.8.0：第二道更细的发缕光 + 发尾一段高光。
+         参考图的长发是靠「一缕一缕的反光」立住的，不是靠一整条亮边。 */
+      ctx.strokeStyle = 'rgba(178,136,94,.18)';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(side * 10.6, 27);
+      ctx.bezierCurveTo(side * 9.8, 36, side * 12.0, 44, side * 11.0, 52);
+      ctx.bezierCurveTo(side * 10.2, 57, side * 11.6, 60, side * 10.4, len - 9);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(side * 14.0, 20);
+      ctx.bezierCurveTo(side * 13.0, 26, side * 14.4, 30, side * 13.4, 35);
+      ctx.strokeStyle = 'rgba(214,176,128,.15)';
+      ctx.lineWidth = 1.1;
       ctx.stroke();
       // 内侧暗边，增加体积
       ctx.beginPath();
@@ -732,7 +774,7 @@ window.Chars = (function () {
     ctx.bezierCurveTo(12.6, 38, 13.8, 28, 13.0, 18);
     ctx.quadraticCurveTo(0, 12.6, -13.0, 18);
     ctx.closePath();
-    paint(ctx, lg(ctx, 0, 13, 0, 46, [0, P.hairMid, 0.5, P.hair, 1, P.hairDark]), 2);
+    paint(ctx, lg(ctx, 0, 13, 0, 46, [0, P.hairMid, 0.5, P.hair, 1, P.hairDark]), 2, P.hairDark);
   }
 
   function girlFrontHair(ctx, dir, P) {
@@ -750,7 +792,7 @@ window.Chars = (function () {
     ctx.bezierCurveTo(2.6, 20.2, -1.4, 22.0, -5.4, 21.2);
     ctx.bezierCurveTo(-8.8, 20.6, -11.4, 19.0, -13.6, 23.4);
     ctx.closePath();
-    paint(ctx, lg(ctx, 0, 8, 0, 22, [0, P.hairTop, 0.45, P.hair, 1, P.hairMid]), 1.9);
+    paint(ctx, lg(ctx, 0, 8, 0, 22, [0, P.hairTop, 0.45, P.hair, 1, P.hairMid]), 1.9, P.hairDark);
 
     // 刘海分区线（偏分）
     ctx.strokeStyle = 'rgba(56,35,26,.5)';
@@ -767,8 +809,26 @@ window.Chars = (function () {
     ctx.beginPath();
     ctx.moveTo(-6.0, 14.0);
     ctx.quadraticCurveTo(0.6, 11.2, 7.2, 13.2);
-    ctx.strokeStyle = 'rgba(196,150,100,.42)';
+    ctx.strokeStyle = 'rgba(176,134,92,.30)';
     ctx.lineWidth = 1.1;
+    ctx.stroke();
+    /* v4.8.0：头顶一整条柔光带（参考图里这层「发丝反光」是精致感的主要来源），
+       再补两道极细的发缕，让刘海不是一整块深色。 */
+    ctx.beginPath();
+    ctx.moveTo(-10.0, 16.2);
+    ctx.bezierCurveTo(-8.0, 10.2, -2.6, 7.4, 2.8, 8.2);
+    ctx.bezierCurveTo(7.4, 8.8, 11.2, 11.4, 12.6, 15.4);
+    ctx.strokeStyle = 'rgba(186,148,104,.16)';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-2.2, 12.0);
+    ctx.quadraticCurveTo(-3.4, 16.2, -4.8, 19.8);
+    ctx.moveTo(3.6, 11.6);
+    ctx.quadraticCurveTo(4.2, 14.6, 5.4, 17.4);
+    ctx.strokeStyle = 'rgba(120,88,62,.30)';
+    ctx.lineWidth = 0.8;
     ctx.stroke();
     ctx.restore();
 
@@ -787,12 +847,12 @@ window.Chars = (function () {
       ctx.bezierCurveTo(s * 12.6, 37, s * 12.4, 25, s * 11.4, 16.6);
       ctx.closePath();
       paint(ctx, lg(ctx, s * 14, 14, s * 12, 49,
-        [0, P.hair, 0.55, P.hairMid, 1, P.hairDark]), 1.8);
+        [0, P.hair, 0.55, P.hairMid, 1, P.hairDark]), 1.8, P.hairDark);
       // 发丝亮线
       ctx.beginPath();
       ctx.moveTo(s * 12.9, 18);
       ctx.quadraticCurveTo(s * 13.6, 31, s * 12.9, 44);
-      ctx.strokeStyle = 'rgba(160,116,74,.5)';
+      ctx.strokeStyle = 'rgba(146,106,70,.32)';
       ctx.lineWidth = 1.0;
       ctx.stroke();
       ctx.restore();
@@ -857,35 +917,89 @@ window.Chars = (function () {
     ctx.stroke();
   }
 
+  /* 格纹：把围巾路径当蒙版，在里面画纵横两组细线。
+     v4.8.0 新增 —— 参考图里 Julie 那条红围巾是苏格兰格，纯红会显得单薄。
+     只在冬季（P.plaid 有值）调用，其它服装不会长出格纹。 */
+  function plaidFill(ctx, pathFn, P) {
+    ctx.save();
+    pathFn();
+    ctx.clip();
+    var c = P.plaid || '#f7e8d1';
+    // 细线
+    ctx.strokeStyle = c;
+    ctx.lineWidth = 1.1;
+    ctx.globalAlpha = 0.38;
+    for (var x = -13; x <= 13; x += 4.4) {
+      ctx.beginPath(); ctx.moveTo(x, 40); ctx.lineTo(x, 68); ctx.stroke();
+    }
+    for (var y = 42; y <= 68; y += 4.6) {
+      ctx.beginPath(); ctx.moveTo(-14, y); ctx.lineTo(14, y); ctx.stroke();
+    }
+    // 宽条：每两条细线之间压一道更宽的半透明带，格纹才有层次
+    ctx.globalAlpha = 0.14;
+    ctx.lineWidth = 2.4;
+    for (var x2 = -12; x2 <= 13; x2 += 8.8) {
+      ctx.beginPath(); ctx.moveTo(x2, 40); ctx.lineTo(x2, 68); ctx.stroke();
+    }
+    ctx.globalAlpha = 0.14;
+    ctx.strokeStyle = '#5d1512';
+    ctx.lineWidth = 1.6;
+    for (var x3 = -11; x3 <= 13; x3 += 8.8) {
+      ctx.beginPath(); ctx.moveTo(x3, 40); ctx.lineTo(x3, 68); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function girlScarf(ctx, P, f, back) {
     // 围巾主体（贴着脖子，不要做成围兜）
-    ctx.beginPath();
-    ctx.moveTo(-9.6, 44.6);
-    ctx.quadraticCurveTo(0, 46.8, 9.6, 44.6);
-    ctx.quadraticCurveTo(10.4, 49.4, 9.2, 51.4);
-    ctx.quadraticCurveTo(0, 48.2, -9.2, 51.4);
-    ctx.quadraticCurveTo(-10.4, 49.4, -9.6, 44.6);
-    ctx.closePath();
-    paint(ctx, lg(ctx, 0, 44.0, 0, 51.8, [0, '#fffdf5', 0.55, P.scarf, 1, P.scarfDark]), 1.8);
+    function scBody() {
+      ctx.beginPath();
+      ctx.moveTo(-10.6, 44.2);
+      ctx.quadraticCurveTo(0, 46.6, 10.6, 44.2);
+      ctx.quadraticCurveTo(11.4, 50.4, 10.2, 53.8);
+      ctx.quadraticCurveTo(0, 50.6, -10.2, 53.8);
+      ctx.quadraticCurveTo(-11.4, 50.4, -10.6, 44.2);
+      ctx.closePath();
+    }
+    scBody();
+    paint(ctx, lg(ctx, 0, 43.6, 0, 54.2, [0, P.scarf, 0.62, P.scarf, 1, P.scarfDark]), 1.8);
+    if (P.plaid) plaidFill(ctx, scBody, P);
 
     // 左侧垂下的围巾尾 + 流苏
     var fl = (f === 1 ? 0.9 : (f === 3 ? -0.9 : 0));
-    ctx.beginPath();
-    ctx.moveTo(-8.8, 48.4);
-    ctx.bezierCurveTo(-11.2, 53.2, -11.4, 58.2, -10.4, 62.4 + fl);
-    ctx.quadraticCurveTo(-8.6, 63.4, -6.8, 62.2 + fl);
-    ctx.bezierCurveTo(-7.6, 57.8, -7.2, 53.2, -6.2, 49.4);
-    ctx.closePath();
+    function scTail() {
+      ctx.beginPath();
+      ctx.moveTo(-8.8, 48.4);
+      ctx.bezierCurveTo(-11.6, 53.6, -11.8, 59.0, -10.8, 63.4 + fl);
+      ctx.quadraticCurveTo(-8.8, 64.4, -7.0, 63.2 + fl);
+      ctx.bezierCurveTo(-7.8, 58.2, -7.4, 53.4, -6.4, 49.6);
+      ctx.closePath();
+    }
+    scTail();
     paint(ctx, lg(ctx, -7, 48.8, -11, 62.8,
       [0, P.scarf, 0.7, P.scarf, 1, P.scarfDark]), 1.7);
+    if (P.plaid) plaidFill(ctx, scTail, P);
+    // 折叠线（读成绕了两圈）
+    ctx.beginPath();
+    ctx.moveTo(-9.6, 48.2);
+    ctx.quadraticCurveTo(0, 51.0, 9.6, 48.2);
+    ctx.strokeStyle = 'rgba(52,12,10,.26)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-9.6, 49.4);
+    ctx.quadraticCurveTo(0, 52.2, 9.6, 49.4);
+    ctx.strokeStyle = 'rgba(255,206,192,.16)';
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
     // 流苏
     ctx.strokeStyle = P.scarfDark;
     ctx.lineWidth = 0.9;
     for (var i = 0; i < 4; i++) {
       var fx = -10.2 + i * 1.2;
       ctx.beginPath();
-      ctx.moveTo(fx, 62.2 + fl);
-      ctx.lineTo(fx - 0.1, 64.8 + fl);
+      ctx.moveTo(fx, 63.2 + fl);
+      ctx.lineTo(fx - 0.1, 65.8 + fl);
       ctx.stroke();
     }
     // 围巾织纹
@@ -986,37 +1100,64 @@ window.Chars = (function () {
     ctx.save();
     ctx.scale(narrow, 1);
 
-    // ---- 裙摆 ----
-    ctx.beginPath();
-    ctx.moveTo(-10.2, 58.6);
-    ctx.bezierCurveTo(-12.0, 67.4, -14.2, 73.4, -15.0, 77.4);
-    ctx.quadraticCurveTo(0, 81.4, 15.0, 77.4);
-    ctx.bezierCurveTo(14.2, 73.4, 12.0, 67.4, 10.2, 58.6);
-    ctx.closePath();
+    // ---- 大衣下摆 + 深色羊毛裙 ----
+    /* v4.8.0：原来下半身整片都是大衣色，远看像一条连身裙。
+       现在在 68.6 处收大衣下摆（带绒边），下面露出深色裙子 ——
+       参考图里 Julie 就是「米白大衣 + 深色裙 + 冬靴」的三段结构。 */
+    function skirtPath() {
+      ctx.beginPath();
+      ctx.moveTo(-10.2, 58.6);
+      ctx.bezierCurveTo(-12.0, 67.4, -14.2, 73.4, -15.0, 77.4);
+      ctx.quadraticCurveTo(0, 81.4, 15.0, 77.4);
+      ctx.bezierCurveTo(14.2, 73.4, 12.0, 67.4, 10.2, 58.6);
+      ctx.closePath();
+    }
+    skirtPath();
     paint(ctx, lg(ctx, -14, 58, 14, 80,
       [0, P.coatHi, 0.22, P.coat, 0.72, P.coatMid, 1, P.coatDark]), 2);
-    // 褶
-    ctx.strokeStyle = 'rgba(120,52,60,.26)';
+
+    // 深色裙：沿大衣轮廓裁一片，只在 68.6 以下生效
+    ctx.save();
+    skirtPath();
+    ctx.clip();
+    ctx.beginPath();
+    ctx.rect(-17, 68.6, 34, 15);
+    ctx.fillStyle = lg(ctx, 0, 68.6, 0, 82, [0, P.pants, 1, P.pantsDark]);
+    ctx.fill();
+    // 裙褶（深底上用一道浅线，褶才立得起来）
+    ctx.strokeStyle = 'rgba(214,208,226,.17)';
+    ctx.lineWidth = 1.0;
+    [-7.0, -2.4, 2.4, 7.0].forEach(function (x) {
+      ctx.beginPath();
+      ctx.moveTo(x * 0.62, 68.8);
+      ctx.quadraticCurveTo(x * 0.94, 74.2, x * 1.34, 80.4);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    // 大衣下摆：绒边 + 一道暗线（把大衣和裙子分开）
+    ctx.beginPath();
+    ctx.moveTo(-13.2, 67.6);
+    ctx.quadraticCurveTo(0, 71.0, 13.2, 67.6);
+    ctx.strokeStyle = '#fffaf0';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-13.2, 69.2);
+    ctx.quadraticCurveTo(0, 72.6, 13.2, 69.2);
+    ctx.strokeStyle = 'rgba(150,110,90,.30)';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+
+    // 大衣竖褶
+    ctx.strokeStyle = 'rgba(120,52,60,.16)';
     ctx.lineWidth = 0.9;
     [-7.0, -2.4, 2.4, 7.0].forEach(function (x) {
       ctx.beginPath();
       ctx.moveTo(x * 0.60, 60);
-      ctx.quadraticCurveTo(x * 0.92, 69, x * 1.34, 78.6);
+      ctx.quadraticCurveTo(x * 0.86, 64, x * 1.06, 68.2);
       ctx.stroke();
     });
-    // 裙摆绒边
-    ctx.beginPath();
-    ctx.moveTo(-14.8, 76.2);
-    ctx.quadraticCurveTo(0, 80.4, 14.8, 76.2);
-    ctx.strokeStyle = '#fffaf0';
-    ctx.lineWidth = 2.4;
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(150,110,90,.35)';
-    ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    ctx.moveTo(-14.8, 77.8);
-    ctx.quadraticCurveTo(0, 82.0, 14.8, 77.8);
-    ctx.stroke();
 
     // ---- 大衣上身 ----
     ctx.beginPath();
@@ -1130,7 +1271,7 @@ window.Chars = (function () {
       ctx.bezierCurveTo(-6.8, 24.0, -10.4, 30.0, -13.8, 40.0);
       ctx.closePath();
       paint(ctx, lg(ctx, 0, 12, 0, 68,
-        [0, P.hairHi, 0.16, P.hairMid, 0.52, P.hair, 1, P.hairDark]), 2);
+        [0, P.hairHi, 0.16, P.hairMid, 0.52, P.hair, 1, P.hairDark]), 2, P.hairDark);
       // 背面发丝
       ctx.strokeStyle = 'rgba(160,116,74,.34)';
       ctx.lineWidth = 1.0;
@@ -1177,14 +1318,31 @@ window.Chars = (function () {
     if (dir === 1) {
       // 背视：整颗头都是头发（否则背面会露出一张没有五官的脸）
       ell(ctx, 0, 26.2, 13.2, 17.4);
-      paint(ctx, lg(ctx, 0, 9, 0, 43.6, [0, P.hairHi, 0.3, P.hair, 1, '#241a14']), 1.9);
+      paint(ctx, lg(ctx, 0, 9, 0, 43.6, [0, P.hairHi, 0.3, P.hair, 1, '#241a14']), 1.9, P.hairDark);
       ctx.beginPath();
       ctx.moveTo(0, 13.4);
       ctx.quadraticCurveTo(6.6, 16.6, 8.8, 24.4);
       ctx.moveTo(0, 13.4);
       ctx.quadraticCurveTo(-6.6, 16.6, -8.8, 24.4);
-      ctx.strokeStyle = 'rgba(90,68,54,.45)';
+      ctx.strokeStyle = 'rgba(126,98,76,.42)';
       ctx.lineWidth = 0.9;
+      ctx.stroke();
+      /* v4.8.0：背影原来是一整颗黑蛋，完全没有头发结构。
+         补几条顺着后脑往下走的发流 + 顶上一圈光。 */
+      ctx.strokeStyle = 'rgba(122,96,74,.35)';
+      ctx.lineWidth = 0.8;
+      [-6.4, -2.2, 2.2, 6.4].forEach(function (bx2) {
+        ctx.beginPath();
+        ctx.moveTo(bx2 * 0.42, 14.6);
+        ctx.quadraticCurveTo(bx2 * 0.92, 24, bx2 * 0.80, 36.6);
+        ctx.stroke();
+      });
+      ctx.beginPath();
+      ctx.moveTo(-10.4, 18.4);
+      ctx.quadraticCurveTo(-2.0, 9.4, 9.6, 17.2);
+      ctx.strokeStyle = 'rgba(168,134,102,.24)';
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = 'round';
       ctx.stroke();
       return;
     }
@@ -1199,7 +1357,7 @@ window.Chars = (function () {
     ctx.bezierCurveTo(-8.6, 21.4, -10.4, 25.4, -11.6, 30.4);
     ctx.bezierCurveTo(-12.6, 29.4, -13.2, 27.2, -13.2, 24.4);
     ctx.closePath();
-    paint(ctx, lg(ctx, 0, 9, 0, 31, [0, P.hairHi, 0.35, P.hair, 1, P.hair]), 1.9);
+    paint(ctx, lg(ctx, 0, 9, 0, 31, [0, P.hairHi, 0.35, P.hair, 1, P.hair]), 1.9, P.hairDark);
     // 发流
     ctx.strokeStyle = 'rgba(90,68,54,.55)';
     ctx.lineWidth = 0.8;
@@ -1225,8 +1383,45 @@ window.Chars = (function () {
     ctx.strokeStyle = 'rgba(255,232,200,.22)';
     ctx.lineWidth = 1.6;
     ctx.stroke();
-  }
 
+    /* v4.8.0：碎发刘海 + 发丝层次
+       原来额前的发际线是一条平滑弧线，放大看像一顶贴头皮的头盔。
+       现在压三片带尖的小发束在额头上（不等宽、不等长），再补两道发流，
+       在 2× 放大下能看出「手绘短发」的层次，缩小后仍然是一整块短发。 */
+    var fdir = dir === 2 ? -1 : (dir === 3 ? 1 : 0);
+    ctx.save();
+    ctx.translate(fdir * 1.3, 0);
+    [[-7.6, 16.2, 6.4, 5.4], [-1.6, 17.0, 6.8, 4.8], [5.2, 15.8, 5.8, 5.8]].forEach(function (L) {
+      var bx = L[0], by = L[1], bw = L[2], bh = L[3];
+      ctx.beginPath();
+      ctx.moveTo(bx - bw * 0.5, by);
+      ctx.bezierCurveTo(bx - bw * 0.34, by + bh * 0.52, bx - bw * 0.12, by + bh * 0.92, bx + bw * 0.10, by + bh);
+      ctx.bezierCurveTo(bx + bw * 0.30, by + bh * 0.80, bx + bw * 0.46, by + bh * 0.40, bx + bw * 0.5, by);
+      ctx.closePath();
+      paint(ctx, lg(ctx, 0, by - 1, 0, by + bh, [0, P.hairMid, 0.5, P.hair, 1, P.hairDark]), 0);
+    });
+    ctx.restore();
+
+    // 两道发流：沿头顶向两侧走，暗示头发的走向
+    ctx.strokeStyle = 'rgba(120,92,68,.42)';
+    ctx.lineWidth = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(-2.6, 11.0);
+    ctx.bezierCurveTo(-6.0, 13.6, -8.6, 16.4, -9.6, 19.4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(3.4, 11.4);
+    ctx.bezierCurveTo(6.4, 13.2, 8.6, 15.8, 9.6, 18.2);
+    ctx.stroke();
+    // 头顶那一圈柔光（参考图里头发是有光泽的，不是纯色块）
+    ctx.beginPath();
+    ctx.moveTo(-9.2, 14.6);
+    ctx.quadraticCurveTo(-1.4, 8.4, 8.6, 13.8);
+    ctx.strokeStyle = 'rgba(196,160,122,.18)';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
   /* 垂下的手臂（男生版）：与 girlArm 同一套参数，便于两侧同步 */
   function boyArm(ctx, sd, dx, P, dim) {
     var sx = sd * 9.4, sy = 46.0;
@@ -1379,31 +1574,67 @@ window.Chars = (function () {
     paint(ctx, lg(ctx, 0, 40.0, 0, 48.2, [0, '#fffdf8', 0.55, P.trim, 1, P.trimDark]), 1.7);
 
     // 围巾（背面在颈后，只画围合的一圈）
+    function boyScarfBody() {
+      ctx.beginPath();
+      ctx.moveTo(-10.4, 43.6);
+      ctx.quadraticCurveTo(0, 40.6, 10.4, 43.6);
+      ctx.quadraticCurveTo(11.2, 49.8, 10.0, 53.4);
+      ctx.quadraticCurveTo(0, 50.2, -10.0, 53.4);
+      ctx.quadraticCurveTo(-11.2, 49.8, -10.4, 43.6);
+      ctx.closePath();
+    }
+    boyScarfBody();
+    paint(ctx, lg(ctx, 0, 40.8, 0, 54.0, [0, P.scarf, 0.62, P.scarf, 1, P.scarfDark]), 1.8);
+    /* v4.8.0：针织罗纹 —— 红围巾如果只是平涂，在雪地里会像一块色板。
+       用一组等距的竖向罗纹 + 上方一道柔光，2× 下能看清是毛线。 */
+    ctx.save();
+    boyScarfBody();
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(48,10,8,.22)';
+    ctx.lineWidth = 1.0;
+    for (var rb = -10; rb <= 10; rb += 2.4) {
+      ctx.beginPath();
+      ctx.moveTo(rb, 39.8);
+      ctx.lineTo(rb + 0.5, 54.2);
+      ctx.stroke();
+    }
     ctx.beginPath();
-    ctx.moveTo(-9.2, 44.2);
-    ctx.quadraticCurveTo(0, 41.4, 9.2, 44.2);
-    ctx.quadraticCurveTo(9.8, 48.4, 8.6, 49.8);
-    ctx.quadraticCurveTo(0, 47.4, -8.6, 49.8);
-    ctx.quadraticCurveTo(-9.8, 48.4, -9.2, 44.2);
-    ctx.closePath();
-    paint(ctx, lg(ctx, 0, 41.4, 0, 50, [0, '#fffdf5', 0.55, P.scarf, 1, P.scarfDark]), 1.8);
+    ctx.moveTo(-9.8, 42.2);
+    ctx.quadraticCurveTo(0, 40.0, 9.8, 42.2);
+    ctx.strokeStyle = 'rgba(255,214,196,.26)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    // 折叠线：一条深一道浅，读成「绕了两圈」
+    ctx.beginPath();
+    ctx.moveTo(-10.0, 47.4);
+    ctx.quadraticCurveTo(0, 50.0, 10.0, 47.4);
+    ctx.strokeStyle = 'rgba(255,210,190,.22)';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-10.2, 48.8);
+    ctx.quadraticCurveTo(0, 51.4, 10.2, 48.8);
+    ctx.strokeStyle = 'rgba(48,10,8,.26)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
     if (!back) {
       // 围巾尾（左侧，短一些，带流苏）
       var fl = (f === 1 ? 0.8 : (f === 3 ? -0.8 : 0));
       ctx.beginPath();
-      ctx.moveTo(-8.4, 47.6);
-      ctx.bezierCurveTo(-10.4, 51.6, -10.6, 55.4, -9.8, 58.4 + fl);
-      ctx.quadraticCurveTo(-8.0, 59.4, -6.4, 58.2 + fl);
-      ctx.bezierCurveTo(-7.2, 54.6, -6.8, 51.2, -6.0, 48.2);
+      ctx.moveTo(-8.6, 47.4);
+      ctx.bezierCurveTo(-10.9, 51.6, -11.5, 56.4, -10.5, 59.8 + fl);
+      ctx.quadraticCurveTo(-8.6, 61.2, -6.1, 59.9 + fl);
+      ctx.bezierCurveTo(-7.2, 55.4, -6.6, 51.2, -5.7, 48.0);
       ctx.closePath();
       paint(ctx, lg(ctx, -6, 48, -10, 59, [0, P.scarf, 1, P.scarfDark]), 1.7);
       ctx.strokeStyle = P.scarfDark;
       ctx.lineWidth = 0.85;
       for (var fs = 0; fs < 4; fs++) {
-        var fx = -9.6 + fs * 1.15;
+        var fx = -10.0 + fs * 1.2;
         ctx.beginPath();
-        ctx.moveTo(fx, 58.2 + fl);
-        ctx.lineTo(fx - 0.1, 60.4 + fl);
+        ctx.moveTo(fx, 59.8 + fl);
+        ctx.lineTo(fx - 0.1, 62.2 + fl);
         ctx.stroke();
       }
     } else {
