@@ -836,12 +836,15 @@ window.World = (function () {
   //       层间错位、越往上越亮，树心透出暖光。
   // 阶段：0 小树苗 → 1 挂彩球 → 2 亮彩灯 → 3 全树点亮（金星/礼物/光柱）
   // ============================================================
+  /* v4.8.0：满树从五层加到六层，同时更高更宽 —— 参考图里那棵树是
+     「一层压一层」的，层数不够就没有宏伟感。基准宽 104 → 112，高 318 → 368。 */
   var TREE_TIERS = [
-    { apex: -108, bot: 2, half: 104, tips: 9 },
-    { apex: -172, bot: -72, half: 86, tips: 8 },
-    { apex: -228, bot: -138, half: 68, tips: 7 },
-    { apex: -276, bot: -196, half: 50, tips: 6 },
-    { apex: -318, bot: -246, half: 33, tips: 5 }
+    { apex: -104, bot: 4, half: 112, tips: 9 },
+    { apex: -170, bot: -66, half: 93, tips: 8 },
+    { apex: -230, bot: -134, half: 74, tips: 7 },
+    { apex: -284, bot: -196, half: 56, tips: 6 },
+    { apex: -330, bot: -252, half: 39, tips: 5 },
+    { apex: -368, bot: -300, half: 25, tips: 4 }
   ];
 
   /* 固定种子的伪随机（0~1）：同一个 seed 每次结果一样，
@@ -854,12 +857,16 @@ window.World = (function () {
   /* 层的外轮廓：两侧上是弧线，底缘是一排下垂的枝尖。
      seed 传了才加不规则（只有大圣诞树用），其它小树保持原来的规整形状。 */
   function firTierPath(ctx, cx, apexY, botY, halfW, tips, seed) {
+    ctx.beginPath();
+    firTierShape(ctx, cx, apexY, botY, halfW, tips, seed);
+  }
+  /* 只建路径不起新路径：拼「整棵树」的裁剪区时要用（多段 subpath 取并集） */
+  function firTierShape(ctx, cx, apexY, botY, halfW, tips, seed) {
     var span = botY - apexY;
-    var notchY = botY - Math.max(5, halfW * 0.12);
+    var notchY = botY - Math.max(4.5, halfW * 0.082);
     var rX = cx + halfW * 0.94, lX = cx - halfW * 0.94;
     var jAmpX = seed ? 2.2 + halfW * 0.030 : 0;
-    var jAmpY = seed ? 1.6 + halfW * 0.020 : 0;
-    ctx.beginPath();
+    var jAmpY = seed ? 2.3 + halfW * 0.024 : 0;
     ctx.moveTo(cx, apexY);
     ctx.bezierCurveTo(cx + halfW * 0.50, apexY + span * 0.13,
                       cx + halfW * 0.90, apexY + span * 0.40, rX, notchY);
@@ -880,10 +887,10 @@ window.World = (function () {
 
   /* 只走底缘那条锯齿（用来压雪）——jitter 必须和上面完全一致，雪才贴着枝条 */
   function firEdgePath(ctx, cx, botY, halfW, tips, seed) {
-    var notchY = botY - Math.max(5, halfW * 0.12);
+    var notchY = botY - Math.max(4.5, halfW * 0.082);
     var rX = cx + halfW * 0.94, lX = cx - halfW * 0.94;
     var jAmpX = seed ? 2.2 + halfW * 0.030 : 0;
-    var jAmpY = seed ? 1.6 + halfW * 0.020 : 0;
+    var jAmpY = seed ? 2.3 + halfW * 0.024 : 0;
     ctx.beginPath();
     ctx.moveTo(rX, notchY);
     for (var j = 0; j < tips; j++) {
@@ -900,7 +907,7 @@ window.World = (function () {
 
   /* u: -1(左) ~ 1(右) 在这一层表面取点；越靠外越靠近下垂的枝尖 */
   function tierPt(cx, apexY, botY, halfW, u) {
-    var notchY = botY - Math.max(5, halfW * 0.12);
+    var notchY = botY - Math.max(4.5, halfW * 0.082);
     var px = cx + halfW * 0.86 * u;
     var py = notchY + (botY - notchY) * (0.30 + 0.70 * u * u);
     return { x: px, y: py };
@@ -917,13 +924,19 @@ window.World = (function () {
   }
 
   function firTier(ctx, cx, apexY, botY, halfW, tips, top, bottom, snowA, lit, seed, full) {
-    // 底部暗影（把层与层分开）
-    ctx.save();
-    ctx.translate(0, 6);
-    firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
-    ctx.fillStyle = 'rgba(12,44,30,.42)';
-    ctx.fill();
-    ctx.restore();
+    /* 缺口 + 层间暗影（v4.8.0 最后一版）
+       枝尖之间那些缺口是「内凹」的：把整层向下平移、或者沿底缘补一条带，
+       都会在缺口里留下一条空隙 —— 空隙背后是亮雪地，一排缺口就变成了
+       一排白色小帐篷。所以这里直接铺一条横跨层宽、向下渐隐的深色裙边，
+       缺口里看到的是深绿的内层枝叶，同时顺带给下一层压了一道影。 */
+    var notchY0 = botY - Math.max(4.5, halfW * 0.082);
+    var dropB = Math.max(9, halfW * 0.095);
+    var gb = ctx.createLinearGradient(0, notchY0, 0, botY + dropB);
+    gb.addColorStop(0, 'rgba(11,38,26,.92)');
+    gb.addColorStop(0.42, 'rgba(10,34,23,.62)');
+    gb.addColorStop(1, 'rgba(10,34,23,0)');
+    ctx.fillStyle = gb;
+    ctx.fillRect(cx - halfW * 0.94, notchY0, halfW * 1.88, botY + dropB - notchY0);
 
     firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     var g = ctx.createLinearGradient(cx - halfW * 0.55, apexY, cx + halfW * 0.6, botY);
@@ -948,7 +961,7 @@ window.World = (function () {
     }
     /* v4.1 放射状枝条：从层心向外散开，让整层有「编织」的质感，
        不再是一整块平的绿色。固定种子 → 每帧、每张照片都一样。 */
-    var notchB = botY - Math.max(5, halfW * 0.12);
+    var notchB = botY - Math.max(4.5, halfW * 0.082);
     ctx.lineWidth = Math.max(1, halfW * 0.015);
     var branchN = Math.min(tips, 7);
     for (var br = 0; br < branchN; br++) {
@@ -991,38 +1004,50 @@ window.World = (function () {
     firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
     ctx.stroke();
 
-    /* 积雪（v4.1 重做）
-       以前是沿锯齿描一条粗白线，放大看像贴在树上的白花边。
-       现在改成：极薄的一道白边 + 每个枝尖一小团雪，雪只「落在枝头」，
-       不在枝与枝之间拉横幅。 */
+    /* 积雪（v4.8.0 第三版）
+       v1 沿锯齿描白线 → 像缝线；v2 把雪团圆心压在枝尖顶点上 → 被层轮廓
+       裁成一个个朝上的白三角（放大后像尖刺）。
+       现在：雪团整个坐在枝尖「上方」、必然落在层内，不再被裁；
+       再加一层雪檐（沿底缘偏移出来的薄白边）把枝尖连成一片，
+       雪是压住枝条的，不是飘在旁边的。 */
     if (snowA > 0) {
-      firEdgePath(ctx, cx, botY, halfW, tips, seed);
-      ctx.strokeStyle = 'rgba(232,244,255,' + Math.min(0.30, snowA * 0.30) + ')';
-      ctx.lineWidth = Math.max(1.0, halfW * 0.014);
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.stroke();
-
-      var notchYs = botY - Math.max(5, halfW * 0.12);
+      ctx.save();
+      firTierPath(ctx, cx, apexY, botY, halfW, tips, seed);
+      ctx.clip();
       var sRX = cx + halfW * 0.94, sLX = cx - halfW * 0.94;
+      var toothW = Math.abs(sRX - sLX) / tips;
+      var snowA2 = Math.min(0.92, 0.30 + snowA * 0.52);
+
+      // ---- 枝尖上的雪团：只有部分枝头积雪，且大小各不相同 ----
+      // （不要沿整条底缘铺雪 —— 铺满会连成一条苍白的锯齿带，比没有雪更难看）
       for (var js = 0; js < tips; js++) {
-        var sx0 = sRX + (sLX - sRX) * (js / tips);
-        var sx1 = sRX + (sLX - sRX) * ((js + 1) / tips);
         var sjx = seed ? (jag(seed, js) - 0.5) * (2.2 + halfW * 0.030) * 2 : 0;
-        var sjy = seed ? (jag(seed + 7.3, js) - 0.5) * (1.6 + halfW * 0.020) * 2 : 0;
-        var sxm = (sx0 + sx1) / 2 + (js % 2 ? 1.6 : -1.6) + sjx;
+        var sjy = seed ? (jag(seed + 7.3, js) - 0.5) * (2.3 + halfW * 0.024) * 2 : 0;
+        var sxm = sRX + (sLX - sRX) * ((js + 0.5) / tips) + (js % 2 ? 1.6 : -1.6) + sjx;
         var stY = botY + (halfW > 60 ? 5 : 2) + sjy;
-        var sr = Math.max(1.7, halfW * (0.022 + 0.016 * jag(seed + 2.2, js)) * (0.7 + snowA * 0.6));
+        var rk = jag(seed + 4.4, js);
+        if (rk < 0.62) continue;                       // 只有约四成枝头积雪
+        /* 雪块要「扁而宽」：宽 2~3 倍于厚，才像压在枝条上的雪；
+           高宽比接近 1 时贴着锯齿边就成了一个个白色小帐篷。 */
+        var rx = toothW * (0.34 + rk * 0.16);
+        var ry = Math.max(1.05, halfW * 0.011) * (0.85 + rk * 0.25) * (0.88 + snowA * 0.20);
+        var cyS = stY - ry * 1.05 - (sjy > 0 ? 0.6 : 0);
         ctx.beginPath();
-        ctx.ellipse(sxm, stY - sr * 0.45, sr * 1.55, sr * 0.80, 0, 0, 7);
-        ctx.fillStyle = 'rgba(250,253,255,' + Math.min(0.95, snowA * 0.55 + 0.30) + ')';
+        ctx.ellipse(sxm, cyS, rx, ry, 0, 0, 7);
+        ctx.fillStyle = 'rgba(252,254,255,' + Math.min(0.90, snowA2 * (0.82 + rk * 0.16)).toFixed(3) + ')';
         ctx.fill();
-        /* 雪团上沿的一点冷高光，别让雪看起来像纯白纸片 */
+        // 雪团下沿的冷影：让雪「压」在枝条上而不是浮着
         ctx.beginPath();
-        ctx.ellipse(sxm - sr * 0.3, stY - sr * 0.72, sr * 0.85, sr * 0.34, 0, 0, 7);
-        ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.8, snowA * 0.4 + 0.22) + ')';
+        ctx.ellipse(sxm, cyS + ry * 0.82, rx * 0.92, ry * 0.38, 0, 0, 7);
+        ctx.fillStyle = 'rgba(96,138,130,.16)';
+        ctx.fill();
+        // 雪团顶部的一点高光
+        ctx.beginPath();
+        ctx.ellipse(sxm - rx * 0.16, cyS - ry * 0.32, rx * 0.44, ry * 0.30, 0, 0, 7);
+        ctx.fillStyle = 'rgba(255,255,255,.52)';
         ctx.fill();
       }
+      ctx.restore();
     }
   }
 
@@ -1197,8 +1222,8 @@ window.World = (function () {
   var ORN_N = {
     2: [2, 1, 1, 1],
     3: [3, 2, 2, 2, 1],
-    4: [4, 3, 3, 2, 2],
-    5: [5, 4, 4, 3, 2]
+    4: [4, 3, 3, 2, 2, 1],
+    5: [5, 4, 4, 3, 2, 2]
   };
   /* 每个阶段只用一套配色：暖金打底，越往后才慢慢掺进红蓝绿 */
   var ORN_PALETTE = {
@@ -1214,34 +1239,34 @@ window.World = (function () {
    * 以前只有两种形状——「小树苗」和「满高五层」——所以第一次升级
    * 就直接变成最大形态，后面两阶只是往上挂东西。
    * 现在 1→2→3 每一阶都真的长高、长宽、多一层：
-   *   1 初生     3 层 / 高 ~176
-   *   2 开始装饰 4 层 / 高 ~260
-   *   3 节日树形 5 层 / 高 ~308
-   *   4 即将点亮 5 层 / 满高 340
-   *   5 完全点亮 满高再放大 6%
+   *   1 初生     3 层 / 高 ~194
+   *   2 开始装饰 4 层 / 高 ~281
+   *   3 节日树形 5 层 / 高 ~341
+   *   4 即将点亮 6 层 / 满高 372
+   *   5 完全点亮 满高再放大 4.5%
    * ============================================================ */
   var TREE_TIERS_YOUNG = [
-    { apex: -62, bot: 2, half: 50, tips: 6 },
-    { apex: -120, bot: -44, half: 40, tips: 5 },
-    { apex: -174, bot: -102, half: 29, tips: 4 }
+    { apex: -72, bot: 2, half: 55, tips: 6 },
+    { apex: -134, bot: -52, half: 44, tips: 5 },
+    { apex: -192, bot: -114, half: 32, tips: 4 }
   ];
   var TREE_TIERS_MID = [
-    { apex: -84, bot: 2, half: 68, tips: 7 },
-    { apex: -148, bot: -64, half: 56, tips: 6 },
-    { apex: -208, bot: -128, half: 44, tips: 5 },
-    { apex: -258, bot: -190, half: 31, tips: 4 }
+    { apex: -92, bot: 3, half: 75, tips: 7 },
+    { apex: -160, bot: -72, half: 62, tips: 6 },
+    { apex: -222, bot: -140, half: 48, tips: 5 },
+    { apex: -278, bot: -204, half: 34, tips: 4 }
   ];
   var TREE_TIERS_NEAR = [
-    { apex: -100, bot: 2, half: 86, tips: 8 },
-    { apex: -164, bot: -78, half: 72, tips: 7 },
-    { apex: -218, bot: -146, half: 56, tips: 6 },
-    { apex: -264, bot: -200, half: 42, tips: 5 },
-    { apex: -306, bot: -246, half: 29, tips: 4 }
+    { apex: -108, bot: 3, half: 91, tips: 8 },
+    { apex: -176, bot: -86, half: 76, tips: 7 },
+    { apex: -238, bot: -154, half: 60, tips: 6 },
+    { apex: -292, bot: -214, half: 45, tips: 5 },
+    { apex: -338, bot: -268, half: 30, tips: 4 }
   ];
 
   /* 5 阶比 4 阶再高 6%：最后一步是「长成」，不只是「变亮」 */
   var TREE_TIERS_FULL = TREE_TIERS.map(function (L) {
-    return { apex: L.apex * 1.06, bot: L.bot * 1.06, half: L.half * 1.06, tips: L.tips };
+    return { apex: L.apex * 1.045, bot: L.bot * 1.045, half: L.half * 1.045, tips: L.tips };
   });
 
   function tiersFor(stage) {
@@ -1269,52 +1294,647 @@ window.World = (function () {
     }
   }
 
-  /* 六阶段圣诞树。同一个函数既画小镇里的树，也被合照调用，
-     所以「玩到的」和「拍下来的」永远一致。
+  /* ============================================================
+   * v4.8.0：中央圣诞树重制
+   * ------------------------------------------------------------
+   * 1) 更宏伟：五层 → 六层，基准宽 104 → 112、高 318 → 368；
+   * 2) 更华丽：红丝带螺旋缠绕 + 蝴蝶结 + 金铃铛 + 金星挂饰 +
+   *    树下灯笼 + 更大的礼物堆 + 数百颗彩灯；
+   * 3) 更快：树体 / 挂饰 / 丝带 / 灯 这些「每帧都一样」的部分，
+   *    按阶段一次性烘焙成离屏位图，每帧只贴图 + 画会动的部分
+   *    （星顶光晕、闪烁灯、星屑、飘雪）。改版前树占了夜景 2/3 的帧时间。
+   * ------------------------------------------------------------
+   * 同一函数仍被小镇、合照、结局复用 —— 所以「玩到的」「拍下来的」
+   * 「结局里那棵」永远是同一棵树。
+   * ============================================================ */
 
-     stage 0 小树苗 → 1 初生 → 2 开始装饰 → 3 节日树形 → 4 即将点亮 → 5 完全点亮
-     每一阶都同时改四件事：树体几何（层数 / 高度 / 宽度）、挂饰密度、
-     光照（地面光池 / 暖晕 / 光柱）、星与飞雪。 */
+  /* 圆角矩形路径（world.js 里没有这个画笔，补一个小的） */
+  function rrPath(ctx, x, y, w, h, r) {
+    r = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  /* 圆锥在某个高度上的半宽（丝带、灯笼要靠它贴住树面） */
+  function coneHalf(tiers, y) {
+    var i, L;
+    for (i = 0; i < tiers.length; i++) {
+      L = tiers[i];
+      if (y >= L.apex && y <= L.bot) {
+        var u = (y - L.apex) / Math.max(1, L.bot - L.apex);
+        return L.half * (0.14 + 0.86 * u);
+      }
+    }
+    if (y < tiers[tiers.length - 1].apex) return tiers[tiers.length - 1].half * 0.24;
+    return tiers[0].half;
+  }
+
+  /* 蝴蝶结：两片环 + 中间结 + 两条飘带（小尺寸下也要能看出是结） */
+  function treeBow(ctx, x, y, s, col) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = col;
+    [-1, 1].forEach(function (sg) {
+      ctx.beginPath();
+      ctx.moveTo(sg * s * 0.10, s * 0.16);
+      ctx.quadraticCurveTo(sg * s * 0.82, s * 0.78, sg * s * 1.02, s * 1.34);
+      ctx.lineTo(sg * s * 0.58, s * 1.22);
+      ctx.quadraticCurveTo(sg * s * 0.40, s * 0.72, -sg * s * 0.06, s * 0.38);
+      ctx.closePath();
+      ctx.fill();
+    });
+    [-1, 1].forEach(function (sg) {
+      ctx.save();
+      ctx.translate(sg * s * 0.56, -s * 0.14);
+      ctx.rotate(sg * 0.36);
+      ctx.beginPath(); ctx.ellipse(0, 0, s * 0.66, s * 0.40, 0, 0, 7);
+      ctx.fillStyle = col; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(sg * s * 0.08, 0, s * 0.26, s * 0.15, 0, 0, 7);
+      ctx.fillStyle = 'rgba(40,8,6,.30)'; ctx.fill();
+      ctx.restore();
+    });
+    ctx.beginPath(); ctx.arc(0, s * 0.04, s * 0.24, 0, 7);
+    ctx.fillStyle = 'rgba(255,232,194,.94)'; ctx.fill();
+    ctx.restore();
+  }
+
+  /* 金色铃铛 */
+  function treeBell(ctx, x, y, s) {
+    ctx.strokeStyle = 'rgba(214,168,86,.9)';
+    ctx.lineWidth = Math.max(0.7, s * 0.13);
+    ctx.beginPath(); ctx.moveTo(x, y - s * 1.15); ctx.lineTo(x, y - s * 0.5); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.62, y + s * 0.42);
+    ctx.bezierCurveTo(x - s * 0.64, y - s * 0.58, x + s * 0.64, y - s * 0.58, x + s * 0.62, y + s * 0.42);
+    ctx.closePath();
+    var g = ctx.createLinearGradient(x - s, y - s * 0.5, x + s, y + s * 0.5);
+    g.addColorStop(0, '#ffeeb4');
+    g.addColorStop(0.44, '#e2ab3e');
+    g.addColorStop(1, '#a26a1a');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(96,58,12,.55)';
+    ctx.lineWidth = Math.max(0.6, s * 0.09);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.70, y + s * 0.42);
+    ctx.lineTo(x + s * 0.70, y + s * 0.42);
+    ctx.strokeStyle = '#b87f22';
+    ctx.lineWidth = Math.max(0.8, s * 0.15);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y + s * 0.58, s * 0.16, 0, 7);
+    ctx.fillStyle = '#8a5c14'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x - s * 0.22, y - s * 0.12, s * 0.13, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,238,.82)'; ctx.fill();
+  }
+
+  /* 金星挂饰（与树顶那颗同形，缩小版） */
+  function treeStarOrn(ctx, x, y, r, col) {
+    var pts = [], i, a, rr2;
+    for (i = 0; i < 10; i++) {
+      rr2 = (i % 2 === 0) ? r : r * 0.42;
+      a = -Math.PI / 2 + i * Math.PI / 5;
+      pts.push([x + Math.cos(a) * rr2, y + Math.sin(a) * rr2]);
+    }
+    ctx.beginPath();
+    for (i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i][0], pts[i][1]) : ctx.moveTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    var g = ctx.createLinearGradient(x, y - r, x, y + r);
+    g.addColorStop(0, '#fff3c0');
+    g.addColorStop(0.5, col || '#f3c040');
+    g.addColorStop(1, '#c98a1e');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(140,92,16,.55)';
+    ctx.lineWidth = Math.max(0.5, r * 0.12);
+    ctx.stroke();
+  }
+
+  /* 树下的节日灯笼（参考图里树根一圈小灯笼） */
+  function treeLantern(ctx, x, y, s) {
+    drawGlow(ctx, x, y - s * 1.05, 'rgba(255,198,112,.50)', s * 5.0, 0.85);
+    ctx.fillStyle = '#6b3f1c';
+    ctx.fillRect(x - s * 0.62, y - s * 0.16, s * 1.24, s * 0.24);
+    rrPath(ctx, x - s * 0.62, y - s * 1.92, s * 1.24, s * 1.78, s * 0.3);
+    var g = ctx.createLinearGradient(x, y - s * 1.92, x, y - s * 0.16);
+    g.addColorStop(0, '#ffeab4');
+    g.addColorStop(0.45, '#ffc768');
+    g.addColorStop(1, '#e08e2e');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(110,56,16,.5)';
+    ctx.lineWidth = Math.max(0.6, s * 0.08);
+    ctx.stroke();
+    ctx.fillStyle = '#5e3616';
+    ctx.fillRect(x - s * 0.74, y - s * 2.12, s * 1.48, s * 0.26);
+    ctx.strokeStyle = '#5e3616';
+    ctx.lineWidth = Math.max(0.6, s * 0.09);
+    ctx.beginPath(); ctx.arc(x, y - s * 2.12, s * 0.34, Math.PI, 0); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, y - s * 1.0, s * 0.20, s * 0.34, 0, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,228,.88)'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - s * 0.62, y - s * 0.5); ctx.lineTo(x + s * 0.62, y - s * 0.5);
+    ctx.strokeStyle = 'rgba(160,88,20,.35)';
+    ctx.lineWidth = Math.max(0.5, s * 0.07);
+    ctx.stroke();
+  }
+
+  /* 红丝带：沿圆锥表面绕圈，只画「朝着观众」的那半圈，绕到树后自然消失。
+     v4.8.0 第三版：早先用 4 道同心描边叠厚度，放大看是一条「红香肠」。
+     现在按带宽填充一个真正的带面，并且让带宽随圆锥透视收窄 ——
+     正对镜头的正面最宽，绕到左右两侧收成细边，这才是「绕在圆锥上」。
+     带面上再压一道受光窄带 + 一条顶边高光 + 一条底边暗影。 */
+  function treeRibbon(ctx, tiers, k, yTop, turns, width) {
+    var N = 150, pts = [], i;
+    var drop = 9.2 * k;
+    for (i = 0; i <= N; i++) {
+      var a = -0.35 + (i / N) * turns * Math.PI * 2;
+      var y = yTop + a * drop;
+      var half = coneHalf(tiers, y);
+      var cs = Math.cos(a);
+      pts.push({
+        x: half * Math.sin(a) * 1.02,
+        y: y,
+        f: cs > -0.24,
+        w: width * (0.38 + 0.62 * Math.max(0, cs))
+      });
+    }
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'butt';
+
+    function bandOf(run, wScale, yOff) {
+      var n = run.length, Lp = [], Rp = [];
+      for (var qi = 0; qi < n; qi++) {
+        var p0 = run[qi > 0 ? qi - 1 : 0];
+        var p1 = run[qi < n - 1 ? qi + 1 : n - 1];
+        var dx = p1.x - p0.x, dy = p1.y - p0.y;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var nx = -dy / len, ny = dx / len;
+        // 两端收窄，免得在树侧面被裁出两个方形断面
+        var taper = Math.min(1, 0.30 + Math.min(qi, n - 1 - qi) / 3 * 0.34);
+        var hw = run[qi].w * 0.5 * wScale * taper;
+        Lp.push([run[qi].x + nx * hw, run[qi].y + ny * hw + yOff]);
+        Rp.push([run[qi].x - nx * hw, run[qi].y - ny * hw + yOff]);
+      }
+      ctx.beginPath();
+      ctx.moveTo(Lp[0][0], Lp[0][1]);
+      for (var a1 = 1; a1 < n; a1++) ctx.lineTo(Lp[a1][0], Lp[a1][1]);
+      for (var b1 = n - 1; b1 >= 0; b1--) ctx.lineTo(Rp[b1][0], Rp[b1][1]);
+      ctx.closePath();
+      return { L: Lp, R: Rp };
+    }
+
+    function flush(run) {
+      if (run.length < 3) return;
+      // 主体
+      bandOf(run, 1, 0);
+      ctx.fillStyle = '#ad2f27';
+      ctx.fill();
+      // 受光面（往上偏一点的窄带，裁在主体里）
+      ctx.save();
+      bandOf(run, 1, 0);
+      ctx.clip();
+      bandOf(run, 0.52, -run[0].w * 0.20);
+      ctx.fillStyle = 'rgba(228,104,86,.72)';
+      ctx.fill();
+      bandOf(run, 0.20, -run[0].w * 0.30);
+      ctx.fillStyle = 'rgba(255,206,186,.34)';
+      ctx.fill();
+      ctx.restore();
+      // 底边暗影 + 顶边高光，把布带的厚度压出来
+      var p, qi2;
+      ctx.beginPath();
+      for (qi2 = 0; qi2 < run.length; qi2++) {
+        p = bandOf1(run, qi2, 1);
+        if (qi2 === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+      }
+      ctx.strokeStyle = 'rgba(96,22,16,.45)';
+      ctx.lineWidth = Math.max(0.7, run[0].w * 0.10);
+      ctx.stroke();
+    }
+
+    /* 单侧边缘点（side: 1 = 下缘, -1 = 上缘） */
+    function bandOf1(run, qi, side) {
+      var n = run.length;
+      var p0 = run[qi > 0 ? qi - 1 : 0];
+      var p1 = run[qi < n - 1 ? qi + 1 : n - 1];
+      var dx = p1.x - p0.x, dy = p1.y - p0.y;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var nx = -dy / len, ny = dx / len;
+      var taper = Math.min(1, 0.30 + Math.min(qi, n - 1 - qi) / 3 * 0.34);
+      var hw = run[qi].w * 0.5 * taper;
+      return [run[qi].x + nx * hw * side, run[qi].y + ny * hw * side];
+    }
+
+    var run2 = [];
+    for (i = 0; i < pts.length; i++) {
+      if (pts[i].f) run2.push(pts[i]);
+      else { flush(run2); run2 = []; }
+    }
+    flush(run2);
+  }
+
+  /* 把整棵树的轮廓拼成一条裁剪路径（多层 subpath 取并集） */
+  function treeClip(ctx, tiers) {
+    ctx.beginPath();
+    for (var i = 0; i < tiers.length; i++) {
+      var L = tiers[i];
+      firTierShape(ctx, 0, L.apex, L.bot, L.half, L.tips, 3.7 + i * 1.9);
+    }
+  }
+
+  /* 彩灯：几百颗小灯铺在树面上。烘焙时画一次，运行时不再重算。 */
+  var LIGHT_COLS = ['#ffe6a8', '#fff6d8', '#ffb862', '#ff8a6a', '#a8e4ff', '#c8f0a0', '#ffc6ea'];
+  function treeLightDots(ctx, tiers, stage, k, lit) {
+    var N = [0, 0, 26, 92, 168, 258][Math.min(stage, 5)] || 0;
+    if (!N) return;
+    var total = 0, i;
+    for (i = 0; i < tiers.length; i++) total += tiers[i].half;
+    var gi = glowSprite();
+    var idx = 0;
+    for (i = 0; i < tiers.length; i++) {
+      var L = tiers[i];
+      var n = Math.max(2, Math.round(N * L.half / total));
+      for (var j = 0; j < n; j++) {
+        var u = -0.94 + 1.88 * ((j + 0.5) / n) + (jag(21.3 + i * 3.1, j) - 0.5) * 0.24;
+        var v = 0.16 + 0.80 * jag(37.7 + i * 2.3, j);
+        var p = surfPt(0, L.apex, L.bot, L.half, u, v);
+        var r = (1.05 + jag(51.2, idx) * 0.85) * k;
+        var col = LIGHT_COLS[(idx * 3 + i) % LIGHT_COLS.length];
+        if (lit && gi) {
+          /* 灯晕收小收淡（v4.8.0：早先 alpha .28 + 4.8 倍尺寸，258 颗灯叠成一片白雾） */
+          ctx.globalAlpha = 0.17;
+          ctx.drawImage(gi, p.x - r * 1.9, p.y - r * 1.9, r * 3.8, r * 3.8);
+          ctx.globalAlpha = 1;
+        }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, lit ? r : r * 0.8, 0, 7);
+        ctx.fillStyle = col;
+        ctx.globalAlpha = lit ? 0.95 : 0.45;
+        ctx.fill();
+        if (lit) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r * 0.45, 0, 7);
+          ctx.fillStyle = 'rgba(255,252,236,.95)';
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        idx++;
+      }
+    }
+  }
+
+  /* 星星光晕贴图：一次生成，之后所有灯都用 drawImage，别再createRadialGradient */
+  var _treeGlow = null;
+  function glowSprite() {
+    if (_treeGlow) return _treeGlow;
+    if (typeof document === 'undefined') return null;
+    var cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 64;
+    var c = cv.getContext('2d');
+    if (!c) return null;
+    var g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,246,214,.95)');
+    g.addColorStop(0.32, 'rgba(255,222,150,.40)');
+    g.addColorStop(1, 'rgba(255,210,120,0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, 64, 64);
+    _treeGlow = cv;
+    return cv;
+  }
+
+  /* ------------------------------------------------------------
+   * 静态树体（树根在原点）：烘焙和被直接绘制共用同一份代码
+   * ------------------------------------------------------------ */
+  function drawTreeBody(ctx, stage) {
+    var tiers = tiersFor(stage);
+    var base = tiers[0], tip = tiers[tiers.length - 1];
+    var halfW = base.half;
+    var k = halfW / 104;
+    var lit = stage >= 4;
+    var full = stage >= 5;
+    var i;
+
+    // ---- 雪堆基座 ----
+    ctx.beginPath();
+    ctx.ellipse(0, 6, halfW * 0.88 + 6, 12 + 12 * k, 0, 0, 7);
+    ctx.fillStyle = 'rgba(110,142,184,.24)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, 2, halfW * 0.81 + 5, 10 + 10 * k, 0, 0, 7);
+    var sgm = ctx.createLinearGradient(-halfW, -16, halfW, 20);
+    sgm.addColorStop(0, '#fdfeff');
+    sgm.addColorStop(1, '#dfe9f6');
+    ctx.fillStyle = sgm;
+    ctx.fill();
+
+    // ---- 树后那圈礼物 ----
+    drawTreeGifts(ctx, 0, 0, stage, true);
+
+    // ---- 树干 ----
+    var trunkTop = base.apex * 0.60;
+    var tHalf = Math.max(3.6, halfW * 0.105);
+    var tg = ctx.createLinearGradient(-tHalf, 0, tHalf, 0);
+    tg.addColorStop(0, '#8a5a38'); tg.addColorStop(0.4, '#6d4426'); tg.addColorStop(1, '#4d2f1a');
+    ctx.beginPath();
+    ctx.moveTo(-tHalf, 6);
+    ctx.quadraticCurveTo(-tHalf * 0.75, trunkTop * 0.5, -tHalf * 0.6, trunkTop);
+    ctx.lineTo(tHalf * 0.6, trunkTop);
+    ctx.quadraticCurveTo(tHalf * 0.75, trunkTop * 0.5, tHalf, 6);
+    ctx.closePath();
+    ctx.fillStyle = tg;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(48,28,14,.6)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(40,24,12,.26)';
+    ctx.lineWidth = 1;
+    for (var bk = 0; bk < 3; bk++) {
+      ctx.beginPath();
+      ctx.moveTo(-tHalf * 0.6 + bk * tHalf * 0.4, -10 - bk * 14);
+      ctx.quadraticCurveTo(-tHalf * 0.4 + bk * tHalf * 0.4, -30 - bk * 14, -tHalf * 0.5 + bk * tHalf * 0.4, -52 - bk * 10);
+      ctx.stroke();
+    }
+
+    // ---- 完全点亮：从星落下来的光柱（画在树后面，别把树冲白）----
+    if (full) {
+      /* v4.8.0：早先是一个梯形整块填充，两侧留下两条硬边，远看像给树罩了个
+         半透明帐篷。现在切成竖条，alpha 按到中线的距离平滑衰减，
+         上端和下端也各自淡出 —— 读起来才是「光」，不是「玻璃」。 */
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var bTop = tip.apex - 22, bBot = 14;
+      var wTop = 13 * k, wBot = 126 * k;
+      var STEPS = 22;
+      for (var bs = 0; bs < STEPS; bs++) {
+        var u0 = -1 + 2 * (bs / STEPS);
+        var u1 = -1 + 2 * ((bs + 1) / STEPS);
+        var um = (u0 + u1) / 2;
+        var fall = 1 - um * um;
+        if (fall <= 0) continue;
+        var gsp = ctx.createLinearGradient(0, bTop, 0, bBot);
+        var aa = 0.26 * Math.pow(fall, 1.6);
+        gsp.addColorStop(0, 'rgba(255,232,160,0)');
+        gsp.addColorStop(0.34, 'rgba(255,226,150,' + aa.toFixed(3) + ')');
+        gsp.addColorStop(1, 'rgba(255,214,130,0)');
+        ctx.fillStyle = gsp;
+        ctx.beginPath();
+        ctx.moveTo(u0 * wTop, bTop);
+        ctx.lineTo(u1 * wTop, bTop);
+        ctx.lineTo(u1 * wBot, bBot);
+        ctx.lineTo(u0 * wBot, bBot);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // ---- 枝扇（层数随阶段增加）----
+    var tops = ['#3a8a5c', '#3d7a52', '#35804f', '#3c7a52', '#3a875a', '#367f53'];
+    for (i = 0; i < tiers.length; i++) {
+      var L = tiers[i];
+      firTier(ctx, 0, L.apex, L.bot, L.half, L.tips,
+        tops[i % tops.length], i % 2 ? '#245f3e' : '#286843',
+        Math.min(0.95, 0.46 + stage * 0.08 + i * 0.05), lit, 3.7 + i * 1.9, full);
+    }
+
+    /* 树脚的雪堆（画在枝叶之后 = 压在树脚前面）
+       不画这一层的话，最下一层枝尖之间的缺口会露出后面那块亮白的雪地，
+       远看就是树底挂了一排白色小牙齿。雪堆把树脚整个埋进去，既挡住了缺口，
+       也符合「院子里积了一冬的雪」的样子。 */
+    ctx.beginPath();
+    ctx.ellipse(0, 12, halfW * 0.80, 13 + 9 * k, 0, 0, 7);
+    var sgf = ctx.createLinearGradient(0, -4, 0, 24 + 9 * k);
+    sgf.addColorStop(0, '#ffffff');
+    sgf.addColorStop(0.55, '#f3f8ff');
+    sgf.addColorStop(1, '#d9e6f6');
+    ctx.fillStyle = sgf;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(-halfW * 0.30, 6, halfW * 0.26, 6 + 3 * k, 0, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(halfW * 0.34, 8, halfW * 0.22, 5 + 3 * k, 0, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.fill();
+
+    // ---- 彩灯：整棵树的灯海（2 阶起挂上，4 阶通电）----
+    treeLightDots(ctx, tiers, stage, k, lit);
+
+    // ---- 红丝带 + 蝴蝶结 ----
+    if (stage >= 3) {
+      ctx.save();
+      treeClip(ctx, tiers);
+      ctx.clip();
+      if (stage === 3) {
+        treeRibbon(ctx, tiers, k, tip.apex + 34 * k, 1.9, 8.5 * k);
+      } else if (stage === 4) {
+        treeRibbon(ctx, tiers, k, tip.apex + 26 * k, 2.4, 9.5 * k);
+      } else {
+        treeRibbon(ctx, tiers, k, tip.apex + 22 * k, 2.7, 10.5 * k);
+      }
+      ctx.restore();
+      // 蝴蝶结挂在丝带经过的地方（在裁剪区之外，会压住一点枝尖）
+      var bowY1 = tip.apex + 74 * k;
+      treeBow(ctx, coneHalf(tiers, bowY1) * 0.62, bowY1, 7.4 * k, '#c0362c');
+      if (stage >= 4) {
+        var bowY2 = base.apex + 44 * k;
+        treeBow(ctx, -coneHalf(tiers, bowY2) * 0.74, bowY2, 7.8 * k, '#c0362c');
+      }
+      if (stage >= 5) {
+        var bowY3 = base.apex + 104 * k;
+        treeBow(ctx, coneHalf(tiers, bowY3) * 0.40, bowY3, 8.6 * k, '#d1402f');
+      }
+    }
+
+    // ---- 彩球 / 金星 / 铃铛 ----
+    if (stage >= 2) {
+      var pal = ORN_PALETTE[Math.min(stage, 5)] || ORN_PALETTE[2];
+      var nTier = ORN_N[Math.min(stage, 5)] || ORN_N[2];
+      var cIdx = 0;
+      for (var oi = 0; oi < tiers.length; oi++) {
+        var Lr = tiers[oi];
+        var nO = nTier[oi] || 0;
+        for (var kk = 0; kk < nO; kk++) {
+          var jr = jag(4.1 + oi * 3.3, kk);
+          var u = -0.72 + 1.44 * ((kk + 0.5) / nO) + (jr - 0.5) * 0.26;
+          var vv = 0.46 + 0.44 * jag(9.7 + oi * 2.7, kk);
+          var pt = surfPt(0, Lr.apex, Lr.bot, Lr.half, u, vv);
+          var r = (6.0 - oi * 0.42 + (Math.abs(u) > 0.55 ? 0.4 : 0) + jr * 0.5) * Math.max(0.7, k);
+          if (full && cIdx % 7 === 3) r += 1.3;
+          var flick = lit ? (0.62 + 0.38 * Math.sin(900 / 560 + cIdx * 1.7)) : 1;
+          if (lit && r > 5.2) drawGlow(ctx, pt.x, pt.y, 'rgba(255,232,168,' + (0.30 * flick + 0.10).toFixed(3) + ')', 12 + r, 0.8);
+          /* 4 阶起每隔几颗换成金星，5 阶再掺几颗铃铛 —— 不能只是「更多同样的球」 */
+          if (stage >= 4 && cIdx % 6 === 4) {
+            treeStarOrn(ctx, pt.x, pt.y, r * 1.15, '#f6c850');
+          } else if (stage >= 5 && cIdx % 11 === 7) {
+            treeBell(ctx, pt.x, pt.y - r * 0.5, r * 0.62);
+          } else {
+            ornament(ctx, pt.x, pt.y, r, pal[cIdx % pal.length]);
+          }
+          cIdx++;
+        }
+      }
+    }
+
+    // ---- 树下灯笼（4 阶起）----
+    if (stage >= 4) {
+      var lant = stage >= 5 ? [[-150, 48, 5.4], [-62, 54, 4.6], [34, 50, 4.8], [140, 46, 5.2]]
+        : [[-146, 46, 4.8], [138, 44, 4.6]];
+      for (var li = 0; li < lant.length; li++) {
+        treeLantern(ctx, lant[li][0], lant[li][1], lant[li][2] * Math.max(0.8, k));
+      }
+    }
+
+    // ---- 树前那圈礼物：画在枝叶之后，完整露出来 ----
+    drawTreeGifts(ctx, 0, 0, stage, false);
+  }
+
+  /* ------------------------------------------------------------
+   * 烘焙缓存：每个阶段一张位图
+   * v4.8.1 内存加固（针对「玩一会儿闪退」）：
+   *   1) 只留 2 张（当前阶段 + 上一个阶段）。以前留 3 张，满阶那张
+   *      约 700×1000，3 张 ≈ 8MB 常驻；手机再叠合影用的 1920×1080 画布时
+   *      容易顶到 iOS 的画布内存上限。合成照、结局都只用当前那棵，2 张足够。
+   *   2) 单张位图有像素上限，超了就自动降采样：低端机宁可略软，也不要 OOM。
+   *   3) 绘制抛错时显式把画布尺寸归零，别让一张半成品占着内存等 GC。
+   * ------------------------------------------------------------ */
+  var TREE_BAKE_SS = 2;
+  var TREE_BAKE_MAX = 2;          // 最多缓存几张
+  var TREE_BAKE_PIXELS = 1.1e6;   // 单张超过这个像素数就降采样
+  var treeLayerCache = {};
+  var treeLayerOrder = [];
+
+  function treeBounds(stage) {
+    var tiers = tiersFor(stage);
+    var halfW = tiers[0].half;
+    var span = stage >= 3 ? 162 : (stage === 2 ? 104 : 0);
+    var w = Math.ceil(Math.max(span, halfW * 1.13) * 2 + 26);
+    var top = Math.ceil(-tiers[tiers.length - 1].apex + 46);
+    var bot = 66;
+    return { w: w, h: top + bot, ox: -w / 2, oy: -top };
+  }
+
+  function treeLayer(stage) {
+    if (typeof document === 'undefined') return null;
+    var key = stage | 0;
+    if (treeLayerCache[key]) return treeLayerCache[key];
+    var b = treeBounds(stage);
+    var ss = TREE_BAKE_SS;
+    if (b.w * b.h * ss * ss > TREE_BAKE_PIXELS) {
+      ss = Math.max(1, Math.sqrt(TREE_BAKE_PIXELS / (b.w * b.h)));
+    }
+    var cw = Math.max(1, Math.round(b.w * ss));
+    var chh = Math.max(1, Math.round(b.h * ss));
+    var cv = document.createElement('canvas');
+    cv.width = cw;
+    cv.height = chh;
+    var c = cv.getContext('2d');
+    if (!c) { cv.width = 0; cv.height = 0; return null; }
+    c.scale(ss, ss);
+    c.translate(-b.ox, -b.oy);
+    try {
+      drawTreeBody(c, stage);
+    } catch (e) {
+      cv.width = 0; cv.height = 0;      // 显式归还
+      return null;
+    }
+    var rec = { cv: cv, w: b.w, h: b.h, ox: b.ox, oy: b.oy };
+    treeLayerCache[key] = rec;
+    treeLayerOrder.push(key);
+    while (treeLayerOrder.length > TREE_BAKE_MAX) {
+      var old = treeLayerOrder.shift();
+      if (old === key) continue;
+      var dead = treeLayerCache[old];
+      if (dead) { dead.cv.width = 0; dead.cv.height = 0; }   // 立刻释放像素，不等 GC
+      delete treeLayerCache[old];
+    }
+    return rec;
+  }
+
+  /* 内存自检：让验收脚本能直接断言「缓存几张、多少 MB」 */
+  function treeMem() {
+    var n = 0, px = 0, keys = [];
+    for (var k in treeLayerCache) {
+      if (!Object.prototype.hasOwnProperty.call(treeLayerCache, k)) continue;
+      var r = treeLayerCache[k];
+      n++; keys.push(k);
+      px += (r.cv.width || 0) * (r.cv.height || 0);
+    }
+    return { layers: n, pixels: px, mb: +(px * 4 / 1048576).toFixed(2), keys: keys, max: TREE_BAKE_MAX };
+  }
+
+  /* ------------------------------------------------------------
+   * 每帧都会动的那一小部分：闪烁灯 / 星顶 / 星屑 / 飘雪
+   * ------------------------------------------------------------ */
+  function treeTwinkle(ctx, tiers, stage, k, t) {
+    if (stage < 4) return;
+    var n = stage >= 5 ? 26 : 16;
+    var gi = glowSprite();
+    for (var i = 0; i < n; i++) {
+      var L = tiers[i % tiers.length];
+      var u = -0.86 + 1.72 * jag(73.1 + i, i % tiers.length);
+      var v = 0.18 + 0.72 * jag(91.7, i);
+      var p = surfPt(0, L.apex, L.bot, L.half, u, v);
+      var a = 0.32 + 0.68 * Math.abs(Math.sin(t / 620 + i * 1.7));
+      var r = (1.7 + 1.8 * a) * k;
+      if (gi) {
+        ctx.globalAlpha = a * 0.5;
+        ctx.drawImage(gi, p.x - r * 2.0, p.y - r * 2.0, r * 4.0, r * 4.0);
+        ctx.globalAlpha = 1;
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.25 * k, 0, 7);
+      ctx.fillStyle = 'rgba(255,248,222,' + (0.55 + 0.45 * a).toFixed(2) + ')';
+      ctx.fill();
+    }
+  }
+
+  /* 六阶段圣诞树：小镇里的树、合照、结局都用这一个函数 */
   function drawBigTree(ctx, tree, stage, t) {
     var x = tree.x, y = tree.y;
     stage = Math.max(0, Math.min(5, (typeof stage === 'number') ? stage : 0));
-
     if (stage === 0) { drawSapling(ctx, x, y, t); return; }
 
     var tiers = tiersFor(stage);
-    var sc = (stage >= 5) ? 1.06 : 1;        // 只用于暖晕/光柱这类「绝对偏移」的换算
-    var base = tiers[0];                     // 最下面一层
-    var tip = tiers[tiers.length - 1];       // 最上面一层
-    var halfW = base.half;
-    var k = halfW / 104;                     // 相对满树的尺寸系数：所有细节都按它缩放
+    var tip = tiers[tiers.length - 1];
+    var halfW = tiers[0].half;
+    var k = halfW / 104;
+    var sc = (stage >= 5) ? 1.045 : 1;
     var starY = tip.apex - 12 * k;
-    var lit = stage >= 4;                    // 灯串通电
-    var full = stage >= 5;                   // 全亮：光柱 / 星屑 / 飘雪 / 光环
+    var lit = stage >= 4;
+    var full = stage >= 5;
 
-    // ---- 地面光池（4 阶起，5 阶最强）----
+    // ---- 地面光池 ----
     if (stage >= 4) {
-      var poolA = full ? 0.34 : 0.16;
-      var pool = ctx.createRadialGradient(x, y + 8, 10, x, y + 8, 190 * k);
+      var poolA = full ? 0.28 : 0.15;
+      var pool = ctx.createRadialGradient(x, y + 8, 10, x, y + 8, 196 * k);
       pool.addColorStop(0, 'rgba(255,214,132,' + poolA + ')');
       pool.addColorStop(0.55, 'rgba(255,196,110,' + (poolA * 0.38).toFixed(3) + ')');
       pool.addColorStop(1, 'rgba(255,196,110,0)');
-      ctx.fillStyle = pool;
       ctx.save();
       ctx.translate(x, y + 8);
       ctx.scale(1, 0.42);
-      ctx.beginPath(); ctx.arc(0, 0, 190 * k, 0, 7); ctx.fill();
+      ctx.fillStyle = pool;
+      ctx.beginPath(); ctx.arc(0, 0, 196 * k, 0, 7); ctx.fill();
       ctx.restore();
     }
 
     // ---- 树后的暖晕 ----
     if (stage >= 4) {
-      var haloA = full ? 0.26 : 0.12;
-      var halo = ctx.createRadialGradient(x, y - 190 * sc, 20, x, y - 190 * sc, 250 * k);
+      var haloA = full ? 0.20 : 0.11;
+      var halo = ctx.createRadialGradient(x, y - 200 * sc, 20, x, y - 200 * sc, 268 * k);
       halo.addColorStop(0, 'rgba(255,206,120,' + haloA + ')');
       halo.addColorStop(0.6, 'rgba(255,190,110,' + (haloA * 0.4).toFixed(3) + ')');
       halo.addColorStop(1, 'rgba(255,190,110,0)');
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(x, y - 190 * sc, 250 * k, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - 200 * sc, 268 * k, 0, 7); ctx.fill();
     }
 
     // ---- 完全点亮：雪地上慢慢荡开的两圈光 ----
@@ -1325,7 +1945,7 @@ window.World = (function () {
         ctx.translate(x, y + 8);
         ctx.scale(1, 0.34);
         ctx.beginPath();
-        ctx.arc(0, 0, (92 + ph * 104) * k, 0, 7);
+        ctx.arc(0, 0, (96 + ph * 110) * k, 0, 7);
         ctx.strokeStyle = 'rgba(255,228,160,' + (0.26 * (1 - ph)).toFixed(3) + ')';
         ctx.lineWidth = 2.2;
         ctx.stroke();
@@ -1333,117 +1953,49 @@ window.World = (function () {
       }
     }
 
-    // ---- 基座：雪堆（跟着树宽走）----
-    ctx.beginPath();
-    ctx.ellipse(x, y + 6, halfW * 0.88 + 6, 12 + 12 * k, 0, 0, 7);
-    ctx.fillStyle = 'rgba(120,150,190,.22)';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(x, y + 2, halfW * 0.81 + 5, 10 + 10 * k, 0, 0, 7);
-    var sgm = ctx.createLinearGradient(x - halfW, y - 16, x + halfW, y + 20);
-    sgm.addColorStop(0, '#fdfeff');
-    sgm.addColorStop(1, '#dfe9f6');
-    ctx.fillStyle = sgm;
-    ctx.fill();
-
-    // ---- 树后那圈礼物：先画，等下被最低一层枝叶压住一点 ----
-    drawTreeGifts(ctx, x, y, stage, true);
-
-    // ---- 树干：高度跟着最下面一层走（树越长越高，树干也越来越粗）----
-    var trunkTop = base.apex * 0.60;
-    var tHalf = Math.max(3.2, halfW * 0.100);
-    var tg = ctx.createLinearGradient(x - tHalf, 0, x + tHalf, 0);
-    tg.addColorStop(0, '#8a5a38'); tg.addColorStop(0.4, '#6d4426'); tg.addColorStop(1, '#4d2f1a');
-    ctx.beginPath();
-    ctx.moveTo(x - tHalf, y + 6);
-    ctx.quadraticCurveTo(x - tHalf * 0.75, y + trunkTop * 0.5, x - tHalf * 0.6, y + trunkTop);
-    ctx.lineTo(x + tHalf * 0.6, y + trunkTop);
-    ctx.quadraticCurveTo(x + tHalf * 0.75, y + trunkTop * 0.5, x + tHalf, y + 6);
-    ctx.closePath();
-    ctx.fillStyle = tg;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(48,28,14,.6)';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(40,24,12,.28)';
-    ctx.lineWidth = 1;
-    for (var bk = 0; bk < 3; bk++) {
-      ctx.beginPath();
-      ctx.moveTo(x - tHalf * 0.6 + bk * tHalf * 0.4, y - 10 - bk * 14);
-      ctx.quadraticCurveTo(x - tHalf * 0.4 + bk * tHalf * 0.4, y - 30 - bk * 14, x - tHalf * 0.5 + bk * tHalf * 0.4, y - 52 - bk * 10);
-      ctx.stroke();
-    }
-
-    // ---- 完全点亮：从星落下来的光柱（画在树后面，别把树冲白）----
-    if (full) {
+    // ---- 树体（静态层）----
+    var layer = treeLayer(stage);
+    if (layer) {
+      ctx.drawImage(layer.cv, x + layer.ox, y + layer.oy, layer.w, layer.h);
+    } else {
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      var beam = ctx.createLinearGradient(x, y + tip.apex - 20, x, y + 10);
-      beam.addColorStop(0, 'rgba(255,226,150,.30)');
-      beam.addColorStop(0.5, 'rgba(255,226,150,.08)');
-      beam.addColorStop(1, 'rgba(255,226,150,0)');
-      ctx.fillStyle = beam;
-      ctx.beginPath();
-      ctx.moveTo(x - 12 * k, y + tip.apex - 24);
-      ctx.lineTo(x + 12 * k, y + tip.apex - 24);
-      ctx.lineTo(x + 132 * k, y + 14);
-      ctx.lineTo(x - 132 * k, y + 14);
-      ctx.closePath();
-      ctx.fill();
+      ctx.translate(x, y);
+      drawTreeBody(ctx, stage);
       ctx.restore();
     }
 
-    // ---- 枝扇（层数随阶段增加）----
-    var tops = ['#3a8a5c', '#3d7a52', '#35804f', '#3c7a52', '#3a875a'];
-    for (var i = 0; i < tiers.length; i++) {
-      var L = tiers[i];
-      firTier(ctx, x, y + L.apex, y + L.bot, L.half, L.tips,
-        tops[i % tops.length], i % 2 ? '#245f3e' : '#286843',
-        Math.min(0.92, 0.44 + stage * 0.08 + i * 0.05), lit, 3.7 + i * 1.9, full);
-    }
+    // ---- 会动的装饰 ----
+    ctx.save();
+    ctx.translate(x, y);
+    treeTwinkle(ctx, tiers, stage, k, t);
+    ctx.restore();
 
-    // ---- 树前那圈礼物：画在枝叶之后，完整露出来 ----
-    drawTreeGifts(ctx, x, y, stage, false);
-
-    // ---- 彩球（2 阶起，越往后越密）----
-    if (stage >= 2) {
-      var pal = ORN_PALETTE[Math.min(stage, 5)] || ORN_PALETTE[2];
-      var nTier = ORN_N[Math.min(stage, 5)] || ORN_N[2];
-      var cIdx = 0;
-      for (var oi = 0; oi < tiers.length; oi++) {
-        var Lr = tiers[oi];
-        var nO = nTier[oi] || 0;
-        for (var kk = 0; kk < nO; kk++) {
-          /* 横向等分 + 固定抖动，纵向 0.46~0.90 错落 —— 挂满但不成排 */
-          var jr = jag(4.1 + oi * 3.3, kk);
-          var u = -0.72 + 1.44 * ((kk + 0.5) / nO) + (jr - 0.5) * 0.26;
-          var vv = 0.46 + 0.44 * jag(9.7 + oi * 2.7, kk);
-          var pt = surfPt(x, y + Lr.apex, y + Lr.bot, Lr.half, u, vv);
-          var r = (6.0 - oi * 0.45 + (Math.abs(u) > 0.55 ? 0.4 : 0) + jr * 0.5) * Math.max(0.7, k);
-          if (full && cIdx % 7 === 3) r += 1.3;   // 少数大球当视觉重点
-          var flick = lit ? (0.62 + 0.38 * Math.sin(t / 560 + cIdx * 1.7)) : 1;
-          if (lit && r > 5.2) drawGlow(ctx, pt.x, pt.y, 'rgba(255,232,168,' + (0.30 * flick + 0.10).toFixed(3) + ')', 12 + r, 0.8);
-          ornament(ctx, pt.x, pt.y, r, pal[cIdx % pal.length]);
-          cIdx++;
-        }
-      }
-    }
-
-    // ---- 灯串（4 阶起；5 阶全部串上）----
-    if (lit) {
-      var garN = full ? tiers.length - 1 : Math.min(2, tiers.length - 1);
-      for (var gi = 0; gi < garN; gi++) {
-        var Lg = tiers[gi];
-        garland(ctx, x, y + Lg.apex, y + Lg.bot, Lg.half, t, gi * 1.7, full ? 1 : 0.62);
-      }
-    }
-
-    // ---- 顶星：3 阶是「装上了但还没通电」，4 阶亮起，5 阶最大 ----
+    // ---- 顶星 ----
     if (stage >= 3) {
-      if (stage === 3) treeStar(ctx, x, starY, 11 * Math.max(0.75, k), t, 0);
-      else treeStar(ctx, x, starY, (full ? 19 : 15) * Math.max(0.8, k), t, 1);
+      var R = (stage === 3) ? 12 * Math.max(0.76, k) : ((full ? 21 : 16) * Math.max(0.8, k));
+      if (stage >= 4) drawGlow(ctx, x, starY, 'rgba(255,226,150,.42)', R * (full ? 4.6 : 3.6), 0.9);
+      treeStar(ctx, x, starY, R, t, stage === 3 ? 0 : 1);
+      // 星顶的十字闪光（满树才有）
+      if (full) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        var pk = 0.55 + 0.45 * Math.sin(t / 520);
+        for (var cs = 0; cs < 4; cs++) {
+          var ang = cs * Math.PI / 2 + Math.PI / 4;
+          var len = R * (3.4 + 1.2 * pk);
+          var lg2 = ctx.createLinearGradient(x, starY, x + Math.cos(ang) * len, starY + Math.sin(ang) * len);
+          lg2.addColorStop(0, 'rgba(255,246,206,' + (0.5 * pk).toFixed(2) + ')');
+          lg2.addColorStop(1, 'rgba(255,246,206,0)');
+          ctx.strokeStyle = lg2;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.moveTo(x, starY);
+          ctx.lineTo(x + Math.cos(ang) * len, starY + Math.sin(ang) * len);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
     } else {
-      // 还没装星：只插一根尖枝
       ctx.beginPath();
       ctx.moveTo(x - 3, y + tip.apex + 18);
       ctx.lineTo(x, y + tip.apex - 2);
@@ -1453,25 +2005,23 @@ window.World = (function () {
       ctx.fill();
     }
 
-    // ---- 星屑 + 飘雪（只在完全点亮的 5 阶）----
+    // ---- 星屑 + 飘雪（只在完全点亮）----
     if (full) {
-      for (var sp = 0; sp < 9; sp++) {
+      for (var sp = 0; sp < 12; sp++) {
         var a2 = (sp * 2.399) % (Math.PI * 2);
         var rr2 = 60 + ((sp * 53) % 110);
         var sx2 = x + Math.cos(a2) * rr2 * 1.15;
-        var sy2 = y - 150 + Math.sin(a2) * rr2 * 1.45;
+        var sy2 = y - 160 + Math.sin(a2) * rr2 * 1.45;
         var tw = 0.30 + 0.70 * Math.abs(Math.sin(t / 700 + sp * 1.7));
         ctx.beginPath();
         ctx.arc(sx2, sy2, 0.9 + tw * 1.1, 0, 7);
         ctx.fillStyle = 'rgba(255,246,205,' + (tw * 0.55).toFixed(3) + ')';
         ctx.fill();
       }
-
-      /* 柔和的暖雪花：只在树周围一小圈，下落很慢，不抢灯 */
       for (var fl = 0; fl < 16; fl++) {
         var fx0 = jag(31.7, fl), fy0 = jag(57.1, fl);
-        var fy = y - 340 + ((fy0 * 400 + t * (0.012 + fx0 * 0.010)) % 400);
-        var fx = x - 165 + fx0 * 330 + Math.sin(t / 950 + fl * 1.3) * 11;
+        var fy = y - 360 + ((fy0 * 440 + t * (0.012 + fx0 * 0.010)) % 440);
+        var fx = x - 175 + fx0 * 350 + Math.sin(t / 950 + fl * 1.3) * 11;
         var fa = 0.16 + 0.30 * (0.5 + 0.5 * Math.sin(t / 520 + fl * 2.1));
         ctx.beginPath();
         ctx.arc(fx, fy, 1.0 + fx0 * 1.5, 0, 7);
@@ -3186,6 +3736,7 @@ window.World = (function () {
     drawGround: drawGround, drawSnowPiles: drawSnowPiles, drawFence: drawFence,
     drawBorderTrees: drawBorderTrees, drawBuilding: drawBuilding, drawBigTree: drawBigTree,
     tiersFor: tiersFor, stageNames: ['小树苗', '初生', '开始装饰', '节日树形', '即将点亮', '完全点亮'],
+    treeMem: treeMem,   // 烘焙缓存自检（验收脚本断言内存占用用）
     drawLamp: drawLamp, drawBench: drawBench, drawPond: drawPond, drawIceRink: drawIceRink,
     drawBridge: drawBridge, drawEggs: drawEggs, drawRoomEggs: drawRoomEggs, drawProps: drawProps,
     ranch: ranch, animals: ranchAnimals, haystack: haystack,

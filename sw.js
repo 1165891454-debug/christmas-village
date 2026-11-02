@@ -18,21 +18,21 @@
  *   同一版本号内的功能补齐，缓存名不变（仍是 omo-v4.6.0）——这一版是首次上线，
  *   还没有手机缓存过它，所以不需要再换名。
  */
-var CACHE = 'omo-v4.7.2';
+var CACHE = 'omo-v4.8.1';
 var CORE = [
   './',
   './index.html',
-  './style.css?v=4.7.2',
-  './firebase-config.js?v=4.7.2',
-  './memories.js?v=4.7.2',
-  './chars.js?v=4.7.2',
-  './sprites.js?v=4.7.2',
-  './world.js?v=4.7.2',
-  './maps.js?v=4.7.2',
-  './specialties.js?v=4.7.2',
-  './life.js?v=4.7.2',
-  './game.js?v=4.7.2',
-  './app.js?v=4.7.2',
+  './style.css?v=4.8.1',
+  './firebase-config.js?v=4.8.1',
+  './memories.js?v=4.8.1',
+  './chars.js?v=4.8.1',
+  './sprites.js?v=4.8.1',
+  './world.js?v=4.8.1',
+  './maps.js?v=4.8.1',
+  './specialties.js?v=4.8.1',
+  './life.js?v=4.8.1',
+  './game.js?v=4.8.1',
+  './app.js?v=4.8.1',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
