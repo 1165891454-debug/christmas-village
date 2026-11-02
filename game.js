@@ -58,19 +58,15 @@
     }
   }
   window.__omoDiag = { log: LOG, push: push };
-  /* 冒烟测试在 Node 里跑（global.window = global），没有 addEventListener。
-     这里做一次存在性判断，让「纯逻辑环境」也能加载本文件，浏览器行为不变。 */
-  if (typeof window.addEventListener === 'function') {
-    window.addEventListener('error', function (e) {
-      /* 资源加载失败（img/script 404）没有 message，单独标出来 */
-      if (e && e.message) push('error', e.message, (e.filename || '') + ':' + (e.lineno || 0));
-      else if (e && e.target && e.target.tagName) push('resource', e.target.tagName + ' ' + (e.target.src || e.target.href || ''));
-    }, true);
-    window.addEventListener('unhandledrejection', function (e) {
-      var r = e && e.reason;
-      push('promise', (r && (r.message || r.code || r)) || 'unhandled rejection', '');
-    });
-  }
+  window.addEventListener('error', function (e) {
+    /* 资源加载失败（img/script 404）没有 message，单独标出来 */
+    if (e && e.message) push('error', e.message, (e.filename || '') + ':' + (e.lineno || 0));
+    else if (e && e.target && e.target.tagName) push('resource', e.target.tagName + ' ' + (e.target.src || e.target.href || ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    push('promise', (r && (r.message || r.code || r)) || 'unhandled rejection', '');
+  });
 })();
 
 window.Game = (function () {
