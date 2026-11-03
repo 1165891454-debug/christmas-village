@@ -83,6 +83,8 @@ window.Game = (function () {
     npcIdx: {}, paused: false, curInteract: null,
     parts: [], interId: null, outdoorPos: null,
     adminGuardUntil: 0, mapId: null, mapReturn: null, spots: {}, photoOpt: null,
+    portalFx: null, traveling: false, adminForcePortal: false, dig: null, camFocus: null,
+    northTestBusy: false,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -2215,6 +2217,14 @@ window.Game = (function () {
     var bias = (mp2 && mp2.camBias) || 0.5;
     var targetCx = S.self.x - vwW / 2;
     var targetCy = S.self.y - vhW * bias;
+    /* v4.10：挖到宝箱时镜头往箱子上压一下（限时，到点自动恢复跟随） */
+    if (S.camFocus) {
+      if (Date.now() > S.camFocus.until) S.camFocus = null;
+      else {
+        targetCx = S.camFocus.x - vwW / 2;
+        targetCy = S.camFocus.y - vhW * 0.56;
+      }
+    }
     S.cam.x = iw2 <= vwW ? (iw2 - vwW) / 2 : Math.max(0, Math.min(iw2 - vwW, targetCx));
     S.cam.y = ih2 <= vhW ? (ih2 - vhW) / 2 : Math.max(0, Math.min(ih2 - vhW, targetCy));
   }
@@ -4586,6 +4596,32 @@ window.Game = (function () {
             done ? '📷 再拍一张' : sp.label, { spot: sp, idx: si, mapId: mp.id });
         });
       }
+      /* v4.10 北境寻宝：有铲子才能挖；信和宝箱随时可看（宝箱要先挖出来） */
+      if (mp.id === NORTH_ID && window.NorthMap) {
+        var ndi = northData();
+        if (ndi.shovel) {
+          (NorthMap.digs || []).forEach(function (sp) {
+            var dug = !!(ndi.digs && ndi.digs[sp.id]);
+            /* 宝箱挖出来之后，这个点让位给"打开箱子" ——
+               不然两个提示叠在同一个坐标上，永远只出"看看挖过的坑"。 */
+            if (dug && sp.kind === 'treasure' && ndi.chest) return;
+            consider('northDig', sp.x, sp.y, sp.r || 62,
+              dug ? '👀 看看挖过的坑' : sp.label, sp);
+          });
+        }
+        if (NorthMap.sled) {
+          consider('northSled', NorthMap.sled.x, NorthMap.sled.y, NorthMap.sled.r || 70,
+            ndi.sled ? '🛷 再看看那辆雪橇' : '🛷 看看那辆旧雪橇', NorthMap.sled);
+        }
+        if (NorthMap.letter) {
+          consider('northLetter', NorthMap.letter.x, NorthMap.letter.y, NorthMap.letter.r || 66,
+            ndi.letter ? '✉️ 再看一遍那封信' : '✉️ 捡起那封信', NorthMap.letter);
+        }
+        if (ndi.chest && NorthMap.chest) {
+          consider('northChest', NorthMap.chest.x, NorthMap.chest.y, 76,
+            ndi.opened ? '🧰 看看打开的箱子' : '🔓 试着打开箱子', NorthMap.chest);
+        }
+      }
       consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, mp.exitLabel || '🚉 回小镇', mp.exitPos);
       if (S.remote.seen && S.remote.inter === hereKey()) {
         var op = S.data && S.data.slots && S.data.slots[S.otherSlot];
@@ -4613,7 +4649,7 @@ window.Game = (function () {
     consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
     /* v4.9.0：小镇北边林子里的那道符文门（章节 + 夜晚解锁，开过就一直在） */
     if (northOpen()) {
-      consider('northPortal', NORTH_PORTAL.x, NORTH_PORTAL.y + 30, NORTH_PORTAL.r,
+      consider('northPortal', NORTH_PORTAL.x, NORTH_PORTAL.y + 34, NORTH_PORTAL.r,
         '🌀 走进符文的光', { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y });
     }
     /* v4.3：地上这十段回忆完全不给提示——没找到的靠走到跟前自动拾起，
@@ -4667,6 +4703,10 @@ window.Game = (function () {
       /* 老木匠：每天第一次说话，塞几根边角料（木材的另一条来源，
          不占温室的地、也不用等 6 小时）。 */
       if (it.ref.id === 'carpenter') {
+        /* v4.10：门出现之后、还没拿到铲子时，老鲁会跟你换那把旧雪铲。
+           注意这一支只"借用"这一次谈话，不写 carpenterDay，
+           所以当天稍后再跟他说一次，边角料照样给。 */
+        if (tryShovelDeal(it.ref)) return;
         var cw0 = curWorld() || {};
         if (cw0.carpenterDay !== dayStr()) {
           var firstC = !S.quest.talked[it.ref.id];
@@ -4696,9 +4736,17 @@ window.Game = (function () {
         updateQuest(); syncQuest();
       }
     } else if (it.type === 'northPortal') {
-      northTransition();
+      northPortalEnter();
     } else if (it.type === 'station') {
       openStationPanel();
+    } else if (it.type === 'northDig') {
+      startDig(it.ref);
+    } else if (it.type === 'northSled') {
+      lookSled();
+    } else if (it.type === 'northLetter') {
+      readLetter();
+    } else if (it.type === 'northChest') {
+      openChestTry();
     } else if (it.type === 'mapExit') {
       if (S.mapId === NORTH_ID) leaveNorth(); else leaveMap();
     } else if (it.type === 'mapView') {
@@ -5247,6 +5295,8 @@ window.Game = (function () {
 
     el.innerHTML = lines.join('');
     renderAdminMats();
+    renderAdminNorth();
+    renderAdminTestline();
   }
 
   /* 礼品图鉴的真实口径：车票 / 回忆 / 地址 / 特产，四本册子都是 world 里现成的字段 */
@@ -5273,6 +5323,323 @@ window.Game = (function () {
     }
     var gl = $('#admin-gift-line');
     if (gl && gl.textContent !== giftLineText()) gl.textContent = giftLineText();
+  }
+
+  /* ============================================================
+   * v4.10 管理员 · 北境秘境管理
+   * ------------------------------------------------------------
+   * 只用原来那套管理员会话（PIN → adminOk），没有新增任何"URL 参数直接当管理员"的口子。
+   * 面板上的操作分两类：
+   *   只读 —— 状态、进度、两名玩家在哪；
+   *   测试用 —— 强制显示传送门（内存开关）、快速传送、直接进北境。
+   * 唯一会写共享存档的是"进入北境 / 快速传送"里的位置同步（本来就会同步），
+   * 其余一律不碰 world.north。
+   * ============================================================ */
+  function northMapLabel(v) {
+    if (v === NORTH_ID) return '北境';
+    if (v === 0 || v === null || v === undefined) return '小镇';
+    if (typeof v === 'string' && window.TravelMaps && TravelMaps.has(v)) {
+      var d = TravelMaps.get(v);
+      return d && d.name ? d.name : v;
+    }
+    if (typeof v === 'string' && v) return '屋里（' + v + '）';
+    return '小镇';
+  }
+
+  function renderAdminNorth() {
+    var box = $('#admin-north-status');
+    var tbox = $('#admin-north-treasure');
+    if (!box) return;
+    var nd = northData();
+    var st = northState();
+    var here = hereKey();
+    var mine = here;
+    var otherMap = (S.remote && S.remote.inter !== undefined) ? S.remote.inter : null;
+    var op = S.data && S.data.slots && S.data.slots[S.otherSlot];
+    if ((otherMap === null || otherMap === undefined) && op && op.pos) otherMap = op.pos.indoor;
+
+    var rows = [];
+    var ver = (window.TownLife && TownLife.version) || '—';
+    rows.push('<div class="admin-sec"><b>版本</b><span>v' + esc(ver) + '</span></div>');
+    rows.push('<div class="admin-sec"><b>我所在</b><span>' + esc(northMapLabel(mine)) +
+      '　x ' + Math.round(S.self.x) + ' · y ' + Math.round(S.self.y) + '</span></div>');
+    rows.push('<div class="admin-sec"><b>传送门</b><span>' +
+      (northOpen() ? '✓ 现在可见' : '✗ 不可见') +
+      (S.adminForcePortal ? '（管理员强制显示中 · 只在本次会话）' : '') +
+      (northAlwaysOn() ? '（测试期常显已开）' : '') + '</span></div>');
+    rows.push('<div class="admin-sec ' + (st && st.open ? 'ok' : 'off') + '"><b>正式解锁</b><span>' +
+      (st && st.open ? '✓ 已经永久解锁' : '✗ 还没有解锁过') + '</span></div>');
+    rows.push('<div class="admin-sec"><b>解锁条件</b><span>章节 ≥ ' + (NORTH_GATE + 1) +
+      ' 且处于夜晚 → 出现一次，之后永久保留（不要求现实等待）</span></div>');
+    rows.push('<div class="admin-sec"><b>章节进度</b><span>第 ' + (chapterNo() + 1) + ' 章　' +
+      (chapterNo() >= NORTH_GATE ? '✓ 已满足' : '还差 ' + (NORTH_GATE - chapterNo()) + ' 章') + '</span></div>');
+    rows.push('<div class="admin-sec"><b>测试模式</b><span>' +
+      (northAlwaysOn() ? '⚠️ 常显中（不写存档）' : '关（按规则走）') + '</span></div>');
+    rows.push('<div class="admin-sec"><b>我在线</b><span>✓ ' + esc(NAME[S.mySlot]) + ' · ' +
+      esc(northMapLabel(mine)) + '</span></div>');
+    rows.push('<div class="admin-sec"><b>' + esc(NAME[S.otherSlot]) + '</b><span>' +
+      (S.online === false ? '✗ 离线' : '✓ 在线') + ' · ' + esc(northMapLabel(otherMap)) + '</span></div>');
+    rows.push('<div class="admin-sec"><b>同图判断</b><span>' +
+      (String(mine) === String(otherMap) ? '两人在同一张图' : '两人不在同一张图（互相看不见，互动也不会串）') +
+      '</span></div>');
+    box.innerHTML = rows.join('');
+
+    if (tbox) {
+      var t = [];
+      t.push('<div class="admin-sec ' + (nd.shovel ? 'ok' : 'off') + '"><b>雪铲</b><span>' +
+        (nd.shovel ? '✓ 已获得' : '✗ 还没换到') +
+        (nd.shovel ? '　' + new Date(nd.shovel).toLocaleString() : '　（找老木匠用 8 木材 + 2 材料换）') + '</span></div>');
+      t.push('<div class="admin-sec ' + (nd.letter ? 'ok' : 'off') + '"><b>那封信</b><span>' +
+        (nd.letter ? '✓ 已读' : '✗ 还没发现（营地雪橇旁）') + '</span></div>');
+      t.push('<div class="admin-sec ' + (nd.sled ? 'ok' : 'off') + '"><b>旧雪橇</b><span>' +
+        (nd.sled ? '✓ 已发现' : '✗ 还没看到') + '</span></div>');
+      var digs = nd.digs || {};
+      var digNames = { soft: '松软的雪', stone: '雪下石头', dull: '闷响', prints: '旧脚印', treasure: '藏宝点' };
+      var dg = (window.NorthMap && NorthMap.digs ? NorthMap.digs : []).map(function (sp) {
+        return (digs[sp.id] ? '✓ ' : '○ ') + (digNames[sp.id] || sp.id);
+      }).join('　');
+      t.push('<div class="admin-sec"><b>挖掘点</b><span>' + (dg || '—') + '</span></div>');
+      t.push('<div class="admin-sec ' + (nd.chest ? 'ok' : 'off') + '"><b>宝箱</b><span>' +
+        (nd.chest ? '✓ 已挖出（' + new Date(nd.chest).toLocaleDateString() + '）' : '✗ 还埋在雪里') +
+        (nd.opened ? '　已开启' : '　未开启') + '</span></div>');
+      t.push('<div class="admin-sec off"><b>北境星钥</b><span>' +
+        (nd.key ? '✓ 已获得' : '✗ 未获得（v5.0 双人星门）') + '</span></div>');
+      tbox.innerHTML = t.join('');
+    }
+  }
+
+  /* ============================================================
+   * v4.10.1 管理员 · 隐藏任务测试（跳过 / 恢复）
+   * ------------------------------------------------------------
+   * 「隐藏任务」在这个项目里就是北境这条线：
+   *   ① 传送门出现 → ② 拿到雪铲 → ③ 挖过四个错点 → ④ 宝箱挖出 → ⑤ 开箱（v5.0）
+   * 它没有单独的"章节号"字段，进度就是 world.north 里那几个开关本身。
+   * 所以这里不发明新结构，而是：
+   *   - 先把它整份快照进 world.northTest.backup（只快照一次，重复跳过不会覆盖）
+   *   - 再把 world.north 推到目标章节需要的那些开关（只加不减，绝不删已有进度）
+   *   - 「恢复」= 把快照原样放回去，然后删掉 northTest 这条测试记录
+   *
+   * 为什么放在 world 里而不是 localStorage：
+   *   刷新不会丢、两台设备看到同一份；写操作仍然走 mutate（world 事务），
+   *   和游戏里其他进度完全一样的路径，不碰 Rules、不碰别的字段。
+   *
+   * 注意：这是**测试**功能，只改 world.north / world.northTest。
+   *   正式触发条件（章节 ≥ NORTH_GATE 且夜里出现一次）一个字没动 ——
+   *   跳过只是"替玩家把已经发生过的事情记上"，不会让门对普通玩家提前出现。
+   * ============================================================ */
+  var NORTH_TEST_STAGES = [
+    { level: 1, name: '传送门已开' },
+    { level: 2, name: '已拿到雪铲' },
+    { level: 3, name: '四个挖掘点已挖' },
+    { level: 4, name: '宝箱已挖出' },
+    { level: 5, name: '宝箱已开启（v5.0）' }
+  ];
+
+  /* 从真实字段**反推**当前隐藏任务走到第几章（0 = 还没开始） */
+  function northQuestStage() {
+    var n = northData();
+    if (!n || !n.open) return 0;
+    if (n.opened || n.key) return 5;
+    if (n.chest) return 4;
+    var d = n.digs || {};
+    if (d.soft && d.stone && d.dull && d.prints) return 3;
+    if (n.shovel) return 2;
+    return 1;
+  }
+  function northStageName(lv) {
+    if (!lv) return '还没开始（0）';
+    for (var i = 0; i < NORTH_TEST_STAGES.length; i++) {
+      if (NORTH_TEST_STAGES[i].level === lv) return '第 ' + lv + ' 章 · ' + NORTH_TEST_STAGES[i].name;
+    }
+    return '第 ' + lv + ' 章';
+  }
+
+  function renderAdminTestline() {
+    var box = $('#admin-testline-status');
+    if (!box) return;
+    var w = curWorld() || {};
+    var nt = w.northTest;
+    var lv = northQuestStage();
+    var rows = [];
+    rows.push('<div class="admin-sec"><b>真实进度</b><span>' + esc(northStageName(lv)) + '</span></div>');
+    if (nt && nt.backup) {
+      rows.push('<div class="admin-sec ok"><b>测试跳过</b><span>✓ 已跳到 ' + esc(northStageName(nt.level)) +
+        '　' + esc(new Date(nt.at || 0).toLocaleString()) + '（可恢复）</span></div>');
+      var b = nt.backup;
+      var bl = (b && b.open) ? (b.opened || b.key ? 5 : (b.chest ? 4 : ((b.digs && b.digs.soft && b.digs.stone && b.digs.dull && b.digs.prints) ? 3 : (b.shovel ? 2 : 1)))) : 0;
+      rows.push('<div class="admin-sec"><b>跳过之前</b><span>' + esc(northStageName(bl)) + '</span></div>');
+    } else {
+      rows.push('<div class="admin-sec off"><b>测试跳过</b><span>没有进行中的跳过（「恢复」会提示没有可恢复的进度）</span></div>');
+    }
+    box.innerHTML = rows.join('');
+  }
+
+  function adminNorthSkip(level) {
+    if (!devOrAdmin()) return;
+    level = Math.max(1, Math.min(5, Math.floor(Number(level) || 5)));
+    if (S.northTestBusy) return;
+    S.northTestBusy = true;
+    var now = Date.now();
+    var before = northQuestStage();
+    mutate(function (w) {
+      w.north = w.north || {};
+      /* 只在第一次跳过时快照：之后连续跳到别的章节，仍然能回到"最开始那样" */
+      if (!w.northTest || !w.northTest.backup) {
+        w.northTest = {
+          at: now, level: 0,
+          backup: JSON.parse(JSON.stringify(w.north || {}))
+        };
+      }
+      var n = w.north;
+      if (level >= 1) { n.open = true; n.at = n.at || now; }
+      if (level >= 2) { n.shovel = n.shovel || now; }
+      if (level >= 3) {
+        n.digs = n.digs || {};
+        ['soft', 'stone', 'dull', 'prints'].forEach(function (id) {
+          if (!n.digs[id]) n.digs[id] = now;
+        });
+      }
+      if (level >= 4) {
+        n.digs = n.digs || {};
+        if (!n.digs.treasure) n.digs.treasure = now;
+        if (!n.chest) n.chest = now;
+      }
+      if (level >= 5) { n.opened = true; n.key = n.key || now; }
+      w.northTest.level = level;
+      w.northTest.at = now;
+      return w;
+    }).then(function (ok) {
+      S.northTestBusy = false;
+      var after = northQuestStage();
+      logAdmin('隐藏任务测试·跳过', '第' + level + '章', before, after, !!ok && !S.worldFallback);
+      if (!ok) { toast('⚠️ 没写进存档，再试一次', 3000); }
+      else if (S.worldFallback) { toast('⚠️ 只写到了本机：云端进度还没放行', 5200); }
+      else { toast('🧪 已跳到 ' + northStageName(level) + '（测试用，不代表正式进度）', 4200); }
+      refreshHUD();
+      renderAdminTestline();
+      renderAdminNorth();
+    }, function () {
+      S.northTestBusy = false;
+      toast('⚠️ 跳过没成功，再试一次', 3000);
+    });
+  }
+
+  function adminNorthRestore() {
+    if (!devOrAdmin()) return;
+    var w0 = curWorld() || {};
+    if (!w0.northTest || !w0.northTest.backup) {
+      toast('没有可恢复的进度：现在就是原始进度', 3200);
+      renderAdminTestline();
+      return;
+    }
+    if (S.northTestBusy) return;
+    S.northTestBusy = true;
+    var before = northQuestStage();
+    mutate(function (w) {
+      if (!w.northTest || !w.northTest.backup) return w;    // 另一台已经恢复过了
+      var b = w.northTest.backup;
+      if (b && Object.keys(b).length) w.north = b;
+      else delete w.north;                                   // 原来根本没有 north 字段
+      delete w.northTest;
+      return w;
+    }).then(function (ok) {
+      S.northTestBusy = false;
+      var left = (curWorld() || {}).northTest;
+      var after = northQuestStage();
+      logAdmin('隐藏任务测试·恢复', 'north', before, after, !!ok && !left);
+      if (!ok || left) toast('⚠️ 恢复没写进存档，再试一次', 3200);
+      else toast('↩️ 隐藏任务进度已恢复到跳过之前（' + northStageName(after) + '）', 3800);
+      refreshHUD();
+      renderAdminTestline();
+      renderAdminNorth();
+    }, function () {
+      S.northTestBusy = false;
+      toast('⚠️ 恢复没成功，再试一次', 3000);
+    });
+  }
+
+  function adminNorthTestAct(kind) {
+    if (!devOrAdmin()) return;
+    if (kind === 'skip') {
+      var sel = $('#north-test-level');
+      adminNorthSkip(sel ? sel.value : 5);
+    } else if (kind === 'restore') {
+      adminNorthRestore();
+    }
+  }
+
+  /* 快速传送：进北境 → 落到某个区域的可站位置 */
+  var NORTH_SPOTS = {
+    forest: { x: 300, y: 900 },
+    crystal: { x: 680, y: 900 },
+    camp: { x: 1060, y: 920 },
+    lake: { x: 1478, y: 940 },
+    ruins: { x: 1790, y: 1000 }
+  };
+  function adminNorthGo(kind) {
+    if (!devOrAdmin()) return;
+    if (kind === 'town') {
+      if (S.mapId === NORTH_ID) leaveNorth();
+      else if (S.interId) leaveIndoor();
+      else toast('已经在镇上了', 1800);
+      renderAdminNorth();
+      return;
+    }
+    var p = NORTH_SPOTS[kind];
+    if (!p) return;
+    if (S.mapId !== NORTH_ID) enterNorth();
+    S.self.x = p.x; S.self.y = p.y; S.self.dir = 0;
+    S.self.moving = false; S.self.frame = 0;
+    S.camFocus = null;
+    try {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, NORTH_ID)
+        .catch(function () { });
+    } catch (e) { }
+    logAdmin('北境快速传送', kind, null, null, true);
+    toast('🌀 传送到 ' + (kind === 'ruins' ? '古代遗迹' : kind === 'camp' ? '被遗忘营地'
+      : kind === 'lake' ? '星光冰湖' : kind === 'crystal' ? '冰晶小径' : '沉默的雪林'), 1800);
+    renderAdminNorth();
+  }
+
+  function adminNorthAct(kind) {
+    if (!devOrAdmin()) return;
+    if (kind === 'force-on') {
+      S.adminForcePortal = true;
+      logAdmin('北境强制显示传送门', 'on', null, null, true);
+      toast('🌀 传送门已强制显示（只在这台设备、不写存档）', 3000);
+    } else if (kind === 'force-off') {
+      S.adminForcePortal = false;
+      logAdmin('北境强制显示传送门', 'off', null, null, true);
+      toast('🌀 已关闭强制显示，回到真实解锁状态', 2600);
+    } else if (kind === 'portal-test') {
+      /* 回到小镇，站到门边 —— 让人直接看到"靠近出现提示"这一步 */
+      if (S.mapId === NORTH_ID) leaveNorth();
+      if (S.interId) { leaveIndoor(); }
+      S.self.x = NORTH_PORTAL.x;
+      S.self.y = NORTH_PORTAL.y + 62;
+      S.self.dir = 1;
+      S.camFocus = null;
+      if (!northOpen()) S.adminForcePortal = true;
+      try {
+        S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0)
+          .catch(function () { });
+      } catch (e) { }
+      logAdmin('北境传送门交互测试', 'portal', null, null, true);
+      toast('🌀 站到门口了，按互动键试试', 2600);
+    } else if (kind === 'enter') {
+      if (S.mapId === NORTH_ID) { toast('本来就在北境', 1800); return; }
+      closeAllPanelsSilent();
+      enterNorth();
+      S.adminForcePortal = S.adminForcePortal;   // 保持原样
+      logAdmin('直接进入北境', 'enter', null, null, true);
+    } else if (kind === 'town' || kind.indexOf('go:') === 0) {
+      /* 'town' 也要走 adminNorthGo —— 之前只放了 go:*，结果"返回小镇"
+         这个按钮点了没反应（路由漏了一档）。 */
+      adminNorthGo(kind === 'town' ? 'town' : kind.slice(3));
+      return;
+    }
+    renderAdminNorth();
+    renderAdminStatus();
   }
 
   /* ---------- 素材 +5 行（按真实注册表生成，不写死四种）---------- */
@@ -5595,6 +5962,20 @@ window.Game = (function () {
       ab[i].dataset.bound = '1';
       ab[i].addEventListener('click', function () { adminDo(this.getAttribute('data-admin')); });
     }
+    /* v4.10.1 隐藏任务测试：跳过 / 恢复 */
+    var tb2 = document.querySelectorAll('[data-north-test]');
+    for (var q = 0; q < tb2.length; q++) {
+      if (tb2[q].dataset.bound) continue;
+      tb2[q].dataset.bound = '1';
+      tb2[q].addEventListener('click', function () { adminNorthTestAct(this.getAttribute('data-north-test')); });
+    }
+    /* v4.10 北境分区：强制显示 / 测试传送门 / 快速传送 */
+    var nb = document.querySelectorAll('[data-north]');
+    for (var k = 0; k < nb.length; k++) {
+      if (nb[k].dataset.bound) continue;
+      nb[k].dataset.bound = '1';
+      nb[k].addEventListener('click', function () { adminNorthAct(this.getAttribute('data-north')); });
+    }
     /* 测试时间推进的四个按钮（只有进了管理员会话才点得到，面板关了就消失） */
     var tb = document.querySelectorAll('[data-time-adv]');
     for (var j = 0; j < tb.length; j++) {
@@ -5729,7 +6110,9 @@ window.Game = (function () {
       card.appendChild(body);
 
       if (owned) {
-        card.addEventListener('click', function () { enterMap(d.id); });
+        /* v4.10：走带票根动画的转场（enterMap 本身没变，仍然直接可用，
+           dev 钩子和"回到上次的地图"都继续走它） */
+        card.addEventListener('click', function () { travelTo(d.id, card); });
       } else {
         card.addEventListener('click', function () {
           toast('🎫 ' + ticketHint(d.id), 3400);
@@ -5838,7 +6221,11 @@ window.Game = (function () {
    *      当晚没发现也不会错过（写进共享存档 world.north.open）。
    * ============================================================ */
   var NORTH_GATE = 9;                     // 章节门槛（0 基）
-  var NORTH_PORTAL = { x: 816, y: 214, r: 96 };  // 小镇北边林子里的那道光
+  /* v4.10：门从"两栋房子中间的窄缝"挪到小镇左侧中间那片冻湖上。
+     湖面本身是碰撞体（走不上去），所以人只能站在南岸触发 —— 交互点因此
+     放在湖南岸那一侧（y + 34），而不是柱子正下方，否则隔着冰永远够不着。
+     门座踩在冰面上，柱子往上一米多，站在岸边正好抬头看它。 */
+  var NORTH_PORTAL = { x: 204, y: 534, r: 80 };
   var NORTH_ID = 'north';
 
   /* ★★ 测试期临时开关 ★★
@@ -5860,6 +6247,9 @@ window.Game = (function () {
     return w.north || null;
   }
   function northOpen() {
+    /* 管理员在这台设备上的"强制显示"：只改内存，不写 world.north，
+       所以正式解锁条件一点没动（关掉面板/刷新就回到真实状态）。 */
+    if (S.adminForcePortal) return true;
     if (northAlwaysOn()) return true;        // 测试期常显
     var n = northState();
     return !!(n && n.open);
@@ -5941,6 +6331,233 @@ window.Game = (function () {
   /* 入场演出：黑场 → 标题卡片 → 渐渐显出新地图。
      全程只是 DOM 透明度 + 一个定时序列，不抢渲染循环；
      期间 pause()，玩家不会在黑屏里乱走。 */
+  /* v4.10：进门前先让门"吸"一下 —— 符文点亮、光条内收、门里过曝，
+     约 0.6 秒后画面才切黑（黑场和标题卡完全沿用 v4.9 的 northTransition，
+     那段动画用户明确说喜欢，一个字都没动）。 */
+  function northPortalEnter() {
+    if (S.portalFx) return;                       // 连点只算一次
+    if (S.traveling) return;                      // 正在别的转场里
+    S.traveling = true;
+    S.portalFx = { t0: Date.now(), dur: 620 };
+    Snd.sfx('door');
+    setTimeout(function () {
+      S.portalFx = null;
+      S.traveling = false;
+      northTransition();
+    }, 640);
+  }
+
+  /* ============================================================
+   * v4.10 北境寻宝
+   * ------------------------------------------------------------
+   * 存档全部落在 world.north 这一个字段里（向后兼容：老存档没有这个字段，
+   * 下面所有读操作都当"{}"处理，不会报错、也不会凭空给东西）：
+   *   north.shovel  拿到雪铲的时间戳
+   *   north.sled    第一次看那辆旧雪橇
+   *   north.letter  拿到 / 读完那封信
+   *   north.digs    { 挖掘点id: 时间戳 }  —— 挖过的坑，双人共享
+   *   north.chest   宝箱被挖出来的时间
+   *   north.opened  宝箱是否打开（v5.0 用，本版本永远是 false）
+   *   north.key     北境星钥（v5.0 用）
+   * 所有写操作都走 mutate（world 事务），所以两个人不会重复领同一份。
+   * ============================================================ */
+  function northData() { return northState() || {}; }
+  function northHas(key) { var n = northData(); return !!(n && n[key]); }
+  function northDug(id) { var n = northData(); return !!(n && n.digs && n.digs[id]); }
+
+  /* ---------- 获得物品的卡片（铲子 / 信） ---------- */
+  var itemCardTimer = 0;
+  function showItemGet(kind, name, sub) {
+    var card = $('#item-card');
+    if (!card) return;
+    var cv = $('#item-card-icon');
+    if (cv && cv.getContext && window.NorthMap) {
+      var g = cv.getContext('2d');
+      cv.width = 64; cv.height = 64;
+      g.clearRect(0, 0, 64, 64);
+      NorthMap.drawIcon(g, kind, 64);
+    }
+    card.querySelector('.ic-name').textContent = name;
+    card.querySelector('.ic-sub').textContent = sub || '';
+    card.classList.remove('hidden');
+    requestAnimationFrame(function () { card.classList.add('on'); });
+    if (itemCardTimer) clearTimeout(itemCardTimer);
+    itemCardTimer = setTimeout(function () {
+      card.classList.remove('on');
+      setTimeout(function () { card.classList.add('hidden'); }, 420);
+      itemCardTimer = 0;
+    }, 2100);
+  }
+
+  /* ---------- 挖 ---------- */
+  function startDig(spot) {
+    if (!spot || S.dig) return;
+    if (!northHas('shovel')) { toast('🪏 得先有一把铲子', 2400); return; }
+    if (northDug(spot.id)) {
+      var d0 = northData();
+      toast(d0.chest && spot.kind === 'treasure' ? '⛏ 坑还在，箱子已经挖出来了' : '⛏ 这个坑已经看过了', 2200);
+      return;
+    }
+    var real = spot.kind === 'treasure';
+    S.self.dir = 0;                                  // 面朝下（挖掘方向）
+    S.self.moving = false; S.self.frame = 0;
+    S.dig = { spot: spot, t0: Date.now(), dur: real ? 2500 : 950, real: real };
+    Snd.sfx('door');
+    pause();
+    setTimeout(function () { finishDig(spot, real); }, real ? 2500 : 950);
+  }
+
+  function finishDig(spot, real) {
+    var d = S.dig;
+    S.dig = null;
+    var now = Date.now();
+    mutate(function (w) {
+      w.north = w.north || {};
+      w.north.digs = w.north.digs || {};
+      if (!w.north.digs[spot.id]) w.north.digs[spot.id] = now;
+      if (real && !w.north.chest) w.north.chest = now;
+      return w;
+    }).then(function () { refreshHUD(); }, function () { });
+
+    if (real) {
+      /* 挖完了往后退半步：不然人正好站在箱子上，被自己的背影整个挡住 */
+      /* 往斜后方退开一步：正后方的话，头顶那块名牌会正好压在箱子上 */
+      var mpW = window.NorthMap;
+      var backY = spot.y + 46;
+      if (mpW && mpW.walk) backY = Math.min(mpW.walk.y1, backY);
+      S.self.x = spot.x + 74;
+      S.self.y = backY;
+      S.self.dir = 2;   // 侧身看着坑
+      S.self.moving = false; S.self.frame = 0;
+      try {
+        S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, NORTH_ID)
+          .catch(function () { });
+      } catch (e) { }
+      /* 镜头往箱子上压一下，再开口说话 —— 不要"弹出奖励窗口" */
+      S.camFocus = { x: spot.x, y: spot.y + 8, until: Date.now() + 2400 };
+      Snd.sfx('craft');
+      setTimeout(function () {
+        openDialog('⛏ 挖到了', [
+          '雪一层一层扒开，底下的东西露了出来 —— 是一个包着铜边的旧箱子。',
+          '箱盖上刻满了细密的符文，摸上去冰凉，像刚从很深的水里捞上来。',
+          '锁扣上有一道蓝色的光，慢慢亮，又慢慢暗下去。'
+        ]);
+      }, 380);
+    } else {
+      openDialog(spot.title, spot.lines);
+    }
+  }
+
+  /* ---------- 那封信 ---------- */
+  var LETTER_LINES = [
+    '信纸脆得像干叶子，一碰就掉渣。字迹是铅笔写的，很轻：',
+    '「如果你能找到这辆车，说明雪还没把它埋干净。」',
+    '「我把东西埋在了最安静的地方 —— 湖的那一头，风停下来的那一小块地上。」',
+    '「不用找钥匙。钥匙在更远的地方，得两个人一起才拿得到。」',
+    '落款只有一个字：「禾」。'
+  ];
+
+  function readLetter() {
+    var read = northHas('letter');
+    if (!read) {
+      mutate(function (w) {
+        w.north = w.north || {};
+        if (!w.north.letter) w.north.letter = Date.now();
+        if (!w.north.sled) w.north.sled = Date.now();
+        return w;
+      }).then(function () { refreshHUD(); }, function () { });
+      showItemGet('letter', '一封旧信', '收进回忆里，随时能再看');
+    }
+    openDialog('✉️ 那封信', LETTER_LINES);
+  }
+
+  function lookSled() {
+    var seen = northHas('sled');
+    if (!seen) {
+      mutate(function (w) {
+        w.north = w.north || {};
+        if (!w.north.sled) w.north.sled = Date.now();
+        return w;
+      }).then(function () { refreshHUD(); }, function () { });
+    }
+    openDialog('🛷 旧雪橇', seen ? [
+      '雪橇的滑板锈得只剩一层壳，绳子一碰就断。',
+      '它被人好好地停在屋檐下面 —— 不是丢下的，是收起来的。'
+    ] : [
+      '一辆旧雪橇，半截埋在雪里。滑板锈成了暗红色，绳子早就烂了。',
+      '木板上刻着一行小字，被雪盖住大半：「…等雪停了就走」。',
+      '座位下面压着一张对折的纸，边角露在外面。'
+    ]);
+  }
+
+  function openChestTry() {
+    if (!northHas('chest')) return;
+    if (northHas('opened')) { openDialog('🧰 宝箱', ['箱子已经开了。']); return; }
+    openDialog('🧰 古老宝箱', [
+      '你伸手去抬箱盖。铜扣纹丝不动。',
+      '锁扣上那道蓝光忽然亮了一下，又慢慢暗回去 —— 像是认得你，却不打算让开。',
+      '箱盖上有一对凹进去的星形槽，一左一右，隔着同样的距离。',
+      '……好像还缺少一把钥匙。'
+    ]);
+  }
+
+  /* ---------- 雪铲：和木匠换 ---------- */
+  var SHOVEL_NEED = { wood: 8, materials: 2 };
+  function shovelShort() {
+    var r = worldRes() || {};
+    var lack = [];
+    if ((r.wood || 0) < SHOVEL_NEED.wood) lack.push('🪵 木材 ' + (r.wood || 0) + '/' + SHOVEL_NEED.wood);
+    if ((r.materials || 0) < SHOVEL_NEED.materials) lack.push('🎁 材料 ' + (r.materials || 0) + '/' + SHOVEL_NEED.materials);
+    return lack;
+  }
+  /* 返回 true 表示"这次谈话已经用掉了"（无论换没换成） */
+  function tryShovelDeal(npc) {
+    if (northHas('shovel')) return false;
+    if (!northOpen()) return false;                     // 门还没出现时，木匠不提这事
+    var lack = shovelShort();
+    if (lack.length) {
+      openDialog(npc.name, [
+        '「北边冰湖上那道蓝光？……我年轻的时候见过一次。」',
+        '「要去的话，空手不行。得先把雪铲开。」',
+        '老鲁从刨花堆里抽出一把旧雪铲，又塞了回去：「给我 ' +
+          SHOVEL_NEED.wood + ' 根木料、' + SHOVEL_NEED.materials + ' 块材料，这把就归你。」',
+        '还差：' + lack.join('　')
+      ]);
+      return true;
+    }
+    /* 事务里连扣带发，取不到料就不发铲子（防止两台设备同时点重复扣/重复发） */
+    var okDone = false;
+    mutate(function (w) {
+      w.res = w.res || {};
+      if (w.north && w.north.shovel) return undefined;      // 对方已经换过了
+      if ((w.res.wood || 0) < SHOVEL_NEED.wood) return undefined;
+      if ((w.res.materials || 0) < SHOVEL_NEED.materials) return undefined;
+      w.res.wood -= SHOVEL_NEED.wood;
+      w.res.materials -= SHOVEL_NEED.materials;
+      w.north = w.north || {};
+      w.north.shovel = Date.now();
+      okDone = true;
+      return w;
+    }).then(function (ok) {
+      refreshHUD();
+      if (okDone) {
+        try { Snd.sfx('craft'); } catch (e) { }
+        showItemGet('shovel', '旧雪铲', '永久工具 · 在北境的雪地上能挖了');
+        openDialog(npc.name, [
+          '「拿着。铲刃我重新开过口，冻土也咬得动。」',
+          '「北边那地方，雪底下埋的不一定是石头。」',
+          '「挖到东西别急着高兴 —— 有些箱子，不是一个人打得开的。」',
+          '🪏 获得：旧雪铲（木材 −' + SHOVEL_NEED.wood + '，材料 −' + SHOVEL_NEED.materials + '）'
+        ]);
+      } else {
+        openDialog(npc.name, ['「差一点。木料和材料都得是实打实的。」', '还差：' + shovelShort().join('　')]);
+      }
+    }, function () {
+      openDialog(npc.name, ['「刚才那一下没谈成，回头再说。」']);
+    });
+    return true;
+  }
+
   function northTransition() {
     var fade = $('#north-fade'), card = $('#north-card');
     if (!fade || !card) { enterNorth(); return; }        // 兜底：没有过渡元素也照样能进
@@ -5963,6 +6580,134 @@ window.Game = (function () {
         }, 1900);
       }, 260);
     }, 720);
+  }
+
+  /* ============================================================
+   * v4.10 车票转场
+   * ------------------------------------------------------------
+   * 车站里点一张票 → 票根从卡片里浮起来、放大、发光 → 压黑 →
+   * 目的地名（英文 + 中文 + 副标题，每个地方一套自己的配色）→ 淡入新地图。
+   *
+   * 刻意复用了北境转场那套结构（压黑 → 标题卡 → 淡出），因为用户明确说
+   * 喜欢那段；只是这里多了一段"票根飞起来"的前奏，并且配色跟着目的地走，
+   * 不会七个地方都放同一片极光。
+   *
+   * 防重复：S.traveling 一把锁，整个流程（含网络失败）都会在最后解开。
+   * 车票本身**不消耗**（这个游戏里票是永久通行证），所以不存在
+   * "扣了票却没进地图"的窗口；真正要防的是连点触发两次 enterMap。
+   * ============================================================ */
+  var TRAVEL_CARD = {
+    sayram: { en: 'SAYRAM LAKE', c1: 'rgba(80,160,255,.42)', c2: 'rgba(150,220,255,.85)' },
+    tibet: { en: 'TIBET', c1: 'rgba(120,190,255,.40)', c2: 'rgba(210,238,255,.88)' },
+    doha: { en: 'DOHA', c1: 'rgba(255,190,110,.38)', c2: 'rgba(255,224,170,.88)' },
+    wuhan: { en: 'WUHAN', c1: 'rgba(110,210,190,.38)', c2: 'rgba(180,244,226,.88)' },
+    wuhai: { en: 'WUHAI', c1: 'rgba(255,160,90,.38)', c2: 'rgba(255,206,150,.88)' },
+    kl: { en: 'KUALA LUMPUR', c1: 'rgba(230,120,200,.38)', c2: 'rgba(255,190,235,.88)' },
+    iceland: { en: 'ICELAND', c1: 'rgba(110,255,200,.36)', c2: 'rgba(170,255,225,.88)' }
+  };
+
+  /* 票根起飞：把那张 canvas 复制到一个固定层上，用 transform 放大到屏幕中央。
+     用 transform 而不是改 left/top —— 手机上合成层动画不掉帧。 */
+  function flyTicket(cv, done) {
+    var fly = $('#ticket-fly');
+    if (!cv || !fly || !fly.getContext) { setTimeout(done, 160); return; }
+    var r = cv.getBoundingClientRect();
+    if (!r.width || !r.height) { setTimeout(done, 160); return; }
+    var g = fly.getContext('2d');
+    if (!g) { setTimeout(done, 160); return; }
+    try {
+      fly.width = 320; fly.height = 150;
+      g.clearRect(0, 0, 320, 150);
+      g.drawImage(cv, 0, 0, 320, 150);
+    } catch (e) { setTimeout(done, 160); return; }
+
+    fly.style.transition = 'none';
+    fly.style.left = r.left + 'px';
+    fly.style.top = r.top + 'px';
+    fly.style.width = r.width + 'px';
+    fly.style.height = r.height + 'px';
+    fly.style.opacity = '1';
+    fly.style.transform = 'none';
+    fly.style.filter = 'none';
+    fly.classList.remove('hidden');
+
+    var vcx = (window.innerWidth || 360) / 2;
+    var vcy = (window.innerHeight || 640) / 2;
+    var dx = vcx - (r.left + r.width / 2);
+    var dy = vcy - (r.top + r.height / 2);
+    var scale = Math.min(2.2, Math.max(1.5, ((window.innerWidth || 360) * 0.82) / r.width));
+
+    requestAnimationFrame(function () {
+      fly.style.transition = '';
+      fly.style.transform = 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px) scale(' + scale.toFixed(3) + ')';
+      fly.style.filter = 'brightness(1.28) drop-shadow(0 0 24px rgba(160,225,255,.85))';
+    });
+    setTimeout(function () {
+      fly.style.opacity = '0';
+      setTimeout(function () { fly.classList.add('hidden'); }, 260);
+      done();
+    }, 520);
+  }
+
+  function showTravelCard(d, cb) {
+    var card = $('#travel-card');
+    if (!card) { cb(); return; }
+    var th = TRAVEL_CARD[d.id] || { en: '', c1: 'rgba(120,200,255,.34)', c2: 'rgba(150,220,255,.85)' };
+    /* 英文名：表里有就用表里的，没有就退回地图自带的 sub */
+    card.style.setProperty('--tc', th.c1);
+    card.style.setProperty('--tc2', th.c2);
+    card.querySelector('.tc-en').textContent = th.en || String(d.sub || '').toUpperCase();
+    card.querySelector('.tc-cn').textContent = d.name || '';
+    card.querySelector('.tc-sub').textContent = d.sub || '';
+    card.classList.remove('hidden');
+    requestAnimationFrame(function () { card.classList.add('on'); });
+    setTimeout(function () {
+      card.classList.remove('on');
+      setTimeout(cb, 640);
+    }, 1250);
+  }
+
+  function travelTo(id, cardEl) {
+    var d = window.TravelMaps && TravelMaps.get(id);
+    if (!d) return false;
+    if (S.traveling) return false;                       // 连点只走一次
+    if (!d.noTicket && !hasTicket(id)) { toast('🎫 ' + ticketHint(id), 3400); return false; }
+    var fade = $('#travel-fade'), card = $('#travel-card');
+    if (!fade || !card) { enterMap(id); return true; }    // 兜底：没有转场元素就直接进
+    S.traveling = true;
+    S.travelCount = (S.travelCount || 0) + 1;            // 验收用：数一数这次到底走了几趟
+    pause();
+    var cv = cardEl ? cardEl.querySelector('canvas') : null;
+    flyTicket(cv, function () {
+      fade.classList.remove('hidden');
+      requestAnimationFrame(function () { fade.style.opacity = '1'; });
+      setTimeout(function () {
+        closeAllPanelsSilent();
+        try {
+          enterMap(id);
+        } catch (e) {
+          /* 进图失败（极少见）也要把锁和黑场收回来，别把人卡在黑屏里 */
+          fade.style.opacity = '0';
+          setTimeout(function () { fade.classList.add('hidden'); }, 600);
+          S.traveling = false;
+          unpause();
+          toast('这一趟没走成，再点一次试试', 3000);
+          return;
+        }
+        pause();
+        showTravelCard(d, function () {
+          fade.style.opacity = '0';
+          setTimeout(function () {
+            fade.classList.add('hidden');
+            card.classList.add('hidden');
+            card.classList.remove('on');
+            unpause();
+            S.traveling = false;
+          }, 640);
+        });
+      }, 620);
+    });
+    return true;
   }
 
   function enterMap(id) {
@@ -7072,6 +7817,19 @@ window.Game = (function () {
         if (vw > 0 && vh > 0) ctx.drawImage(bgi, vx, vy, vw, vh, vx, vy, vw, vh);
       }
       if (typeof md.anim === 'function') { ctx.save(); md.anim(ctx, ts); ctx.restore(); }
+      /* v4.10 北境：雪橇边那封还没捡的信（捡了就不再画） */
+      if (md.id === NORTH_ID && window.NorthMap && NorthMap.letter && !northHas('letter')) {
+        ctx.save();
+        World.drawEnvelope(ctx, { x: NorthMap.letter.x, y: NorthMap.letter.y, color: '#e8dcc0' }, ts, false);
+        ctx.restore();
+      }
+      /* v4.10 北境：挖过的坑是地面痕迹，压在人物之下 */
+      if (md.id === NORTH_ID && window.NorthMap && NorthMap.drawPit) {
+        var ndp = northData(), dgp = ndp.digs || {};
+        (NorthMap.digs || []).forEach(function (sp) {
+          if (dgp[sp.id]) { ctx.save(); NorthMap.drawPit(ctx, sp.x, sp.y, sp.kind); ctx.restore(); }
+        });
+      }
       /* v4.1 环境细节的动态部分（草浪 / 浮尘 / 灯光呼吸 / 水花），
          只在人物之前薄薄叠一层，不参与碰撞，也不吃帧率。 */
       if (window.TravelMaps && TravelMaps.animExtra) {
@@ -7084,6 +7842,15 @@ window.Game = (function () {
       if (memObj) {
         var gotLetter = !!S.quest.found[memObj.id];
         World.drawEnvelope(ctx, { x: md.eggPos.x, y: md.eggPos.y, color: memObj.color }, ts, gotLetter);
+      }
+
+      /* v4.10 北境：挖出来的宝箱要参与前后排序，人绕到它后面会被挡住 */
+      if (md.id === NORTH_ID && window.NorthMap && northHas('chest')) {
+        drawables.push({ y: NorthMap.chest.y, fn: function () {
+          ctx.save();
+          NorthMap.drawChest(ctx, NorthMap.chest.x, NorthMap.chest.y, ts, northHas('opened'));
+          ctx.restore();
+        } });
       }
 
       if (showRemote) {
@@ -7101,6 +7868,9 @@ window.Game = (function () {
         nameTag(ctx, S.self.x, S.self.y - 78, NAME[S.mySlot] + '（你）', true);
       } });
       drawables.sort(function (a, b) { return a.y - b.y; }).forEach(function (d) { d.fn(); });
+
+      /* v4.10：挖掘演出 —— 画在人物之后，雪块才会飞在人前面 */
+      if (S.dig) drawDigFx(ctx, ts);
 
       /* 画面最上面压一层很淡的空气感，让远景和人物贴合，
          同时也不至于挡住地面——只是 0 到 ~40% 不透明度的竖向渐变。 */
@@ -7137,8 +7907,22 @@ window.Game = (function () {
       /* v4.9.0：北境入口 —— 和树 / 路灯一样参与前后排序，人走过去会被门挡住 */
       if (northOpen() && window.NorthMap && NorthMap.drawPortal) {
         drawables.push({ y: NORTH_PORTAL.y, fn: function () {
+          /* 靠近时整座门会更亮一点（near 0~1）；按下交互后进入"蓄能"（charge 0~1），
+             蓄满才切黑场 —— 这就是"吸入式光效"，不另做一套动画系统。 */
+          var pdx = S.self.x - NORTH_PORTAL.x, pdy = S.self.y - NORTH_PORTAL.y;
+          var pd = Math.sqrt(pdx * pdx + pdy * pdy);
+          var nearP = Math.max(0, Math.min(1, 1 - pd / 300));
+          var chg = 0;
+          if (S.portalFx) {
+            chg = Math.min(1, (Date.now() - S.portalFx.t0) / S.portalFx.dur);
+            chg = chg * chg;
+          }
+          /* 白天把门压暗一档（雪地太亮，门会糊成一片白），夜里给满 */
+          var lampN = 0;
+          try { lampN = window.TownLife ? TownLife.snapshot().lamp : 0; } catch (e) { }
           ctx.save();
-          NorthMap.drawPortal(ctx, NORTH_PORTAL.x, NORTH_PORTAL.y, 1.35, ts / 1000, false);
+          NorthMap.drawPortal(ctx, NORTH_PORTAL.x, NORTH_PORTAL.y, 1.34, ts / 1000, false,
+            { near: nearP, charge: chg, tone: 0.72 + 0.28 * lampN });
           ctx.restore();
         } });
       }
@@ -7238,6 +8022,59 @@ window.Game = (function () {
        iPhone 实测时打开 ?dev=1，分别记录「Safari 里」和「主屏幕 PWA 里」的数字，
        两者都应该稳定在 150 px/s（推到底）——若 PWA 明显更高，就是时间步长出了问题。 */
     if (S.dev) drawDevMeter(ctx, ts);
+  }
+
+  /* v4.10 挖掘演出：
+     不新画一套骨骼，只在人物脚下加"被铲开的雪"和"挥动的铲子"，
+     再加上飞起来的雪块 —— 三样东西就够读成"在挖"了。 */
+  function drawDigFx(ctx, ts) {
+    var d = S.dig;
+    if (!d) return;
+    var t = Math.min(1, (Date.now() - d.t0) / d.dur);
+    var x = S.self.x, y = S.self.y;
+    ctx.save();
+    /* 1) 被铲开的雪坑：随进度扩大，边缘是翻出来的雪 */
+    var rr = (d.real ? 26 : 18) * (0.35 + t * 0.65);
+    ctx.beginPath();
+    ctx.ellipse(x + 8, y - 2, rr, rr * 0.42, 0, 0, 7);
+    ctx.fillStyle = 'rgba(232,242,252,.9)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 8, y - 3, rr * 0.78, rr * 0.32, 0, 0, 7);
+    ctx.fillStyle = 'rgba(40,56,80,.55)';
+    ctx.fill();
+
+    /* 2) 铲子：绕人物右手位置来回挥（用时间戳算，不存状态） */
+    var cyc = ((Date.now() % 460) / 460);
+    var swing = -0.85 + Math.sin(cyc * Math.PI) * 1.5;
+    ctx.save();
+    ctx.translate(x + 12, y - 26);
+    ctx.rotate(swing);
+    ctx.strokeStyle = '#8a6a44';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 26); ctx.stroke();
+    ctx.fillStyle = '#c3cedd';
+    ctx.beginPath();
+    ctx.moveTo(-6, 26);
+    ctx.lineTo(6, 26);
+    ctx.lineTo(4, 36);
+    ctx.lineTo(-4, 36);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    /* 3) 飞起来的雪块：6 块，周期里先上后落 */
+    for (var i = 0; i < 6; i++) {
+      var ph = (cyc + i * 0.17) % 1;
+      var dirx = (i % 2 ? 1 : -1) * (10 + (i % 3) * 9);
+      var px = x + 8 + dirx * ph;
+      var py = y - 8 - Math.sin(ph * Math.PI) * (18 + (i % 4) * 7);
+      var a = 1 - ph;
+      ctx.fillStyle = 'rgba(240,250,255,' + (a * 0.9).toFixed(2) + ')';
+      ctx.fillRect(px - 2, py - 2, 4 - (i % 2), 3);
+    }
+    ctx.restore();
   }
 
   function drawDevMeter(ctx, ts) {
@@ -7456,6 +8293,8 @@ window.Game = (function () {
       chapter: chapterNo(), chapterDay: chapterDayStr(),
       ranch: Object.assign({}, (curWorld() && curWorld().ranch) || {}),
       indoors: !!S.interId, memoryCount: foundCount(),
+      traveling: !!S.traveling, portalFx: !!S.portalFx, dig: !!S.dig,
+      travelCount: S.travelCount || 0,
       party: partySnapshot()
     };
   }
@@ -7504,10 +8343,21 @@ window.Game = (function () {
       });
     },
     devEnterNorth: function () { if (!devHook()) return false; enterNorth(); return true; },
+    /* v4.10.1 隐藏任务测试：只读快照，给验收脚本断言用（不提供写入口） */
+    devNorthQuest: function () {
+      var w = curWorld() || {};
+      return {
+        stage: northQuestStage(),
+        name: northStageName(northQuestStage()),
+        test: w.northTest || null,
+        north: w.north || null
+      };
+    },
     devLeaveNorth: function () { if (!devHook()) return false; leaveNorth(); return true; },
     devNorthInfo: function () {
       return {
         open: northOpen(), mapId: S.mapId || null, here: hereKey(),
+        force: !!S.adminForcePortal, always: northAlwaysOn(),
         portal: { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y, r: NORTH_PORTAL.r },
         exit: (window.NorthMap && NorthMap.portalIn) || null,
         state: northState(),

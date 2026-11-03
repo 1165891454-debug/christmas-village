@@ -1120,103 +1120,622 @@ window.NorthMap = (function () {
     drawPortal(g, PORTAL_IN.x, PORTAL_IN.y, 1.0, s, true);
   }
 
-  /* 传送门（小镇里那个用的是同一个函数，尺寸不同） */
-  function drawPortal(g, x, y, scale, s, atNorth) {
-    var R = 58 * scale;
-    var pulse = 0.5 + 0.5 * Math.sin(s * 1.3);
+  /* ============================================================
+   * 传送门 v4.10 —— 古老符文门
+   * ------------------------------------------------------------
+   * 小镇里那道门和北境的回程门是同一个函数，只是 scale 不同。
+   *
+   * 画法分两层（和圣诞树一个思路）：
+   *   静态层：石柱 / 冰晶 / 断裂横楣 / 门座 —— 按 scale 烘一张位图，只烘一次；
+   *   动态层：空间裂隙 / 旋转符文 / 向上光点 / 极光带 / 靠近增亮 / 进入蓄能。
+   *
+   * 关键的美术取舍：**这是像素画，不是插画**。
+   * 第一版用了大片柔和渐变，结果整座门糊成一坨蓝色果冻，和小镇那种
+   * 硬边色块的风格完全不像。现在改成：石头用 3 个色阶 + 1px 深色描边，
+   * 裂隙用「深底 + 几层平涂光带 + 一道硬亮边」，渐变只留给地面那一小圈。
+   * ============================================================ */
+  var PORTAL_BAKE = {};
+
+  var PST = {
+    out: '#232e42',          // 描边
+    hi: '#8294b2',           // 受光面
+    mid: '#64769a',          // 中间调
+    lo: '#465672',           // 背光面
+    dark: '#33415c',         // 砌缝 / 暗部
+    snow: '#f2f9ff',
+    snow2: '#cfe1f4'
+  };
+  var PICE = { out: 'rgba(96,168,214,.75)', hi: 'rgba(214,244,255,.85)', mid: 'rgba(150,216,252,.62)' };
+
+  /* 一根风化的石柱：硬边色块 + 1px 描边，顶上压雪 */
+  function pillar(g, x, y, w, h, seed, lean) {
+    var r = rnd(seed);
+    g.save();
+    g.translate(x, y);
+    if (lean) g.rotate(lean);
+    var hw = w / 2;
+
+    /* 柱身（正面） */
+    g.beginPath();
+    g.moveTo(-hw, 0);
+    g.lineTo(-hw + w * 0.05, -h * 0.93);
+    g.lineTo(hw - w * 0.10, -h);
+    g.lineTo(hw, 0);
+    g.closePath();
+    g.fillStyle = PST.mid;
+    g.fill();
+    /* 左受光 */
+    g.beginPath();
+    g.moveTo(-hw, 0);
+    g.lineTo(-hw + w * 0.05, -h * 0.93);
+    g.lineTo(-hw + w * 0.30, -h * 0.955);
+    g.lineTo(-hw + w * 0.26, 0);
+    g.closePath();
+    g.fillStyle = PST.hi;
+    g.fill();
+    /* 右背光 */
+    g.beginPath();
+    g.moveTo(hw - w * 0.26, 0);
+    g.lineTo(hw - w * 0.28, -h * 0.985);
+    g.lineTo(hw - w * 0.10, -h);
+    g.lineTo(hw, 0);
+    g.closePath();
+    g.fillStyle = PST.lo;
+    g.fill();
+    /* 描边 */
+    g.beginPath();
+    g.moveTo(-hw, 0);
+    g.lineTo(-hw + w * 0.05, -h * 0.93);
+    g.lineTo(hw - w * 0.10, -h);
+    g.lineTo(hw, 0);
+    g.strokeStyle = PST.out;
+    g.lineWidth = Math.max(1, w * 0.055);
+    g.stroke();
+
+    /* 砌缝 */
+    g.strokeStyle = PST.dark;
+    g.lineWidth = Math.max(1, w * 0.05);
+    for (var b = 1; b <= 3; b++) {
+      var by = -h * (b / 4.2);
+      g.beginPath();
+      g.moveTo(-hw + w * 0.05, by);
+      g.lineTo(hw - w * 0.04, by - h * 0.008);
+      g.stroke();
+    }
+    /* 一道裂 */
+    var cx0 = (r() - 0.5) * w * 0.2;
+    g.beginPath();
+    g.moveTo(cx0, -h * 0.16);
+    g.lineTo(cx0 + w * 0.10, -h * 0.40);
+    g.lineTo(cx0 - w * 0.05, -h * 0.62);
+    g.stroke();
+
+    /* 阴刻符文：暗槽（点亮时动态层在上面叠亮色） */
+    for (var rn = 0; rn < 3; rn++) {
+      var ry = -h * (0.28 + rn * 0.20);
+      g.fillStyle = PST.dark;
+      g.fillRect(-w * 0.17, ry, w * 0.34, Math.max(1.6, w * 0.07));
+      if (rn % 2 === 0) g.fillRect(-w * 0.035, ry - w * 0.13, Math.max(1.6, w * 0.07), w * 0.26);
+    }
+    /* 顶雪：一块硬边的雪帽，往前探出一点 */
+    g.beginPath();
+    g.moveTo(-hw - w * 0.10, -h * 0.93);
+    g.lineTo(-hw + w * 0.02, -h * 1.02);
+    g.lineTo(hw - w * 0.06, -h * 0.99);
+    g.lineTo(hw + w * 0.10, -h * 0.90);
+    g.lineTo(hw - w * 0.30, -h * 0.90);
+    g.lineTo(-hw + w * 0.24, -h * 0.87);
+    g.closePath();
+    g.fillStyle = PST.snow;
+    g.fill();
+    g.strokeStyle = PST.out;
+    g.lineWidth = 1;
+    g.stroke();
+    g.fillStyle = PST.snow2;
+    g.fillRect(-hw + w * 0.02, -h * 0.885, w * 0.72, Math.max(1, h * 0.012));
+
+    /* 柱脚雪堆 */
+    g.beginPath();
+    g.ellipse(0, 0, w * 0.72, Math.max(2.2, w * 0.16), 0, 0, 7);
+    g.fillStyle = PST.snow;
+    g.fill();
+    g.strokeStyle = PST.out;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  /* 冰晶：三块硬边三角，深浅各一档 */
+  function iceShard(g, x, y, h, w, lean) {
+    g.save();
+    g.translate(x, y);
+    g.rotate(lean || 0);
+    g.beginPath();
+    g.moveTo(0, -h);
+    g.lineTo(w, -h * 0.24);
+    g.lineTo(w * 0.34, 0);
+    g.lineTo(-w * 0.52, -h * 0.20);
+    g.closePath();
+    g.fillStyle = PICE.mid;
+    g.fill();
+    g.beginPath();
+    g.moveTo(0, -h);
+    g.lineTo(w * 0.26, -h * 0.30);
+    g.lineTo(0, -h * 0.06);
+    g.closePath();
+    g.fillStyle = PICE.hi;
+    g.fill();
+    g.beginPath();
+    g.moveTo(0, -h);
+    g.lineTo(w, -h * 0.24);
+    g.lineTo(w * 0.34, 0);
+    g.lineTo(-w * 0.52, -h * 0.20);
+    g.closePath();
+    g.strokeStyle = PICE.out;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  /* 静态层：门座 + 三根石柱（两高一低）+ 冰晶。烘一次，之后只贴图。 */
+  function portalBake(scale) {
+    if (typeof document === 'undefined' || !document.createElement) return null;
+    var key = Math.round(scale * 100);
+    if (PORTAL_BAKE[key]) return PORTAL_BAKE[key];
+    var R = 54 * scale;
+    var w = Math.ceil(R * 4.0), h = Math.ceil(R * 3.4);
+    var ox = -w / 2, oy = -h * 0.88;
+    var SS = 2;
+    var cv = document.createElement('canvas');
+    if (!cv || !cv.getContext) return null;
+    cv.width = Math.max(1, Math.ceil(w * SS));
+    cv.height = Math.max(1, Math.ceil(h * SS));
+    var g = cv.getContext('2d');
+    if (!g) return null;
+    g.scale(SS, SS);
+    g.translate(-ox, -oy);
+
+    /* 门座：一块冻在冰里的石板 */
+    g.beginPath();
+    g.ellipse(0, 2, R * 1.30, R * 0.34, 0, 0, 7);
+    g.fillStyle = PST.dark;
+    g.fill();
+    g.beginPath();
+    g.ellipse(0, -1, R * 1.26, R * 0.31, 0, 0, 7);
+    g.fillStyle = PST.mid;
+    g.fill();
+    g.beginPath();
+    g.ellipse(0, -R * 0.09, R * 1.02, R * 0.22, 0, 0, 7);
+    g.fillStyle = PST.hi;
+    g.fill();
+    g.beginPath();
+    g.ellipse(0, -1, R * 1.26, R * 0.31, 0, 0, 7);
+    g.strokeStyle = PST.out;
+    g.lineWidth = 1.4;
+    g.stroke();
+
+    /* 后面的断柱（最矮，往后压，给纵深） */
+    pillar(g, -R * 1.26, -R * 0.06, R * 0.26, R * 0.62, 7.3, 0);
+    /* 左柱 */
+    pillar(g, -R * 0.74, 0, R * 0.40, R * 1.94, 3.1, 0);
+    /* 右柱（略矮一点，但两根都够高，横梁才搭得住） */
+    pillar(g, R * 0.76, 0, R * 0.38, R * 1.80, 5.7, 0);
+
+    /* 残拱：三块石头从左柱顶上往右搭，搭到一半就断了。
+       第一版是一整块悬空的横梁，看起来像从柱子上支出来一根扁担 ——
+       现在改成贴着柱顶、逐块降低的拱石，断口留在中间，
+       既说明"这儿本来有座完整的门"，又不会封成一个现代门框。 */
+    /* 横梁：从左右两根柱顶各伸出一截，中间断开。
+       这样"这里本来是一座完整的门"读得出来，又不会封成现代门框。
+       （试过单边一整块压顶石 —— 因为柱顶是斜切的，那块石头会浮在半空。） */
+    function beam(sign, x0, x1) {
+      g.beginPath();
+      g.moveTo(x0, -R * 1.94);
+      g.lineTo(x0, -R * 2.13);
+      g.lineTo(x1, -R * 2.11);
+      g.lineTo(x1 + sign * R * 0.03, -R * 2.04);   // 断口：斜着劈下去
+      g.lineTo(x1 - sign * R * 0.02, -R * 1.96);
+      g.lineTo(x0, -R * 1.94);
+      g.closePath();
+      g.fillStyle = PST.mid;
+      g.fill();
+      g.strokeStyle = PST.out;
+      g.lineWidth = 1.3;
+      g.stroke();
+      /* 梁上的雪 */
+      g.beginPath();
+      g.moveTo(x0, -R * 2.13);
+      g.lineTo((x0 + x1) / 2, -R * 2.18);
+      g.lineTo(x1, -R * 2.11);
+      g.lineTo(x1, -R * 2.07);
+      g.lineTo((x0 + x1) / 2, -R * 2.13);
+      g.lineTo(x0, -R * 2.09);
+      g.closePath();
+      g.fillStyle = PST.snow;
+      g.fill();
+      /* 梁下的符文槽 */
+      g.fillStyle = PST.dark;
+      var n2 = 3;
+      for (var bi = 0; bi < n2; bi++) {
+        var bx2 = x0 + (x1 - x0) * (0.16 + bi * 0.30);
+        g.fillRect(bx2, -R * 2.03, R * 0.07, R * 0.025);
+      }
+    }
+    beam(-1, -R * 0.90, -R * 0.16);
+    beam(1, R * 0.92, R * 0.18);
+
+    /* 掉在门座边上的一小块碎石（断口掉下来的，给故事感） */
+    g.save();
+    g.translate(R * 0.34, -R * 0.03);
+    g.rotate(0.22);
+    g.beginPath();
+    g.moveTo(-R * 0.10, 0);
+    g.lineTo(-R * 0.07, -R * 0.10);
+    g.lineTo(R * 0.08, -R * 0.08);
+    g.lineTo(R * 0.10, 0);
+    g.closePath();
+    g.fillStyle = PST.lo;
+    g.fill();
+    g.strokeStyle = PST.out;
+    g.lineWidth = 1.1;
+    g.stroke();
+    g.restore();
+
+    /* 柱脚的冰晶 */
+    iceShard(g, -R * 1.04, -R * 0.02, R * 0.40, R * 0.13, -0.22);
+    iceShard(g, -R * 0.88, 0, R * 0.26, R * 0.09, 0.16);
+    iceShard(g, R * 1.02, -R * 0.02, R * 0.32, R * 0.11, 0.24);
+    iceShard(g, R * 0.86, 0, R * 0.21, R * 0.08, -0.18);
+    /* 门座上的残雪 */
+    g.beginPath();
+    g.ellipse(-R * 0.36, R * 0.0, R * 0.38, R * 0.075, 0, 0, 7);
+    g.fillStyle = PST.snow;
+    g.fill();
+    g.beginPath();
+    g.ellipse(R * 0.50, R * 0.02, R * 0.28, R * 0.06, 0, 0, 7);
+    g.fillStyle = PST.snow;
+    g.fill();
+
+    var rec = { cv: cv, w: w, h: h, ox: ox, oy: oy, R: R };
+    PORTAL_BAKE[key] = rec;
+    return rec;
+  }
+
+  /* 地面魔法阵：两圈细环 + 短刻线 + 轮转的符文 */
+  function portalCircle(g, R, s, lum, alpha) {
+    g.save();
+    g.scale(1, 0.40);
+    var i, a;
+    g.beginPath();
+    g.arc(0, 0, R * 1.24, 0, 7);
+    g.strokeStyle = 'rgba(110,196,255,' + (0.55 * lum * alpha).toFixed(3) + ')';
+    g.lineWidth = 2.6;
+    g.stroke();
+    g.beginPath();
+    g.arc(0, 0, R * 1.04, 0, 7);
+    g.strokeStyle = 'rgba(160,224,255,' + (0.34 * lum * alpha).toFixed(3) + ')';
+    g.lineWidth = 1.2;
+    g.stroke();
+    /* 环之间的短刻线（古老魔法阵的齿） */
+    for (i = 0; i < 18; i++) {
+      a = (i / 18) * Math.PI * 2 - s * 0.10;
+      g.beginPath();
+      g.moveTo(Math.cos(a) * R * 1.07, Math.sin(a) * R * 1.07);
+      g.lineTo(Math.cos(a) * R * 1.21, Math.sin(a) * R * 1.21);
+      g.strokeStyle = 'rgba(120,200,255,' + ((0.16 + 0.20 * Math.abs(Math.sin(s * 1.5 + i))) * lum * alpha).toFixed(3) + ')';
+      g.lineWidth = 1.8;
+      g.stroke();
+    }
+    /* 环上的符文块，慢速转 */
+    for (i = 0; i < 10; i++) {
+      a = (i / 10) * Math.PI * 2 + s * 0.16;
+      g.save();
+      g.rotate(a);
+      g.translate(R * 1.14, 0);
+      var l2 = 0.30 + 0.70 * Math.abs(Math.sin(s * 1.4 + i * 0.9));
+      g.fillStyle = 'rgba(210,244,255,' + (l2 * 0.9 * lum * alpha).toFixed(3) + ')';
+      g.fillRect(-R * 0.045, -R * 0.020, R * 0.090, R * 0.040);
+      g.fillRect(-R * 0.011, -R * 0.068, R * 0.022, R * 0.048);
+      g.restore();
+    }
+    g.restore();
+  }
+
+  /* 空间裂隙的轮廓：一个上下收窄、边缘会轻抖的"眼睛"形状 */
+  /* 裂隙轮廓：一道**撕开的竖缝**。
+     试过四种：兜帽形（像帐篷）、尖叶形（像蓝宝石）、圆拱门（像玻璃罩）、
+     这个撕裂形。前三种都是"一块发光的实体"，只有撕裂形会被读成"洞"。
+     做法：底宽 0.54R，往上收到 0.40R，顶端是参差的裂口（不是平滑曲线）。 */
+  function riftHalfAt(R, t) {
+    return R * (0.54 - 0.14 * t);
+  }
+  function riftPath(g, R, H2, s, ph) {
+    var N = 16, i, t, w2, y2;
+    g.beginPath();
+    /* 左侧：从地面往上 */
+    for (i = 0; i <= N; i++) {
+      t = i / N;
+      w2 = riftHalfAt(R, t) * (1 + 0.045 * Math.sin(t * 9 + s * 1.9 + ph));
+      y2 = -H2 * t;
+      if (i === 0) g.moveTo(-w2, y2); else g.lineTo(-w2, y2);
+    }
+    /* 顶端：参差的裂口（4 段折线，长短不一，随时间轻微起伏） */
+    var top = [[-0.54, 0.975], [-0.27, 1.0], [0.0, 0.988], [0.27, 1.0], [0.54, 0.975]];
+    for (i = 0; i < top.length; i++) {
+      g.lineTo(top[i][0] * R * (0.95 + 0.02 * Math.sin(s * 1.3 + i)),
+        -H2 * (top[i][1] + 0.008 * Math.sin(s * 1.7 + i * 2.1 + ph)));
+    }
+    /* 右侧：往下回到地面 */
+    for (i = N; i >= 0; i--) {
+      t = i / N;
+      w2 = riftHalfAt(R, t) * (1 + 0.045 * Math.sin(t * 9 + s * 1.9 + 1.7 + ph));
+      g.lineTo(w2, -H2 * t);
+    }
+    g.closePath();
+  }
+
+  function drawPortal(g, x, y, scale, s, atNorth, opt) {
+    opt = opt || {};
+    var near = Math.max(0, Math.min(1, opt.near || 0));        // 玩家靠近 0~1
+    var charge = Math.max(0, Math.min(1, opt.charge || 0));    // 进入蓄能 0~1
+    var R = 54 * scale;
+    var pulse = 0.5 + 0.5 * Math.sin(s * 1.15);
+    /* tone：白天把整座门压暗一点（0.72），否则在亮雪地上会糊成一团白；
+       夜里给满。近/蓄能照旧往上加。 */
+    var tone = (opt.tone === undefined ? 1 : opt.tone);
+    var lum = (0.80 + near * 0.20 + charge * 0.50) * tone;
+    var H2 = R * (1.66 + charge * 0.14);
+
     g.save();
     g.translate(x, y);
 
-    /* 先压一圈暗底：雪地本来就很亮，纯加法混合会被洗成一片白，
-       门看起来像一层雾。有了这层暗底，蓝光才有对比。 */
+    /* ---- 1. 地面：一小圈冷暗底 + 一圈光池 ----
+       雪地本来很亮，纯加法混合会被洗白，所以先压一层冷暗底再叠光。
+       注意范围要收着 —— 第一版铺得太大，像地上摊了一滩水。 */
     g.beginPath();
-    g.ellipse(0, 2, R * 2.0, R * 0.62, 0, 0, 7);
-    g.fillStyle = rad(g, 0, 2, R * 2.0, [
-      0, 'rgba(8,16,36,.46)', 0.55, 'rgba(10,20,44,.26)', 1, 'rgba(10,20,44,0)'
+    g.ellipse(0, 3, R * 1.16, R * 0.34, 0, 0, 7);
+    g.fillStyle = rad(g, 0, 3, R * 1.16, [
+      0, 'rgba(8,16,34,.34)', 0.62, 'rgba(10,20,42,.14)', 1, 'rgba(10,20,42,0)'
     ]);
     g.fill();
-
-    // 地面光池
     g.save();
     g.globalCompositeOperation = 'lighter';
     g.beginPath();
-    g.ellipse(0, 0, R * 1.9, R * 0.42, 0, 0, 7);
-    g.fillStyle = rad(g, 0, 0, R * 1.9, [
-      0, 'rgba(120,200,255,' + (0.20 + pulse * 0.10).toFixed(3) + ')',
+    g.ellipse(0, 2, R * 1.16, R * 0.26, 0, 0, 7);
+    g.fillStyle = rad(g, 0, 2, R * 1.16, [
+      0, 'rgba(96,190,255,' + (0.22 * lum).toFixed(3) + ')',
       1, 'rgba(80,150,255,0)'
     ]);
     g.fill();
     g.restore();
 
-    // 符文环（俯视的椭圆）
-    g.save();
-    g.scale(1, 0.40);
-    g.beginPath(); g.arc(0, 0, R * 1.02, 0, 7);
-    g.strokeStyle = 'rgba(120,205,255,' + (0.80 + pulse * 0.18).toFixed(2) + ')';
-    g.lineWidth = 4.4;
-    g.stroke();
-    g.beginPath(); g.arc(0, 0, R * 0.78, 0, 7);
-    g.strokeStyle = 'rgba(120,200,255,.35)';
-    g.lineWidth = 1.6;
-    g.stroke();
-    // 环上的符文，慢慢转
-    var N = 12;
-    for (var i = 0; i < N; i++) {
-      var a = (i / N) * Math.PI * 2 + s * 0.22;
-      g.save();
-      g.rotate(a);
-      g.translate(R * 0.90, 0);
-      g.fillStyle = 'rgba(190,238,255,' + (0.5 + 0.4 * Math.sin(s * 2 + i)).toFixed(2) + ')';
-      g.fillRect(-3.2, -2.2, 6.4, 4.4);
-      g.restore();
+    /* ---- 2. 石头（烘焙位图；没有 canvas 的环境退化成两个方块） ---- */
+    var rec = portalBake(scale);
+    if (rec) {
+      g.drawImage(rec.cv, rec.ox, rec.oy, rec.w, rec.h);
+    } else {
+      g.fillStyle = PST.mid;
+      g.fillRect(-R * 1.12, -R * 1.64, R * 0.36, R * 1.64);
+      g.fillRect(R * 0.79, -R * 1.26, R * 0.34, R * 1.26);
     }
-    g.restore();
 
-    // 光幕（竖着的一块，带竖向流动）
+    /* ---- 3. 魔法阵 ----
+       必须画在石头之后：它刻在门座和冰面上，画在前面会被门座整个盖掉
+       （第一版就是这样，地上那道环几乎看不见）。 */
+    portalCircle(g, R, s, lum, 1);
     g.save();
     g.globalCompositeOperation = 'lighter';
-    var hh = R * 1.55;
-    g.beginPath();
-    g.moveTo(-R * 0.52, 0);
-    g.quadraticCurveTo(-R * 0.60, -hh * 0.62, 0, -hh);
-    g.quadraticCurveTo(R * 0.60, -hh * 0.62, R * 0.52, 0);
-    g.closePath();
-    var cg = g.createLinearGradient(0, -hh, 0, 0);
-    cg.addColorStop(0, 'rgba(190,235,255,.16)');
-    cg.addColorStop(0.5, 'rgba(110,195,255,' + (0.34 + pulse * 0.12).toFixed(3) + ')');
-    cg.addColorStop(1, 'rgba(70,140,255,.44)');
-    g.fillStyle = cg;
+    portalCircle(g, R, s, lum, 0.55);
+    g.restore();
+
+    /* ---- 4. 空间裂隙（整座门的主角） ---- */
+
+    /* 4a. 门洞里的暗（先铺一层，别让背后的雪透进来） */
+    riftPath(g, R, H2, s, 0);
+    g.fillStyle = '#0a1633';
     g.fill();
-    // 流动的竖纹
-    g.strokeStyle = 'rgba(210,240,255,.16)';
-    g.lineWidth = 1.4;
-    for (var k = 0; k < 6; k++) {
-      var kx = -R * 0.44 + k * R * 0.18;
+
+    /* 4b. 门里那层"别处"的光。
+       这里用一次竖向渐变是值得的：它同时给出了"下面亮、上面紫"的色序
+       和纵深（越靠近地面越亮，光是从裂缝里漏到冰上的）。 */
+    g.save();
+    riftPath(g, R, H2, s, 0);
+    g.clip();
+    /* 门里：**深色**。
+       这一版之前试过"整块亮蓝"，结果不管怎么调都读成一颗蓝宝石 ——
+       因为一个又亮又饱和的形状，观众只会当它是个物件。
+       洞就该是暗的：光只在边上、在里面流动的那几条丝上。 */
+    g.fillStyle = lin(g, 0, 0, 0, -H2, [
+      0, '#050a18',
+      0.30, '#0a1430',
+      0.62, '#0b1c3c',
+      0.88, '#122a52',
+      1, '#1b3a6a'
+    ]);
+    g.fillRect(-R, -H2, R * 2, H2);
+    /* 贴着内壁的一圈冷光：让"洞口"有厚度，不是一张黑纸 */
+    var ig = rad(g, 0, -H2 * 0.42, R * 0.66, [
+      0, 'rgba(70,170,240,0)',
+      0.72, 'rgba(70,170,240,.10)',
+      1, 'rgba(140,220,255,.34)'
+    ]);
+    g.fillStyle = ig;
+    g.fillRect(-R, -H2, R * 2, H2);
+    /* 底部透上来的光（"那边"的光从地面漏出来） */
+    g.beginPath();
+    g.ellipse(0, 0, R * 0.52, R * 0.24, 0, 0, 7);
+    g.fillStyle = rad(g, 0, 0, R * 0.52, [
+      0, 'rgba(226,252,255,.80)', 1, 'rgba(120,200,255,0)'
+    ]);
+    g.fill();
+    /* 竖向光帘：几条粗细不一的亮柱，慢慢晃 —— 这是"里面有东西在流"的关键 */
+    g.globalCompositeOperation = 'lighter';
+    for (var cu = 0; cu < 6; cu++) {
+      /* 竖着往下淌的光丝：x 基本不变、只轻轻摆 —— 之前那些往中间收的曲线
+         在洞里交叉成了一个大大的 "X"，像反光，不像光在流。 */
+      var cxp2 = -R * 0.40 + cu * R * 0.16 + Math.sin(s * 0.7 + cu * 1.7) * R * 0.03;
+      var cw2 = R * (0.03 + (cu % 3) * 0.022);
       g.beginPath();
-      g.moveTo(kx, 0);
-      g.quadraticCurveTo(kx + Math.sin(s * 2 + k) * 6, -hh * 0.55, kx * 0.2, -hh * (0.9 + 0.06 * Math.sin(s + k)));
+      g.moveTo(cxp2, 0);
+      g.quadraticCurveTo(cxp2 + Math.sin(s * 0.9 + cu) * R * 0.05, -H2 * 0.5,
+        cxp2 + Math.sin(s * 1.2 + cu * 2) * R * 0.05, -H2 * 0.96);
+      g.strokeStyle = cu % 2
+        ? 'rgba(206,180,255,' + (0.32 + 0.14 * Math.sin(s * 1.9 + cu)).toFixed(3) + ')'
+        : 'rgba(196,244,255,' + (0.36 + 0.16 * Math.sin(s * 1.6 + cu)).toFixed(3) + ')';
+      g.lineWidth = cw2 * 1.6;
       g.stroke();
     }
-    // 边缘亮线
+    /* 中心一道更亮的核：有它，裂缝才像"透光"，而不是一块色板 */
     g.beginPath();
-    g.moveTo(-R * 0.52, 0);
-    g.quadraticCurveTo(-R * 0.60, -hh * 0.62, 0, -hh);
-    g.quadraticCurveTo(R * 0.60, -hh * 0.62, R * 0.52, 0);
-    g.strokeStyle = 'rgba(200,244,255,' + (0.55 + pulse * 0.35).toFixed(2) + ')';
-    g.lineWidth = 3.0;
+    g.ellipse(0, -H2 * 0.34, R * 0.06, H2 * 0.26, 0, 0, 7);
+    g.fillStyle = 'rgba(236,252,255,.22)';
+    g.fill();
+    /* 往里飘的流光带：几条横的，慢慢往上走 */
+    g.globalCompositeOperation = 'lighter';
+    for (var b2 = 0; b2 < 4; b2++) {
+      var by2 = -(((s * 22 + b2 * H2 * 0.25) % (H2 * 1.05)));
+      g.beginPath();
+      g.ellipse(Math.sin(s * 0.6 + b2) * R * 0.16, by2, R * 0.66, R * 0.055, 0, 0, 7);
+      g.fillStyle = 'rgba(170,232,255,' + (0.11 + 0.05 * Math.sin(s * 2.4 + b2)).toFixed(3) + ')';
+      g.fill();
+    }
+    /* 竖着的空间褶：两三条，颜色偏紫，提示"后面还有一层" */
+    for (var k = 0; k < 3; k++) {
+      var kx = -R * 0.34 + k * R * 0.34 + Math.sin(s * 0.9 + k * 2.1) * R * 0.05;
+      g.beginPath();
+      g.moveTo(kx, 0);
+      g.quadraticCurveTo(kx + R * 0.10, -H2 * 0.5, kx * 0.42, -H2 * 0.96);
+      g.strokeStyle = k === 1 ? 'rgba(186,152,255,.26)' : 'rgba(120,214,255,.20)';
+      g.lineWidth = 1.6 + (k % 2) * 1.4;
+      g.stroke();
+    }
+    /* 深处的星点 */
+    for (var st2 = 0; st2 < 8; st2++) {
+      var stx = Math.sin(st2 * 2.7 + s * 0.3) * R * 0.46;
+      var sty = -((st2 * 0.141 + s * 0.045) % 1) * H2 * 0.9 - R * 0.05;
+      var sa2 = 0.3 + 0.45 * Math.abs(Math.sin(s * 1.9 + st2));
+      g.fillStyle = 'rgba(226,246,255,' + sa2.toFixed(2) + ')';
+      g.fillRect(stx - 0.7, sty - 0.7, 1.4, 1.4);
+    }
+    g.restore();
+
+    /* 4c. 硬亮边：外面一道窄光晕 + 一条 2px 的白边（像素画的"硬"就在这里） */
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    riftPath(g, R, H2, s, 0);
+    g.strokeStyle = 'rgba(90,180,255,' + (0.22 * lum).toFixed(3) + ')';
+    g.lineWidth = 7;
+    g.stroke();
+    riftPath(g, R, H2, s, 0);
+    g.strokeStyle = 'rgba(232,252,255,' + ((0.86 + pulse * 0.14) * lum).toFixed(3) + ')';
+    g.lineWidth = 2.6;
     g.stroke();
     g.restore();
 
-    // 上升的粒子
-    for (var p = 0; p < 7; p++) {
-      var ph2 = ((s * 0.5 + p * 0.14) % 1);
-      var py = -ph2 * hh * 0.9;
-      var pxx = Math.sin(ph2 * 6 + p * 1.7) * R * 0.34;
-      g.beginPath();
-      g.arc(pxx, py, 1.2 + (1 - ph2) * 1.3, 0, 7);
-      g.fillStyle = 'rgba(210,242,255,' + ((1 - ph2) * 0.6).toFixed(2) + ')';
-      g.fill();
+    /* 4d. 从裂缝里溢到空气里的一点点光（很淡，只为了让边缘不那么"贴纸"） */
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.beginPath();
+    g.ellipse(0, -H2 * 0.55, R * (0.95 + charge * 0.3), H2 * 0.55, 0, 0, 7);
+    g.fillStyle = rad(g, 0, -H2 * 0.55, R * 1.30, [
+      0, 'rgba(110,196,255,' + ((0.10 + charge * 0.20) * lum).toFixed(3) + ')',
+      1, 'rgba(90,150,255,0)'
+    ]);
+    g.fill();
+    g.restore();
+
+    /* 4e. 裂缝底部的光摊在门座上（没有这一块，门会像贴在背景上的贴纸） */
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.beginPath();
+    g.ellipse(0, -R * 0.02, R * 0.56, R * 0.20, 0, 0, 7);
+    g.fillStyle = rad(g, 0, -R * 0.02, R * 0.60, [
+      0, 'rgba(190,245,255,' + ((0.34 + charge * 0.3) * lum).toFixed(3) + ')',
+      1, 'rgba(90,170,255,0)'
+    ]);
+    g.fill();
+    g.restore();
+
+    /* ---- 5. 石柱上的符文：被门里的光点亮，一明一暗往上走 ---- */
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    var cols = [[-R * 0.74, R * 1.96, R * 0.40], [R * 0.76, R * 1.46, R * 0.38]];
+    for (var c = 0; c < cols.length; c++) {
+      var cxp = cols[c][0], chp = cols[c][1], cwp = cols[c][2];
+      for (var rn2 = 0; rn2 < 3; rn2++) {
+        var ry2 = -chp * (0.28 + rn2 * 0.20);
+        var gl2 = 0.18 + 0.82 * Math.max(0, Math.sin(s * 1.6 + rn2 * 1.1 + c * 0.7));
+        g.fillStyle = 'rgba(150,228,255,' + (gl2 * 0.62 * lum).toFixed(3) + ')';
+        g.fillRect(cxp - cwp * 0.17, ry2, cwp * 0.34, Math.max(1.6, cwp * 0.07));
+        if (rn2 % 2 === 0) g.fillRect(cxp - cwp * 0.035, ry2 - cwp * 0.13, Math.max(1.6, cwp * 0.07), cwp * 0.26);
+      }
     }
+    /* 横楣符文带 */
+    /* 横梁上的符文：左右各三颗，交替亮 */
+    var beamRunes = [
+      [-R * 0.66, -R * 2.05], [-R * 0.44, -R * 2.05], [-R * 0.30, -R * 2.04],
+      [R * 0.66, -R * 2.05], [R * 0.44, -R * 2.05], [R * 0.30, -R * 2.04]
+    ];
+    for (var lr = 0; lr < beamRunes.length; lr++) {
+      var gl3 = 0.18 + 0.82 * Math.max(0, Math.sin(s * 1.5 + lr * 0.8));
+      g.fillStyle = 'rgba(160,232,255,' + (gl3 * 0.55 * lum).toFixed(3) + ')';
+      g.fillRect(beamRunes[lr][0], beamRunes[lr][1], R * 0.07, R * 0.025);
+    }
+    g.restore();
+
+    /* ---- 6. 向上的光点与雪粒（固定 12 个，按时间戳推，不存粒子） ---- */
+    for (var p = 0; p < 12; p++) {
+      var ph2 = ((s * (0.20 + (p % 4) * 0.032) + p * 0.083) % 1);
+      var py2 = -ph2 * H2 * 1.02;
+      var pxx = Math.sin(ph2 * 5.2 + p * 1.7) * R * (0.30 + ph2 * 0.22);
+      var pa = (1 - ph2) * (0.40 + 0.22 * lum);
+      g.fillStyle = p % 3 === 0
+        ? 'rgba(206,190,255,' + pa.toFixed(2) + ')'
+        : 'rgba(216,244,255,' + pa.toFixed(2) + ')';
+      g.fillRect(pxx - 0.8, py2 - 0.8, 1.7, 1.7);
+    }
+
+    /* ---- 7. 极光带：偶尔从门里斜着扫过的一道绿紫光 ---- */
+    var sweep = (s * 0.10) % 1;
+    if (sweep < 0.5) {
+      var sa = Math.sin((sweep / 0.5) * Math.PI) * (0.14 + 0.10 * lum);
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.beginPath();
+      g.moveTo(-R * 0.92, -H2 * (0.22 + sweep * 0.62));
+      g.quadraticCurveTo(0, -H2 * (0.38 + sweep * 0.56), R * 0.92, -H2 * (0.24 + sweep * 0.60));
+      g.lineTo(R * 0.92, -H2 * (0.17 + sweep * 0.60));
+      g.quadraticCurveTo(0, -H2 * (0.31 + sweep * 0.56), -R * 0.92, -H2 * (0.15 + sweep * 0.62));
+      g.closePath();
+      g.fillStyle = 'rgba(150,255,214,' + sa.toFixed(3) + ')';
+      g.fill();
+      g.restore();
+    }
+
+    /* ---- 8. 进入时的吸入光效：向内收的光条 + 中心过曝 ---- */
+    if (charge > 0.001) {
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.beginPath();
+      g.ellipse(0, -H2 * 0.5, R * 1.1, H2 * 0.5, 0, 0, 7);
+      g.fillStyle = rad(g, 0, -H2 * 0.5, R * 1.2, [
+        0, 'rgba(235,252,255,' + (charge * 0.5).toFixed(3) + ')',
+        1, 'rgba(120,200,255,0)'
+      ]);
+      g.fill();
+      for (var q = 0; q < 10; q++) {
+        var qa = (q / 10) * Math.PI * 2 + s * 0.9;
+        var r0 = R * (1.6 - charge * 0.85);
+        g.beginPath();
+        g.moveTo(Math.cos(qa) * r0, -H2 * 0.48 + Math.sin(qa) * r0 * 0.62);
+        g.lineTo(Math.cos(qa) * r0 * 0.45, -H2 * 0.48 + Math.sin(qa) * r0 * 0.28);
+        g.strokeStyle = 'rgba(210,246,255,' + (charge * 0.5).toFixed(3) + ')';
+        g.lineWidth = 2;
+        g.stroke();
+      }
+      g.restore();
+    }
+
     g.restore();
   }
 
@@ -1252,6 +1771,206 @@ window.NorthMap = (function () {
     { x: 1640, y: 948, w: 24, h: 18 }
   ];
 
+
+  /* ============================================================
+   * v4.10 寻宝：挖掘点 / 旧雪橇 / 那封信 / 古老宝箱
+   * ------------------------------------------------------------
+   * 一切坐标都是**固定的**，不随机 —— 两个人看到的是同一份地图，
+   * 进度写在 world.north 里共享，所以 v5.0 的双人机关也能直接接着用。
+   *
+   * 五种挖掘反馈（四个错的，一个对的）：
+   *   soft    雪是松的，一铲子下去空空的
+   *   stone   碰到了石头
+   *   dull    硬东西，但声音很闷（旧木箱角）
+   *   prints  挖出一段很老的脚印
+   *   treasure 脚下硬得反常 —— 金属或陶罐的回声
+   * 错误地点没有任何惩罚，也不消耗东西，只是"这里不对"。
+   * ============================================================ */
+  var DIGS = [
+    {
+      id: 'soft', x: 330, y: 790, kind: 'soft', r: 62,
+      label: '⛏ 挖开这里的雪',
+      title: '松软的雪',
+      lines: ['铲子很轻松就捅进去了，雪下面是空的、松的。',
+        '除了雪，还是雪。']
+    },
+    {
+      id: 'stone', x: 704, y: 846, kind: 'stone', r: 62,
+      label: '⛏ 挖开这里的雪',
+      title: '雪下是石头',
+      lines: ['铲刃"当"地磕了一下，震得手发麻。',
+        '扒开雪，是一块埋在地里的石头，边角被冰磨得很圆。']
+    },
+    {
+      id: 'dull', x: 1186, y: 820, kind: 'dull', r: 62,
+      label: '⛏ 挖开这里的雪',
+      title: '闷闷的一声',
+      lines: ['铲子碰到了硬东西 —— 可那声音是闷的，像敲在旧木头上。',
+        '是一角烂掉的木箱，钉子都锈没了。']
+    },
+    {
+      id: 'prints', x: 1352, y: 838, kind: 'prints', r: 62,
+      label: '⛏ 挖开这里的雪',
+      title: '雪下的脚印',
+      lines: ['铲子下去，露出来的不是土，是一串脚印。',
+        '很小，很浅，一层一层被雪压过。有人在这里站过很久，然后走了。']
+    },
+    {
+      id: 'treasure', x: 1560, y: 900, kind: 'treasure', r: 66,
+      label: '⛏ 这里不一样',
+      title: '底下有东西',
+      lines: ['铲刃撞上去，是一声很脆的金属响。',
+        '不是石头。是某种……容器。']
+    }
+  ];
+
+  /* 旧雪橇旁那封信（信本身在 camp 的雪橇边上） */
+  var LETTER = { x: 1016, y: 946, r: 66 };
+  var SLED = { x: 936, y: 962, r: 70 };      // 那辆旧雪橇（画在 camp 段里）
+  var CHEST = { x: 1560, y: 900 };
+
+  /* ---------- 挖过的坑 ---------- */
+  function drawPit(g, x, y, kind) {
+    g.save();
+    /* 坑：外圈翻出来的雪，里面是暗的 */
+    g.beginPath();
+    g.ellipse(x, y, kind === 'treasure' ? 40 : 28, kind === 'treasure' ? 15 : 11, 0, 0, 7);
+    g.fillStyle = 'rgba(226,238,252,.85)';
+    g.fill();
+    g.beginPath();
+    g.ellipse(x, y - 1, kind === 'treasure' ? 33 : 22, kind === 'treasure' ? 11 : 8, 0, 0, 7);
+    g.fillStyle = kind === 'prints' ? 'rgba(96,116,146,.85)' : 'rgba(28,40,60,.8)';
+    g.fill();
+    g.beginPath();
+    g.ellipse(x - 2, y - 3, (kind === 'treasure' ? 33 : 22) * 0.8, (kind === 'treasure' ? 11 : 8) * 0.6, 0, 0, 7);
+    g.fillStyle = 'rgba(12,18,30,.55)';
+    g.fill();
+    if (kind === 'prints') {
+      g.fillStyle = 'rgba(190,206,228,.55)';
+      for (var i = 0; i < 4; i++) {
+        g.fillRect(x - 14 + i * 8, y - 2 + (i % 2) * 3, 3, 2);
+      }
+    }
+    if (kind === 'stone') {
+      g.beginPath();
+      g.ellipse(x + 4, y - 2, 9, 5, 0.2, 0, 7);
+      g.fillStyle = '#54637e';
+      g.fill();
+    }
+    g.restore();
+  }
+
+  /* ---------- 古老宝箱 ----------
+     铜边 + 木箱体 + 蓝符文锁扣 + 一层雪。挖出来之后一直留在那儿。 */
+  function drawChest(g, x, y, ts, opened) {
+    g.save();
+    g.translate(x, y);
+    g.scale(1.22, 1.22);        // 整个寻宝线的终点，画大一点才撑得住
+    /* 影子 */
+    g.beginPath();
+    g.ellipse(0, 0, 34, 10, 0, 0, 7);
+    g.fillStyle = 'rgba(10,18,32,.42)';
+    g.fill();
+    /* 箱体 */
+    g.fillStyle = '#4a3626';
+    g.beginPath();
+    g.rect(-28, -30, 56, 30);
+    g.fill();
+    g.fillStyle = '#5d4530';
+    g.fillRect(-28, -30, 56, 6);
+    /* 木条 */
+    g.strokeStyle = 'rgba(30,22,14,.55)';
+    g.lineWidth = 1.4;
+    for (var i = 1; i < 3; i++) {
+      g.beginPath(); g.moveTo(-28 + i * 18.6, -24); g.lineTo(-28 + i * 18.6, 0); g.stroke();
+    }
+    /* 盖 */
+    g.fillStyle = '#6b5038';
+    g.beginPath();
+    g.moveTo(-30, -30);
+    g.quadraticCurveTo(0, -46, 30, -30);
+    g.lineTo(30, -26);
+    g.quadraticCurveTo(0, -40, -30, -26);
+    g.closePath();
+    g.fill();
+    /* 铜边 */
+    g.strokeStyle = '#8a6a3a';
+    g.lineWidth = 3;
+    g.beginPath(); g.moveTo(-30, -28); g.quadraticCurveTo(0, -44, 30, -28); g.stroke();
+    g.beginPath(); g.moveTo(-28, -2); g.lineTo(28, -2); g.stroke();
+    g.strokeStyle = '#c9a45c';
+    g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(-30, -30); g.quadraticCurveTo(0, -46, 30, -30); g.stroke();
+    /* 锁扣 */
+    g.fillStyle = '#8a6a3a';
+    g.fillRect(-7, -26, 14, 16);
+    g.fillStyle = '#d8b46a';
+    g.fillRect(-5, -24, 10, 12);
+    /* 锁扣上的蓝符文：慢慢呼吸 */
+    var pl = 0.55 + 0.45 * Math.sin((ts || 0) / 520);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = 'rgba(140,225,255,' + (0.55 * pl).toFixed(2) + ')';
+    g.fillRect(-1.5, -22, 3, 8);
+    g.fillRect(-4, -19, 8, 2);
+    g.beginPath();
+    g.ellipse(0, -18, 16, 12, 0, 0, 7);
+    g.fillStyle = rad(g, 0, -18, 16, [0, 'rgba(120,205,255,.28)', 1, 'rgba(120,205,255,0)']);
+    g.fill();
+    g.restore();
+    /* 箱盖上的雪 */
+    g.fillStyle = 'rgba(244,251,255,.92)';
+    g.beginPath();
+    g.ellipse(-8, -34, 18, 4, -0.05, 0, 7);
+    g.fill();
+    g.beginPath();
+    g.ellipse(16, -29, 10, 3, 0.1, 0, 7);
+    g.fill();
+    g.restore();
+  }
+
+  /* ---------- 像素小图标（获得物品 / 管理员面板用） ----------
+     kind: shovel | letter | chest | key */
+  function drawIcon(g, kind, size) {
+    var u = size / 16;
+    g.save();
+    g.clearRect && g.clearRect(0, 0, size, size);
+    g.translate(0, 0);
+    function px(x, y, w, h, c) { g.fillStyle = c; g.fillRect(x * u, y * u, w * u, h * u); }
+    if (kind === 'shovel') {
+      px(7, 1, 2, 9, '#8a6a44');          // 木柄
+      px(7, 0, 2, 1, '#a98a5e');
+      px(6, 9, 4, 2, '#9aa8bb');          // 铁颈
+      px(5, 11, 6, 4, '#c3cedd');         // 铲面
+      px(6, 15, 4, 1, '#7c8b9e');
+      px(6, 11, 1, 4, '#e8f1fa');         // 高光
+      px(6, 2, 1, 7, '#6d5233');          // 柄暗边
+    } else if (kind === 'letter') {
+      px(2, 4, 12, 9, '#f2e6c8');
+      px(2, 4, 12, 1, '#d8c69c');
+      px(3, 6, 10, 6, '#fbf3df');
+      px(3, 6, 5, 1, '#c9b184');
+      px(4, 8, 8, 1, '#c9b184');
+      px(4, 10, 6, 1, '#c9b184');
+      px(11, 9, 3, 3, '#b8422f');         // 火漆
+    } else if (kind === 'chest') {
+      px(2, 7, 12, 7, '#5d4530');
+      px(2, 4, 12, 4, '#6b5038');
+      px(2, 4, 12, 1, '#8a6a3a');
+      px(2, 11, 12, 1, '#8a6a3a');
+      px(7, 6, 2, 5, '#d8b46a');
+      px(7, 8, 2, 2, '#8ce1ff');
+      px(3, 3, 10, 1, '#f2f9ff');
+    } else if (kind === 'key') {
+      px(3, 2, 5, 5, '#c9a45c');
+      px(4, 3, 3, 3, '#8ce1ff');
+      px(7, 6, 2, 8, '#c9a45c');
+      px(9, 11, 3, 2, '#c9a45c');
+      px(9, 8, 2, 2, '#c9a45c');
+    }
+    g.restore();
+  }
+
   /* ============================================================
    * 对外：一张标准的 TravelMaps 地图对象
    * ============================================================ */
@@ -1285,7 +2004,15 @@ window.NorthMap = (function () {
     portalIn: PORTAL_IN,
     ruins: RUINS,
     lake: LAKE,
-    drawPortal: drawPortal
+    drawPortal: drawPortal,
+    /* v4.10 寻宝 */
+    digs: DIGS,
+    sled: SLED,
+    letter: LETTER,
+    chest: CHEST,
+    drawPit: drawPit,
+    drawChest: drawChest,
+    drawIcon: drawIcon
   };
 
   return MAP;

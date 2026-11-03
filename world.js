@@ -2138,17 +2138,50 @@ window.World = (function () {
     ctx.beginPath(); ctx.ellipse(1215, 1040, 36, 12, -0.3, 0, 7); ctx.fill();
   }
 
+  /* 小镇左侧中间那片冻湖。
+     v4.10：北境的传送门就立在它中间，所以它不能再是一块平板 ——
+     补了岸线暗边、冰层的深浅、裂纹和几点反光，站在岸边看得出是"水冻住了"。 */
   function drawIceRink(ctx) {
-    ctx.fillStyle = '#cfe2f5';
-    ctx.beginPath(); ctx.ellipse(170, 515, 130, 46, 0, 0, 7); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.ellipse(170, 515, 130, 46, 0, 0, 7); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1.5;
+    var cx = 170, cy = 515, rx = 130, ry = 46;
+    /* 岸线：一圈压暗的雪泥，把湖和雪地分开 */
+    ctx.beginPath(); ctx.ellipse(cx, cy + 3, rx + 7, ry + 5, 0, 0, 7);
+    ctx.fillStyle = 'rgba(150,176,208,.55)'; ctx.fill();
+    /* 冰面：上浅下深（近处更厚） */
+    var g = ctx.createLinearGradient(0, cy - ry, 0, cy + ry);
+    g.addColorStop(0, '#bcd6ee');
+    g.addColorStop(0.45, '#a9c8e6');
+    g.addColorStop(1, '#8fb2d6');
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, 7);
+    ctx.fillStyle = g; ctx.fill();
+    /* 中间偏上的一块更亮的"薄冰" */
+    ctx.beginPath(); ctx.ellipse(cx - 12, cy - 12, rx * 0.6, ry * 0.52, -0.06, 0, 7);
+    ctx.fillStyle = 'rgba(228,242,255,.5)'; ctx.fill();
+    /* 边缘的白霜 */
+    ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx - 1, ry - 1, 0, 0, 7); ctx.stroke();
+    /* 裂纹 */
+    ctx.strokeStyle = 'rgba(255,255,255,.62)'; ctx.lineWidth = 1.2;
     for (var i = 0; i < 6; i++) {
-      var sx = 80 + i * 32;
-      ctx.beginPath(); ctx.moveTo(sx, 495 + (i % 3) * 12);
-      ctx.quadraticCurveTo(sx + 20, 505 + (i % 2) * 14, sx + 44, 498 + (i % 3) * 10);
+      var sx = cx - 88 + i * 32;
+      ctx.beginPath(); ctx.moveTo(sx, cy - 20 + (i % 3) * 12);
+      ctx.quadraticCurveTo(sx + 20, cy - 10 + (i % 2) * 14, sx + 44, cy - 17 + (i % 3) * 10);
       ctx.stroke();
+    }
+    /* 斜着的一道长裂 */
+    ctx.strokeStyle = 'rgba(120,158,196,.55)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(cx - 62, cy + 12);
+    ctx.lineTo(cx - 18, cy + 4);
+    ctx.lineTo(cx + 10, cy + 16);
+    ctx.lineTo(cx + 62, cy + 8);
+    ctx.stroke();
+    /* 反光的点 */
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    for (var k = 0; k < 9; k++) {
+      var a = (k / 9) * Math.PI * 2 + 0.4;
+      var px = cx + Math.cos(a) * rx * 0.72;
+      var py = cy + Math.sin(a) * ry * 0.66;
+      ctx.fillRect(px, py, k % 3 === 0 ? 3 : 2, 2);
     }
   }
 

@@ -1167,7 +1167,7 @@ window.TownLife = (function () {
   }
 
   return {
-    version: '4.9.0',
+    version: '4.10.1',
     tick: tick,
     drawFootprints: drawFootprints,
     drawBuildingLife: drawBuildingLife,

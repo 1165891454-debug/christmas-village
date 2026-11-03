@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.9.0" />
+  <link rel="stylesheet" href="style.css?v=4.10.1" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -400,6 +400,50 @@
               </div>
               <p class="muted small-note">⚠️ 这是测试工具：只把「已经开始的」花 / 树 / 包裹倒计时原点往前拨，<b>不会</b>修改 30 分钟 / 6 小时 / 2 小时这些真实时长，也不会改别的房间。结果会同步到本房间两台设备。</p>
             </div>
+            <div class="admin-block admin-north" id="admin-north">
+              <div class="admin-block-head">🌀 北境秘境管理 <span class="admin-block-sub">NORTH ADMINISTRATION</span></div>
+              <div id="admin-north-status" class="admin-north-status"></div>
+              <div class="admin-actions">
+                <button class="btn ghost small" type="button" data-north="force-on">强制显示传送门</button>
+                <button class="btn ghost small" type="button" data-north="force-off">关闭强制显示</button>
+                <button class="btn ghost small" type="button" data-north="portal-test">测试传送门交互</button>
+                <button class="btn primary small" type="button" data-north="enter">直接进入北境</button>
+              </div>
+              <div class="admin-north-sub">快速传送 · 五个区域</div>
+              <div class="admin-actions">
+                <button class="btn ghost small" type="button" data-north="go:forest">沉默的雪林</button>
+                <button class="btn ghost small" type="button" data-north="go:crystal">冰晶小径</button>
+                <button class="btn ghost small" type="button" data-north="go:camp">被遗忘营地</button>
+                <button class="btn ghost small" type="button" data-north="go:lake">星光冰湖</button>
+                <button class="btn ghost small" type="button" data-north="go:ruins">古代遗迹</button>
+                <button class="btn ghost small" type="button" data-north="town">返回小镇</button>
+              </div>
+              <div class="admin-north-sub">寻宝进度（只读 · 双人共享）</div>
+              <div id="admin-north-treasure" class="admin-north-status"></div>
+              <p class="muted small-note">强制显示只影响这台设备的预览，不会写进存档，也不会解开正式解锁条件。寻宝进度是房间共享的，这里只能看、不能改。</p>
+            </div>
+
+            <div class="admin-block admin-north admin-testline" id="admin-testline">
+              <div class="admin-block-head">🧪 隐藏任务测试 <span class="admin-block-sub">HIDDEN QUEST · TEST ONLY</span></div>
+              <p class="admin-warn">⚠ 测试功能：仅用于开发测试，不代表正式游戏进度</p>
+              <div id="admin-testline-status" class="admin-north-status"></div>
+              <div class="admin-testline-row">
+                <label for="north-test-level">目标章节</label>
+                <select id="north-test-level" class="admin-select">
+                  <option value="1">① 传送门已开</option>
+                  <option value="2">② 已拿到雪铲</option>
+                  <option value="3">③ 四个挖掘点已挖</option>
+                  <option value="4">④ 宝箱已挖出</option>
+                  <option value="5" selected>⑤ 宝箱已开启（v5.0）</option>
+                </select>
+              </div>
+              <div class="admin-actions">
+                <button class="btn primary small" type="button" data-north-test="skip">跳过隐藏任务章节</button>
+                <button class="btn ghost small" type="button" data-north-test="restore">恢复隐藏任务进度</button>
+              </div>
+              <p class="muted small-note">跳过只写共享存档里的 <b>world.north</b>（走 world 事务，两台设备同时生效），并先把跳过前的进度整份备份到 <b>world.northTest</b>；「恢复」就是把它原样放回去。车票、回忆、特产、冰岛解锁条件一律不碰。</p>
+            </div>
+
             <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。<br />素材 +5 每 60 秒最多存一次完整备份，避免连点把存档撑大；每次操作都会记进本机日志。</p>
           </div>
         </div>
@@ -596,17 +640,35 @@
     <div class="nc-line"></div>
   </div>
 
-  <script src="firebase-config.js?v=4.9.0"></script>
-  <script src="memories.js?v=4.9.0"></script>
-  <script src="chars.js?v=4.9.0"></script>
-  <script src="sprites.js?v=4.9.0"></script>
-  <script src="world.js?v=4.9.0"></script>
-  <script src="north.js?v=4.9.0"></script>
-  <script src="maps.js?v=4.9.0"></script>
-  <script src="specialties.js?v=4.9.0"></script>
-  <script src="life.js?v=4.9.0"></script>
-  <script src="game.js?v=4.9.0"></script>
-  <script src="app.js?v=4.9.0"></script>
+  <!-- v4.10 获得物品：旧雪铲 / 那封信 -->
+  <div id="item-card" class="hidden" aria-hidden="true">
+    <canvas id="item-card-icon" width="64" height="64"></canvas>
+    <div class="ic-name"></div>
+    <div class="ic-sub"></div>
+  </div>
+
+  <!-- v4.10 车票转场：票根飞起 → 压黑 → 目的地名 → 淡入新地图 -->
+  <canvas id="ticket-fly" class="hidden" width="320" height="150" aria-hidden="true"></canvas>
+  <div id="travel-fade" class="hidden"></div>
+  <div id="travel-card" class="hidden" aria-hidden="true">
+    <div id="travel-glow"></div>
+    <div class="tc-en"></div>
+    <div class="tc-cn"></div>
+    <div class="tc-sub"></div>
+    <div class="tc-line"></div>
+  </div>
+
+  <script src="firebase-config.js?v=4.10.1"></script>
+  <script src="memories.js?v=4.10.1"></script>
+  <script src="chars.js?v=4.10.1"></script>
+  <script src="sprites.js?v=4.10.1"></script>
+  <script src="world.js?v=4.10.1"></script>
+  <script src="north.js?v=4.10.1"></script>
+  <script src="maps.js?v=4.10.1"></script>
+  <script src="specialties.js?v=4.10.1"></script>
+  <script src="life.js?v=4.10.1"></script>
+  <script src="game.js?v=4.10.1"></script>
+  <script src="app.js?v=4.10.1"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

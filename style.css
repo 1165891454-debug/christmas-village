@@ -1286,3 +1286,121 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
   .nc-cn { font-size: 21px; }
   .nc-en { font-size: 11px; }
 }
+
+/* ---------- v4.10 车票转场 ---------- */
+#ticket-fly {
+  position: fixed; z-index: 58; pointer-events: none;
+  border-radius: 6px;
+  transform-origin: 50% 50%;
+  transition: transform .46s cubic-bezier(.22,.9,.3,1), filter .46s ease, opacity .3s ease;
+  will-change: transform, filter;
+}
+#travel-fade {
+  position: fixed; inset: 0; z-index: 59;
+  background: #02040a; opacity: 0;
+  transition: opacity .55s ease;
+  pointer-events: none;
+}
+#travel-card {
+  position: fixed; inset: 0; z-index: 61;
+  display: grid; place-content: center; gap: 10px;
+  text-align: center; pointer-events: none;
+  opacity: 0; transform: translateY(14px);
+  transition: opacity .8s ease, transform .8s ease;
+}
+#travel-card.on { opacity: 1; transform: none; }
+#travel-glow {
+  position: absolute; left: 50%; top: 50%; width: 340px; height: 340px;
+  margin: -170px 0 0 -170px; border-radius: 50%;
+  background: radial-gradient(circle, var(--tc, rgba(120,200,255,.34)) 0%, rgba(0,0,0,0) 68%);
+  filter: blur(2px); opacity: .85;
+}
+.tc-en {
+  position: relative;
+  font-size: 12px; font-weight: 700; letter-spacing: .44em; text-indent: .44em;
+  color: #cbe6ff; text-shadow: 0 0 10px rgba(120,190,255,.45);
+}
+.tc-cn {
+  position: relative;
+  font-size: 30px; font-weight: 800; letter-spacing: .18em; text-indent: .18em;
+  color: #f6fbff;
+  text-shadow: 0 0 14px var(--tc, rgba(130,205,255,.6)), 0 0 30px rgba(90,160,255,.30);
+}
+.tc-sub {
+  position: relative;
+  font-size: 12.5px; letter-spacing: .16em; text-indent: .16em;
+  color: rgba(226,240,255,.72);
+}
+.tc-line {
+  position: relative;
+  width: 140px; height: 1px; margin: 6px auto 0;
+  background: linear-gradient(90deg, transparent, var(--tc2, rgba(150,220,255,.85)), transparent);
+}
+@media (max-height: 420px) {
+  .tc-cn { font-size: 22px; }
+  .tc-en { font-size: 11px; }
+  #travel-glow { width: 240px; height: 240px; margin: -120px 0 0 -120px; }
+}
+
+/* ---------- v4.10 获得物品卡 ---------- */
+#item-card {
+  position: fixed; left: 50%; top: 14%; z-index: 62;
+  transform: translate(-50%, 10px) scale(.92);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 22px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(28,40,58,.94), rgba(16,24,38,.96));
+  border: 1px solid rgba(140,210,255,.42);
+  box-shadow: 0 10px 34px rgba(0,0,0,.5), 0 0 26px rgba(110,190,255,.22);
+  opacity: 0; pointer-events: none;
+  transition: opacity .34s ease, transform .34s cubic-bezier(.2,.9,.3,1.1);
+}
+#item-card.on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+#item-card canvas { image-rendering: pixelated; width: 64px; height: 64px; }
+#item-card .ic-name { font-size: 15px; font-weight: 800; color: #f4fbff; letter-spacing: .06em; }
+#item-card .ic-sub { font-size: 11.5px; color: rgba(214,234,255,.72); letter-spacing: .04em; }
+@media (max-height: 420px) {
+  #item-card { top: 8%; padding: 10px 16px 8px; }
+  #item-card canvas { width: 48px; height: 48px; }
+}
+
+/* ---------- v4.10 管理员 · 北境分区 ---------- */
+.admin-north { border-top: 1px solid rgba(140,200,255,.18); padding-top: 12px; }
+.admin-north-sub {
+  font-size: 11.5px; color: rgba(150,210,255,.78);
+  letter-spacing: .06em; margin: 10px 0 6px;
+}
+.admin-north-status { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.admin-north-status .admin-sec {
+  flex-direction: row; align-items: baseline; gap: 8px;
+  padding: 4px 8px; background: rgba(20,32,48,.55); border-radius: 7px;
+}
+.admin-north-status .admin-sec b { flex: 0 0 66px; color: #8fd6ff; }
+.admin-north-status .admin-sec span { flex: 1 1 auto; font-size: 11.5px; line-height: 1.45; }
+.admin-north-status .admin-sec.ok b { color: #9dffb8; }
+.admin-north-status .admin-sec.off b { color: rgba(232,220,200,.55); }
+
+/* ---------- v4.10.1 管理员 · 隐藏任务测试 ---------- */
+.admin-warn {
+  margin: 4px 0 8px; padding: 6px 9px;
+  font-size: 11.5px; line-height: 1.5;
+  color: #ffd9a0;
+  background: rgba(120,72,16,.28);
+  border: 1px solid rgba(255,190,110,.35);
+  border-radius: 7px;
+}
+.admin-testline-row {
+  display: flex; align-items: center; gap: 8px;
+  margin: 2px 0 8px;
+}
+.admin-testline-row label { font-size: 12px; color: rgba(232,220,200,.8); flex: 0 0 auto; }
+.admin-select {
+  flex: 1 1 auto; min-width: 0;
+  padding: 6px 8px; min-height: 34px;
+  font-size: 12.5px; color: #f4ead8;
+  background: rgba(18,28,42,.9);
+  border: 1px solid rgba(140,200,255,.28);
+  border-radius: 8px;
+  -webkit-appearance: none; appearance: none;
+}
+.admin-select:focus { outline: 1px solid rgba(140,200,255,.6); }
