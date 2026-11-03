@@ -5841,16 +5841,32 @@ window.Game = (function () {
   var NORTH_PORTAL = { x: 816, y: 214, r: 96 };  // 小镇北边林子里的那道光
   var NORTH_ID = 'north';
 
+  /* ★★ 测试期临时开关 ★★
+     true  = 传送门常显：不看章节、不看昼夜，也不写存档（进度干净，随时可退回规则）。
+     false = 恢复正常规则（章节 ≥ NORTH_GATE 且夜里出现一次，之后永久保留）。
+     想临时按规则跑一次不用改代码：网址加 ?north=0（例如 index.html?room=xxx&north=0）。
+     最终交付前把下面这行的 true 改成 false 即可。 */
+  var NORTH_TEST_ALWAYS = true;
+  /* Node 冒烟测试里没有 location（和上面 addEventListener 一样要判存在） */
+  var _northFlag = (typeof location !== 'undefined' && location.search)
+    ? /[?&]north=(0|1)\b/.exec(location.search) : null;
+  function northAlwaysOn() {
+    if (_northFlag) return _northFlag[1] === '1';
+    return NORTH_TEST_ALWAYS;
+  }
+
   function northState() {
     var w = curWorld() || {};
     return w.north || null;
   }
   function northOpen() {
+    if (northAlwaysOn()) return true;        // 测试期常显
     var n = northState();
     return !!(n && n.open);
   }
   /* 夜里 + 章节够 → 开一次门（写进共享存档，两台设备同时看到） */
   function maybeOpenNorth() {
+    if (northAlwaysOn()) return;            // 测试期不写存档，保证进度干净
     if (northOpen()) return;
     if (S.mapId || S.interId || S.ending) return;      // 只在镇上判断
     if ((chapterNo() || 0) < NORTH_GATE && ((curWorld() || {}).chapter || 0) < NORTH_GATE) return;
