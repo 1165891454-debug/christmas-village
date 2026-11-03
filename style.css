@@ -1251,3 +1251,38 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
   pointer-events: none;
 }
 #btn-lottery.is-empty { opacity: .55; }
+
+/* ---------- v4.9.0 北境入场演出 ---------- */
+#north-fade {
+  position: fixed; inset: 0; z-index: 60;
+  background: #02040a; opacity: 0;
+  transition: opacity .72s ease;
+  pointer-events: none;
+}
+#north-card {
+  position: fixed; inset: 0; z-index: 61;
+  display: grid; place-content: center; gap: 12px;
+  text-align: center; pointer-events: none;
+  opacity: 0; transform: translateY(12px);
+  transition: opacity .85s ease, transform .85s ease;
+}
+#north-card.on { opacity: 1; transform: none; }
+.nc-en {
+  font-size: 13px; font-weight: 700; letter-spacing: .42em;
+  color: #a8dcff; text-indent: .42em;
+  text-shadow: 0 0 10px rgba(110,190,255,.45);
+}
+.nc-cn {
+  font-size: 27px; font-weight: 800; letter-spacing: .2em; text-indent: .2em;
+  color: #f4fbff;
+  /* 阴影收在字周围：半径太大时会糊成一块"深色底板"，看起来像多了一个框 */
+  text-shadow: 0 0 12px rgba(130,205,255,.55), 0 0 26px rgba(90,160,255,.30);
+}
+.nc-line {
+  width: 132px; height: 1px; margin: 8px auto 0;
+  background: linear-gradient(90deg, transparent, rgba(150,220,255,.85), transparent);
+}
+@media (max-height: 420px) {
+  .nc-cn { font-size: 21px; }
+  .nc-en { font-size: 11px; }
+}

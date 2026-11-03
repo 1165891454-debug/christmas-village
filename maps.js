@@ -3598,6 +3598,11 @@ window.TravelMaps = (function () {
     if (EXTRA_ANIM[id]) { try { EXTRA_ANIM[id](g, t); } catch (e) { } }
   }
 
+  /* v4.9.0：被遗忘的北境 —— 独立地图模块（north.js）挂进来。
+     它标了 secret / noTicket：不进车站列表（list() 只看 ORDER），也不发车票；
+     但 get()/has()/bg()/碰撞/同步/断线恢复全都走同一套，不需要另开分支。 */
+  if (window.NorthMap && window.NorthMap.id) D[window.NorthMap.id] = window.NorthMap;
+
   return {
     get: get, list: list, bg: bg, thumb: thumb, ticket: ticket, animExtra: animExtra,
     W: W, H: H, has: function (id) { return !!D[id]; }

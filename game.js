@@ -1392,6 +1392,8 @@ window.Game = (function () {
 
     S.parts = []; S.interId = null; S.outdoorPos = null;
     S.mapId = restoreMap; S.mapReturn = null; S.posRestored = false;
+    /* v4.9.0：刷新时人正在北境 → 回程落点补成镇上那道门旁边 */
+    if (restoreMap === NORTH_ID) S.mapReturn = { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y + 64, dir: 0 };
     S.prevPresence = null; S.prevStage = -1; S.heartT = 0;
     S.quest = { step: 0, talked: {}, visited: {}, found: {} };
     S.q = { lvl: 2, acc: 0, n: 0 };
@@ -1540,7 +1542,18 @@ window.Game = (function () {
     var p = $('#partner-presence');
     if (p) {
       p.querySelector('.dot').className = 'dot ' + (online ? 'on' : 'off');
-      p.querySelector('span').textContent = (NAME[S.otherSlot]) + (online ? ' 在线' : ' 离线');
+      /* 对方在别的地图/屋里时，直接说清楚他在哪 ——
+         免得两人各在一张图、互相看不见却都以为对方"在线但站着不动"。 */
+      var where = '';
+      if (online) {
+        var ri = S.remote.inter;
+        if (ri === NORTH_ID) where = ' 在北境';
+        else if (typeof ri === 'string' && window.TravelMaps && TravelMaps.has(ri)) {
+          var md0 = TravelMaps.get(ri);
+          where = ' 在' + (md0 && md0.name ? md0.name : '别处');
+        } else if (typeof ri === 'string' && ri) where = ' 在屋里';
+      }
+      p.querySelector('span').textContent = (NAME[S.otherSlot]) + (online ? (where || ' 在线') : ' 离线');
     }
   }
 
@@ -2167,6 +2180,7 @@ window.Game = (function () {
     checkVisitZones();
     autoPickEggs();
     updateQuest();
+    maybeOpenNorth();
 
     /* ---- v4.5：树点亮之后不再自动播结局 ----
      * 以前这里是 startEnding()：树一满、任务一到，整段 15 句对白自己就开演了。
@@ -4572,7 +4586,7 @@ window.Game = (function () {
             done ? '📷 再拍一张' : sp.label, { spot: sp, idx: si, mapId: mp.id });
         });
       }
-      consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, '🚉 回小镇', mp.exitPos);
+      consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, mp.exitLabel || '🚉 回小镇', mp.exitPos);
       if (S.remote.seen && S.remote.inter === hereKey()) {
         var op = S.data && S.data.slots && S.data.slots[S.otherSlot];
         if (op) consider('partner', S.remote.x, S.remote.y, 90, '👋 和 ' + NAME[S.otherSlot] + ' 打个招呼', op);
@@ -4597,6 +4611,11 @@ window.Game = (function () {
       consider('door', dr.x, dr.y, 78, enterable ? ('🚪 进入 ' + dr.name) : ('👀 ' + dr.name), dr);
     });
     consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
+    /* v4.9.0：小镇北边林子里的那道符文门（章节 + 夜晚解锁，开过就一直在） */
+    if (northOpen()) {
+      consider('northPortal', NORTH_PORTAL.x, NORTH_PORTAL.y + 30, NORTH_PORTAL.r,
+        '🌀 走进符文的光', { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y });
+    }
     /* v4.3：地上这十段回忆完全不给提示——没找到的靠走到跟前自动拾起，
        找到过的才会在地图上留一句「再看看这里」（重读用）。
        所以这里只登记「已经找到的」，未找到的不参与互动判定。 */
@@ -4676,10 +4695,12 @@ window.Game = (function () {
         S.quest.talked[it.ref.id] = 1;
         updateQuest(); syncQuest();
       }
+    } else if (it.type === 'northPortal') {
+      northTransition();
     } else if (it.type === 'station') {
       openStationPanel();
     } else if (it.type === 'mapExit') {
-      leaveMap();
+      if (S.mapId === NORTH_ID) leaveNorth(); else leaveMap();
     } else if (it.type === 'mapView') {
       var mpv = curMap();
       if (mpv) {
@@ -5802,10 +5823,137 @@ window.Game = (function () {
     pause();
   }
 
+  /* ============================================================
+   * v4.9.0 · 被遗忘的北境 THE FORGOTTEN NORTH
+   * ------------------------------------------------------------
+   * 北境是 TravelMaps 体系里的一张「隐藏地图」（north.js）：
+   *   · 不售票、不进车站列表 —— 只通过小镇北边林子里那道传送门进；
+   *   · 但摄像机、边界、碰撞、双人位置同步、断线恢复全部复用现成那套，
+   *     所以这里不需要再造一套场景状态机。
+   *
+   * 三道门槛（缺一不可，且不占用现实时间）：
+   *   1) 章节推进到 NORTH_GATE 章（第 10 章「远方的回信」之后）；
+   *   2) 此刻是夜晚（小镇的昼夜循环 30 分钟一轮，等到夜里就行）；
+   *   3) 只要满足过一次，门就**永久**留在那儿 —— 不是一次性事件，
+   *      当晚没发现也不会错过（写进共享存档 world.north.open）。
+   * ============================================================ */
+  var NORTH_GATE = 9;                     // 章节门槛（0 基）
+  var NORTH_PORTAL = { x: 816, y: 214, r: 96 };  // 小镇北边林子里的那道光
+  var NORTH_ID = 'north';
+
+  function northState() {
+    var w = curWorld() || {};
+    return w.north || null;
+  }
+  function northOpen() {
+    var n = northState();
+    return !!(n && n.open);
+  }
+  /* 夜里 + 章节够 → 开一次门（写进共享存档，两台设备同时看到） */
+  function maybeOpenNorth() {
+    if (northOpen()) return;
+    if (S.mapId || S.interId || S.ending) return;      // 只在镇上判断
+    if ((chapterNo() || 0) < NORTH_GATE && ((curWorld() || {}).chapter || 0) < NORTH_GATE) return;
+    var st = window.TownLife && TownLife.snapshot ? TownLife.snapshot() : null;
+    if (!st || st.phase !== 'night') return;
+    if (S.northTrying) return;
+    S.northTrying = true;
+    mutate(function (w) {
+      w.north = w.north || {};
+      if (w.north.open) return undefined;               // 对方刚开过
+      w.north.open = true;
+      w.north.at = Date.now();
+      return w;
+    }).then(function (ok) {
+      S.northTrying = false;
+      if (!ok) return;
+      toast('❄️ 镇子最北边的林子里，雪地上多了一圈发蓝的符文……', 6200);
+      try { Snd.sfx('spark'); } catch (e) { }
+      burst(NORTH_PORTAL.x, NORTH_PORTAL.y + 20, 'spark', 3);
+    }, function () { S.northTrying = false; });
+  }
+
+  /* 进北境：不发票、不给地图礼物、不写 travel 记录 —— 它是秘境，不是旅行地 */
+  function enterNorth() {
+    var d = window.TravelMaps && TravelMaps.get(NORTH_ID);
+    if (!d) { toast('这条路还没通', 2400); return; }
+    closeAllPanels();                                  // 顺手解除暂停
+    S.mapReturn = { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y + 64, dir: 0 };
+    S.interId = null;
+    S.outdoorPos = null;
+    S.mapId = NORTH_ID;
+    S.self.x = d.spawn.x;
+    S.self.y = d.spawn.y;
+    S.self.dir = (typeof d.spawn.dir === 'number') ? d.spawn.dir : 3;
+    S.self.animT = 0; S.self.frame = 0; S.self.moving = false;
+    S.remote.seen = (S.remote.inter === NORTH_ID);
+    S.parts = [];
+    try { Snd.sfx('door'); } catch (e) { }
+    try { TravelMaps.bg(NORTH_ID); } catch (e) { }      // 先把整张图烘出来，别让第一帧空
+    try {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, NORTH_ID)
+        .catch(function () { });
+    } catch (e) { }
+    /* 第一次进来记一笔（只记时间，给后续版本用） */
+    var st = northState();
+    if (!st || !st.entered) {
+      mutate(function (w) {
+        w.north = w.north || {};
+        if (!w.north.entered) w.north.entered = Date.now();
+        return w;
+      }).then(function () { refreshHUD(); }, function () { });
+    }
+  }
+
+  /* 出北境：回到镇上的传送门旁边（而不是车站），人不会「瞬移到别处」 */
+  function leaveNorth() {
+    S.mapId = null;
+    var back = S.mapReturn || { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y + 64, dir: 0 };
+    S.self.x = back.x; S.self.y = back.y; S.self.dir = back.dir || 0;
+    S.self.moving = false; S.self.frame = 0; S.self.animT = 0;
+    S.mapReturn = null;
+    S.remote.seen = !!(S.data && S.data.slots && S.data.slots[S.otherSlot]) && S.remote.inter === 0;
+    S.parts = [];
+    try { Snd.sfx('door'); } catch (e) { }
+    try {
+      S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0)
+        .catch(function () { });
+    } catch (e) { }
+    toast('⛄ 符文的光在身后合上了，你们又回到了雪夜的小镇', 3600);
+  }
+
+  /* 入场演出：黑场 → 标题卡片 → 渐渐显出新地图。
+     全程只是 DOM 透明度 + 一个定时序列，不抢渲染循环；
+     期间 pause()，玩家不会在黑屏里乱走。 */
+  function northTransition() {
+    var fade = $('#north-fade'), card = $('#north-card');
+    if (!fade || !card) { enterNorth(); return; }        // 兜底：没有过渡元素也照样能进
+    pause();
+    fade.classList.remove('hidden');
+    fade.style.opacity = '0';
+    requestAnimationFrame(function () { fade.style.opacity = '1'; });
+    setTimeout(function () {
+      enterNorth();                                      // 此时画面已经全黑
+      setTimeout(function () {
+        card.classList.remove('hidden');
+        requestAnimationFrame(function () { card.classList.add('on'); });
+        setTimeout(function () {
+          card.classList.remove('on');
+          setTimeout(function () {
+            card.classList.add('hidden');
+            fade.style.opacity = '0';
+            setTimeout(function () { fade.classList.add('hidden'); unpause(); }, 900);
+          }, 800);
+        }, 1900);
+      }, 260);
+    }, 720);
+  }
+
   function enterMap(id) {
     var d = window.TravelMaps && TravelMaps.get(id);
     if (!d) return;
-    if (!hasTicket(id)) { toast('🎫 ' + ticketHint(id), 3400); return; }
+    /* 北境这类秘境标记了 noTicket：它不由车票解锁，走自己的入口 */
+    if (!d.noTicket && !hasTicket(id)) { toast('🎫 ' + ticketHint(id), 3400); return; }
     closeAllPanels();          // 顺手解除暂停，否则上车后走不动
     // 记住小镇上的位置，回来时站回原处
     S.mapReturn = { x: S.self.x, y: S.self.y, dir: S.self.dir };
@@ -6970,6 +7118,14 @@ window.Game = (function () {
         drawables.push({ y: -9999, fn: function () { TownLife.drawTreeHalo(ctx, World.tree, treeStage()); } });
       }
       drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
+      /* v4.9.0：北境入口 —— 和树 / 路灯一样参与前后排序，人走过去会被门挡住 */
+      if (northOpen() && window.NorthMap && NorthMap.drawPortal) {
+        drawables.push({ y: NORTH_PORTAL.y, fn: function () {
+          ctx.save();
+          NorthMap.drawPortal(ctx, NORTH_PORTAL.x, NORTH_PORTAL.y, 1.35, ts / 1000, false);
+          ctx.restore();
+        } });
+      }
       World.benches.forEach(function (b) { drawables.push({ y: b.y, fn: function () { World.drawBench(ctx, b); } }); });
       World.lamps.forEach(function (l) { drawables.push({ y: l.y, fn: function () { World.drawLamp(ctx, l, ts); } }); });
       if (World.animals) {
@@ -7279,7 +7435,8 @@ window.Game = (function () {
       outfit: getOutfit(S.mySlot, 'winter'), otherOutfit: getOutfit(S.otherSlot, 'winter'),
       res: Object.assign({}, worldRes()),
       remote: { x: Math.round(S.remote.x), y: Math.round(S.remote.y), tx: Math.round(S.remote.tx),
-                ty: Math.round(S.remote.ty), seen: !!S.remote.seen, inter: S.remote.inter || 0 },
+                ty: Math.round(S.remote.ty), seen: !!S.remote.seen, inter: S.remote.inter || 0,
+                shown: !!(S.remote.seen && S.remote.inter === hereKey()) },
       chapter: chapterNo(), chapterDay: chapterDayStr(),
       ranch: Object.assign({}, (curWorld() && curWorld().ranch) || {}),
       indoors: !!S.interId, memoryCount: foundCount(),
@@ -7320,6 +7477,31 @@ window.Game = (function () {
   return {
     enter: enter, onData: onData, active: active, devState: devState, devPlace: devPlace, devWave: devWave,
     devEnterMap: devEnterMap, devStation: devStation, devInteract: devInteract,
+    /* v4.9.0 北境：给验收脚本用的口子（只在 dev/harness 下有效） */
+    devNorth: function (open) {
+      if (!devHook()) return Promise.resolve(false);
+      return mutate(function (w) {
+        w.north = w.north || {};
+        w.north.open = open !== false;
+        if (open !== false && !w.north.at) w.north.at = Date.now();
+        return w;
+      });
+    },
+    devEnterNorth: function () { if (!devHook()) return false; enterNorth(); return true; },
+    devLeaveNorth: function () { if (!devHook()) return false; leaveNorth(); return true; },
+    devNorthInfo: function () {
+      return {
+        open: northOpen(), mapId: S.mapId || null, here: hereKey(),
+        portal: { x: NORTH_PORTAL.x, y: NORTH_PORTAL.y, r: NORTH_PORTAL.r },
+        exit: (window.NorthMap && NorthMap.portalIn) || null,
+        state: northState(),
+        regions: (window.NorthMap && NorthMap.regions) || [],
+        ruins: (window.NorthMap && NorthMap.ruins) || null,
+        lake: (window.NorthMap && NorthMap.lake) || null,
+        walk: (window.NorthMap && NorthMap.walk) || null,
+        size: window.NorthMap ? { w: NorthMap.w, h: NorthMap.h } : null
+      };
+    },
     devIndoor: devIndoor, devLook: devLook,
     devHit: function (x, y) { return devHook() ? hits(x, y) : null; },
     devNear: function () {
