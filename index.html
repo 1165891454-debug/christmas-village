@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=4.10.1" />
+  <link rel="stylesheet" href="style.css?v=5.1.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -433,8 +433,13 @@
                   <option value="1">① 传送门已开</option>
                   <option value="2">② 已拿到雪铲</option>
                   <option value="3">③ 四个挖掘点已挖</option>
-                  <option value="4">④ 宝箱已挖出</option>
-                  <option value="5" selected>⑤ 宝箱已开启（v5.0）</option>
+                  <option value="4">④ 最终宝箱已挖出</option>
+                  <option value="5">⑤ 双人星门已开 + 星钥</option>
+                  <option value="6">⑥ 宝箱已开启（三件奖励）</option>
+                  <option value="7">⑦ 去过冰岛（带极光盒子）</option>
+                  <option value="8">⑧ 极光演出完成</option>
+                  <option value="9">⑨ 小镇恢复光明</option>
+                  <option value="10" selected>⑩ 最终圣诞筹备</option>
                 </select>
               </div>
               <div class="admin-actions">
@@ -640,6 +645,9 @@
     <div class="nc-line"></div>
   </div>
 
+  <!-- v5.0 剧情演出：冰岛极光 / 小镇天亮 -->
+  <canvas id="cine" class="hidden" aria-hidden="true"></canvas>
+
   <!-- v4.10 获得物品：旧雪铲 / 那封信 -->
   <div id="item-card" class="hidden" aria-hidden="true">
     <canvas id="item-card-icon" width="64" height="64"></canvas>
@@ -658,17 +666,18 @@
     <div class="tc-line"></div>
   </div>
 
-  <script src="firebase-config.js?v=4.10.1"></script>
-  <script src="memories.js?v=4.10.1"></script>
-  <script src="chars.js?v=4.10.1"></script>
-  <script src="sprites.js?v=4.10.1"></script>
-  <script src="world.js?v=4.10.1"></script>
-  <script src="north.js?v=4.10.1"></script>
-  <script src="maps.js?v=4.10.1"></script>
-  <script src="specialties.js?v=4.10.1"></script>
-  <script src="life.js?v=4.10.1"></script>
-  <script src="game.js?v=4.10.1"></script>
-  <script src="app.js?v=4.10.1"></script>
+  <script src="firebase-config.js?v=5.1.0"></script>
+  <script src="memories.js?v=5.1.0"></script>
+  <script src="chars.js?v=5.1.0"></script>
+  <script src="sprites.js?v=5.1.0"></script>
+  <script src="world.js?v=5.1.0"></script>
+  <script src="north.js?v=5.1.0"></script>
+  <script src="maps.js?v=5.1.0"></script>
+  <script src="specialties.js?v=5.1.0"></script>
+  <script src="life.js?v=5.1.0"></script>
+  <script src="story.js?v=5.1.0"></script>
+  <script src="game.js?v=5.1.0"></script>
+  <script src="app.js?v=5.1.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

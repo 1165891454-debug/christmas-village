@@ -1860,72 +1860,198 @@ window.NorthMap = (function () {
     g.restore();
   }
 
-  /* ---------- 古老宝箱 ----------
-     铜边 + 木箱体 + 蓝符文锁扣 + 一层雪。挖出来之后一直留在那儿。 */
-  function drawChest(g, x, y, ts, opened) {
+  /* ---------- 最终宝箱 ----------
+     这一段重画过：v4.10 那个 56×46 的"小木屋"当不起整条线的终点。
+     现在 116×92，木箱体 + 青铜包边 + 中央符文锁 + **两个星形钥匙槽** +
+     积雪 + 冰晶 + 呼吸的蓝光。平时它是安静的，开箱时才亮起来。 */
+  var CHEST_W = 116, CHEST_H = 92;
+
+  /* opened: 0 关 / 0~1 开盖过程中 / 1 已开 */
+  function drawChest(g, x, y, ts, opened, keyIn) {
+    var t = (typeof ts === 'number') ? ts : 0;
+    var open = (typeof opened === 'number') ? Math.max(0, Math.min(1, opened)) : (opened ? 1 : 0);
+    var glow = 0.55 + 0.45 * Math.sin(t / 620);
+    var W2 = CHEST_W / 2;
     g.save();
     g.translate(x, y);
-    g.scale(1.22, 1.22);        // 整个寻宝线的终点，画大一点才撑得住
+
     /* 影子 */
     g.beginPath();
-    g.ellipse(0, 0, 34, 10, 0, 0, 7);
-    g.fillStyle = 'rgba(10,18,32,.42)';
+    g.ellipse(0, 0, W2 * 0.95, 13, 0, 0, 7);
+    g.fillStyle = 'rgba(6,12,24,.46)';
     g.fill();
-    /* 箱体 */
-    g.fillStyle = '#4a3626';
-    g.beginPath();
-    g.rect(-28, -30, 56, 30);
-    g.fill();
-    g.fillStyle = '#5d4530';
-    g.fillRect(-28, -30, 56, 6);
-    /* 木条 */
-    g.strokeStyle = 'rgba(30,22,14,.55)';
-    g.lineWidth = 1.4;
-    for (var i = 1; i < 3; i++) {
-      g.beginPath(); g.moveTo(-28 + i * 18.6, -24); g.lineTo(-28 + i * 18.6, 0); g.stroke();
+
+    /* 开盖后从箱子里溢出来的光（先画，被箱体压住一部分） */
+    if (open > 0.02) {
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.beginPath();
+      g.ellipse(0, -CHEST_H * 0.55, W2 * (0.5 + open * 0.5), CHEST_H * (0.35 + open * 0.5), 0, 0, 7);
+      g.fillStyle = rad(g, 0, -CHEST_H * 0.55, W2 * 1.1, [
+        0, 'rgba(226,250,255,' + (0.42 * open).toFixed(3) + ')',
+        0.55, 'rgba(140,220,255,' + (0.20 * open).toFixed(3) + ')',
+        1, 'rgba(110,190,255,0)'
+      ]);
+      g.fill();
+      g.restore();
     }
-    /* 盖 */
-    g.fillStyle = '#6b5038';
+
+    /* ---- 箱体 ---- */
+    var bodyH = CHEST_H * 0.60;
     g.beginPath();
-    g.moveTo(-30, -30);
-    g.quadraticCurveTo(0, -46, 30, -30);
-    g.lineTo(30, -26);
-    g.quadraticCurveTo(0, -40, -30, -26);
-    g.closePath();
+    g.rect(-W2, -bodyH, CHEST_W, bodyH);
+    g.fillStyle = lin(g, -W2, -bodyH, W2, 0, [0, '#5a4028', 0.45, '#4a3420', 1, '#382718']);
     g.fill();
-    /* 铜边 */
+    /* 木纹竖条 */
+    g.strokeStyle = 'rgba(28,18,10,.45)';
+    g.lineWidth = 1.2;
+    for (var i = 1; i < 5; i++) {
+      var px = -W2 + (CHEST_W / 5) * i;
+      g.beginPath(); g.moveTo(px, -bodyH + 4); g.lineTo(px, -2); g.stroke();
+    }
+    /* 木纹高光 */
+    g.strokeStyle = 'rgba(150,116,74,.22)';
+    g.lineWidth = 1;
+    for (var i2 = 0; i2 < 5; i2++) {
+      var px2 = -W2 + 4 + (CHEST_W / 5) * i2;
+      g.beginPath(); g.moveTo(px2, -bodyH + 6); g.lineTo(px2, -4); g.stroke();
+    }
+    /* 青铜包边：上下各一道 + 两侧竖条 */
+    g.fillStyle = '#8a6a3a';
+    g.fillRect(-W2, -bodyH, CHEST_W, 6);
+    g.fillRect(-W2, -8, CHEST_W, 8);
+    g.fillRect(-W2, -bodyH, 7, bodyH);
+    g.fillRect(W2 - 7, -bodyH, 7, bodyH);
+    g.fillStyle = 'rgba(214,176,106,.55)';
+    g.fillRect(-W2 + 1, -bodyH + 1, CHEST_W - 2, 1.6);
+    g.fillRect(-W2 + 1, -7, CHEST_W - 2, 1.6);
+    /* 铆钉 */
+    g.fillStyle = '#d8b46a';
+    for (var rv = 0; rv < 4; rv++) {
+      g.fillRect(-W2 + 2 + rv * (CHEST_W - 8) / 3, -bodyH + 2, 2.6, 2.6);
+      g.fillRect(-W2 + 2 + rv * (CHEST_W - 8) / 3, -6, 2.6, 2.6);
+    }
+
+    /* ---- 盖子（会随 open 转开） ---- */
+    g.save();
+    g.translate(-W2, -bodyH);
+    g.rotate(-open * 0.95);
+    var lidH = CHEST_H * 0.34;
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.quadraticCurveTo(W2, -lidH * 1.15, CHEST_W, 0);
+    g.lineTo(CHEST_W, 6);
+    g.quadraticCurveTo(W2, -lidH * 0.75, 0, 6);
+    g.closePath();
+    g.fillStyle = lin(g, 0, -lidH, 0, 6, [0, '#6a4c30', 1, '#4a3420']);
+    g.fill();
+    /* 盖上的青铜箍 */
     g.strokeStyle = '#8a6a3a';
     g.lineWidth = 3;
-    g.beginPath(); g.moveTo(-30, -28); g.quadraticCurveTo(0, -44, 30, -28); g.stroke();
-    g.beginPath(); g.moveTo(-28, -2); g.lineTo(28, -2); g.stroke();
-    g.strokeStyle = '#c9a45c';
-    g.lineWidth = 1.2;
-    g.beginPath(); g.moveTo(-30, -30); g.quadraticCurveTo(0, -46, 30, -30); g.stroke();
-    /* 锁扣 */
-    g.fillStyle = '#8a6a3a';
-    g.fillRect(-7, -26, 14, 16);
-    g.fillStyle = '#d8b46a';
-    g.fillRect(-5, -24, 10, 12);
-    /* 锁扣上的蓝符文：慢慢呼吸 */
-    var pl = 0.55 + 0.45 * Math.sin((ts || 0) / 520);
-    g.save();
-    g.globalCompositeOperation = 'lighter';
-    g.fillStyle = 'rgba(140,225,255,' + (0.55 * pl).toFixed(2) + ')';
-    g.fillRect(-1.5, -22, 3, 8);
-    g.fillRect(-4, -19, 8, 2);
     g.beginPath();
-    g.ellipse(0, -18, 16, 12, 0, 0, 7);
-    g.fillStyle = rad(g, 0, -18, 16, [0, 'rgba(120,205,255,.28)', 1, 'rgba(120,205,255,0)']);
+    g.moveTo(0, 0);
+    g.quadraticCurveTo(W2, -lidH * 1.15, CHEST_W, 0);
+    g.stroke();
+    g.strokeStyle = 'rgba(216,180,106,.6)';
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(0, -1.5);
+    g.quadraticCurveTo(W2, -lidH * 1.15 - 1.5, CHEST_W, -1.5);
+    g.stroke();
+    /* 盖上的雪 + 冰晶 */
+    g.fillStyle = 'rgba(240,250,255,.95)';
+    g.beginPath();
+    g.ellipse(W2 * 0.72, -lidH * 0.42, W2 * 0.46, 5.5, -0.06, 0, 7);
+    g.fill();
+    g.beginPath();
+    g.ellipse(W2 * 0.30, -lidH * 0.30, W2 * 0.22, 3.4, 0.1, 0, 7);
+    g.fill();
+    g.fillStyle = 'rgba(190,232,255,.75)';
+    g.beginPath();
+    g.moveTo(W2 * 1.30, -lidH * 0.10);
+    g.lineTo(W2 * 1.42, -lidH * 0.42);
+    g.lineTo(W2 * 1.50, -lidH * 0.06);
+    g.closePath();
     g.fill();
     g.restore();
-    /* 箱盖上的雪 */
-    g.fillStyle = 'rgba(244,251,255,.92)';
+
+    /* ---- 中央锁：青铜牌 + 符文锁孔 ---- */
+    var lockY = -bodyH * 0.46;
+    g.fillStyle = '#8a6a3a';
+    g.fillRect(-13, lockY - 14, 26, 30);
+    g.fillStyle = '#b8934e';
+    g.fillRect(-11, lockY - 12, 22, 26);
+    g.fillStyle = '#d8b46a';
+    g.fillRect(-11, lockY - 12, 22, 2);
+    /* 锁孔 */
+    g.fillStyle = '#1a2230';
+    g.fillRect(-2.4, lockY - 6, 4.8, 12);
     g.beginPath();
-    g.ellipse(-8, -34, 18, 4, -0.05, 0, 7);
+    g.arc(0, lockY - 8, 4.2, 0, 7);
     g.fill();
+    /* 锁孔里的蓝光（呼吸） */
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = 'rgba(150,228,255,' + (0.35 + glow * 0.45).toFixed(3) + ')';
+    g.fillRect(-1.4, lockY - 5, 2.8, 9);
     g.beginPath();
-    g.ellipse(16, -29, 10, 3, 0.1, 0, 7);
+    g.arc(0, lockY - 8, 2.6, 0, 7);
     g.fill();
+    g.restore();
+
+    /* ---- 两个星形钥匙槽（一左一右） ---- */
+    var slotY = lockY + 2;
+    [-1, 1].forEach(function (sd) {
+      var sx = sd * (W2 * 0.52);
+      g.save();
+      g.translate(sx, slotY);
+      /* 凹槽底 */
+      starPath(g, 0, 0, 9.5, 0);
+      g.fillStyle = 'rgba(12,18,28,.85)';
+      g.fill();
+      starPath(g, 0, 0, 9.5, 0);
+      g.strokeStyle = 'rgba(138,106,58,.9)';
+      g.lineWidth = 1.4;
+      g.stroke();
+      /* 插了钥匙就亮 */
+      if (keyIn) {
+        starPath(g, 0, 0, 7, 0);
+        g.fillStyle = 'rgba(160,238,255,' + (0.55 + glow * 0.40).toFixed(3) + ')';
+        g.fill();
+        g.save();
+        g.globalCompositeOperation = 'lighter';
+        g.beginPath();
+        g.ellipse(0, 0, 17, 17, 0, 0, 7);
+        g.fillStyle = rad(g, 0, 0, 17, [0, 'rgba(140,225,255,.30)', 1, 'rgba(120,200,255,0)']);
+        g.fill();
+        g.restore();
+      }
+      g.restore();
+    });
+
+    /* ---- 箱脚 ---- */
+    g.fillStyle = '#2c1e12';
+    g.fillRect(-W2 + 4, 0, 12, 4);
+    g.fillRect(W2 - 16, 0, 12, 4);
+
+    /* ---- 呼吸光 + 少量蓝色粒子（平时就很克制） ---- */
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.beginPath();
+    g.ellipse(0, lockY, 42, 26, 0, 0, 7);
+    g.fillStyle = rad(g, 0, lockY, 42, [
+      0, 'rgba(120,205,255,' + (0.10 + glow * 0.10).toFixed(3) + ')',
+      1, 'rgba(120,205,255,0)'
+    ]);
+    g.fill();
+    g.restore();
+    for (var p2 = 0; p2 < 5; p2++) {
+      var ph = ((t / 2600 + p2 * 0.2) % 1);
+      var py = -8 - ph * 54;
+      var pxx = Math.sin(ph * 5 + p2 * 2.1) * 26;
+      g.fillStyle = 'rgba(190,236,255,' + ((1 - ph) * 0.55).toFixed(2) + ')';
+      g.fillRect(pxx - 1, py - 1, 2, 2);
+    }
     g.restore();
   }
 
@@ -1961,6 +2087,39 @@ window.NorthMap = (function () {
       px(7, 6, 2, 5, '#d8b46a');
       px(7, 8, 2, 2, '#8ce1ff');
       px(3, 3, 10, 1, '#f2f9ff');
+    } else if (kind === 'map') {
+      /* 禾的地图：卷边的羊皮纸 + 一条折线 */
+      px(2, 3, 12, 10, '#d9c49a');
+      px(3, 4, 10, 8, '#efe0bd');
+      px(2, 3, 1, 10, '#b8a077');
+      px(13, 3, 1, 10, '#b8a077');
+      px(5, 6, 2, 1, '#8a7350');
+      px(7, 7, 2, 1, '#8a7350');
+      px(9, 6, 2, 1, '#8a7350');
+      px(9, 9, 2, 1, '#8a7350');
+      px(6, 10, 3, 1, '#8a7350');
+    } else if (kind === 'coat') {
+      /* 北境御寒衣：深蓝 + 白毛领 */
+      px(4, 3, 8, 3, '#e8f2fb');          // 毛领
+      px(3, 5, 10, 8, '#2f4a72');         // 衣身
+      px(6, 5, 4, 8, '#3c5c88');
+      px(7, 5, 2, 8, '#24405f');          // 门襟
+      px(3, 5, 1, 8, '#1d3350');
+      px(12, 5, 1, 8, '#1d3350');
+      px(3, 12, 3, 2, '#22405f');
+      px(10, 12, 3, 2, '#22405f');
+      px(7, 8, 2, 1, '#c9a45c');          // 扣
+      px(7, 11, 2, 1, '#c9a45c');
+    } else if (kind === 'auroraBox') {
+      /* 极光盒子：木盒 + 盒盖上一道光 */
+      px(2, 6, 12, 8, '#5a4028');
+      px(2, 5, 12, 2, '#6b4e30');
+      px(2, 5, 12, 1, '#8a6a3a');
+      px(7, 7, 2, 6, '#8a6a3a');
+      px(3, 9, 2, 2, '#3fd0b0');
+      px(5, 8, 2, 4, '#57e0c0');
+      px(9, 7, 2, 5, '#7fe6d4');
+      px(11, 10, 2, 2, '#a8f0e4');
     } else if (kind === 'key') {
       px(3, 2, 5, 5, '#c9a45c');
       px(4, 3, 3, 3, '#8ce1ff');
@@ -1968,6 +2127,262 @@ window.NorthMap = (function () {
       px(9, 11, 3, 2, '#c9a45c');
       px(9, 8, 2, 2, '#c9a45c');
     }
+    g.restore();
+  }
+
+  /* ============================================================
+   * v5.0 双人星门 / 星钥 / 最终宝箱
+   * ------------------------------------------------------------
+   * 两个星纹台（mechA / mechB）就在石门前，间距 200。
+   * 充能状态不写存档：两台设备各自用"双方的实时坐标"算，天然一致；
+   * 真正需要共享的只有「门开了」这个结果 —— 那一步走 mutate 事务。
+   * ============================================================ */
+  var GATE = {
+    a: { x: RUINS.mechA.x, y: RUINS.mechA.y },
+    b: { x: RUINS.mechB.x, y: RUINS.mechB.y },
+    arch: { x: RUINS.gate.x, y: RUINS.gate.y },
+    r: 44                       // 站到多近算"踩上去了"
+  };
+
+  /* 五角星路径（尖朝上），半径 r */
+  function starPath(g, cx, cy, r, rot) {
+    g.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var a = rot + (i / 10) * Math.PI * 2 - Math.PI / 2;
+      var rr = (i % 2 === 0) ? r : r * 0.44;
+      var px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    }
+    g.closePath();
+  }
+
+  /* 星纹台：没踩上去的时候是一圈很淡的刻纹，踩上去自下而上点亮 */
+  function drawPad(g, x, y, fill, ts, side) {
+    fill = Math.max(0, Math.min(1, fill || 0));
+    var pulse = 0.5 + 0.5 * Math.sin(ts / 480 + (side === 'a' ? 0 : 1.7));
+    g.save();
+    /* 台面 */
+    g.beginPath();
+    g.ellipse(x, y, 54, 19, 0, 0, 7);
+    g.fillStyle = 'rgba(30,44,66,.55)';
+    g.fill();
+    g.beginPath();
+    g.ellipse(x, y - 2, 50, 17, 0, 0, 7);
+    g.fillStyle = 'rgba(70,88,118,.55)';
+    g.fill();
+
+    /* 外圈刻纹 */
+    g.save();
+    g.beginPath();
+    g.ellipse(x, y - 2, 46, 15.5, 0, 0, 7);
+    g.strokeStyle = 'rgba(120,200,255,' + (0.24 + fill * 0.6).toFixed(3) + ')';
+    g.lineWidth = 2;
+    g.stroke();
+    g.restore();
+
+    /* 五角星刻纹：用 clip 让点亮"从下往上长" */
+    g.save();
+    if (fill > 0.01) {
+      g.beginPath();
+      g.rect(x - 60, y - 2 - 26 * fill, 120, 26 * fill + 4);
+      g.clip();
+    }
+    starPath(g, x, y - 3, 26, ts / 2600 * (side === 'a' ? 1 : -1));
+    g.fillStyle = 'rgba(150,228,255,' + (0.12 + fill * 0.72).toFixed(3) + ')';
+    g.fill();
+    starPath(g, x, y - 3, 26, ts / 2600 * (side === 'a' ? 1 : -1));
+    g.strokeStyle = 'rgba(210,245,255,' + (0.30 + fill * 0.6).toFixed(3) + ')';
+    g.lineWidth = 1.6;
+    g.stroke();
+    g.restore();
+
+    /* 点亮后的地面光池 */
+    if (fill > 0.02) {
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.beginPath();
+      g.ellipse(x, y, 58, 20, 0, 0, 7);
+      g.fillStyle = rad(g, x, y, 58, [
+        0, 'rgba(150,235,255,' + (0.34 * fill * (0.7 + pulse * 0.3)).toFixed(3) + ')',
+        1, 'rgba(120,200,255,0)'
+      ]);
+      g.fill();
+      g.restore();
+    }
+    g.restore();
+  }
+
+  /* 两座台之间的能量线：踩满时抽过去，带流动的光点 */
+  function drawBeam(g, ax, ay, bx, by, p, ts) {
+    if (p <= 0.01) return;
+    var N = 18;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < N; i++) {
+      var t0 = i / N, t1 = (i + 1) / N;
+      if (t1 > p) break;
+      var x0 = ax + (bx - ax) * t0, y0 = ay + (by - ay) * t0 - 3;
+      var x1 = ax + (bx - ax) * t1, y1 = ay + (by - ay) * t1 - 3;
+      var mid = (x0 + x1) / 2;
+      var wave = Math.sin(t0 * 6 + ts / 300) * 6 * Math.sin(Math.PI * t0);
+      g.beginPath();
+      g.moveTo(x0, y0 + wave);
+      g.lineTo(x1, y1 + wave);
+      g.strokeStyle = 'rgba(170,240,255,' + (0.35 + 0.35 * Math.sin(t0 * 9 - ts / 220)).toFixed(3) + ')';
+      g.lineWidth = 3.2;
+      g.stroke();
+    }
+    /* 顺流的光点 */
+    for (var k = 0; k < 4; k++) {
+      var ph = ((ts / 900 + k * 0.25) % 1) * p;
+      var px = ax + (bx - ax) * ph;
+      var py = ay + (by - ay) * ph - 3 + Math.sin(ph * 6 + ts / 300) * 6 * Math.sin(Math.PI * ph);
+      g.beginPath();
+      g.arc(px, py, 2.6, 0, 7);
+      g.fillStyle = 'rgba(230,252,255,.9)';
+      g.fill();
+    }
+    g.restore();
+  }
+
+  /* 石门的两扇门叶。open = 0 关死，1 完全打开（各自缩进旁边的石柱里）
+     —— 第一版画成了一整块浅灰板 + 一排亮横条，远看像栋亮着窗的楼。
+     现在改成：深色石面 + 错缝的石块 + 中间一道缝 + 一枚浅浅的星纹。 */
+  function drawGateDoor(g, x, y, open, ts) {
+    open = Math.max(0, Math.min(1, open || 0));
+    var gap = 96, hh = 164, leaf = gap / 2;
+    var slide = open * (leaf * 0.94);
+    var r = rnd(31);
+
+    /* 门后：先铺深色，再透出一点光 */
+    if (open > 0.02) {
+      g.beginPath();
+      g.rect(x - leaf, y - hh, gap, hh);
+      g.fillStyle = 'rgba(5,8,16,' + (0.55 + open * 0.40).toFixed(3) + ')';
+      g.fill();
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.beginPath();
+      g.ellipse(x, y - hh * 0.52, gap * 0.40 * open, hh * 0.46, 0, 0, 7);
+      g.fillStyle = rad(g, x, y - hh * 0.52, gap * 0.52, [
+        0, 'rgba(120,210,255,' + (0.26 * open).toFixed(3) + ')',
+        1, 'rgba(90,170,255,0)'
+      ]);
+      g.fill();
+      g.restore();
+    }
+
+    /* 门叶都裁在门洞里：滑开之后是被石柱挡住，而不是飘到柱子外面去 */
+    g.save();
+    g.beginPath();
+    g.rect(x - leaf, y - hh - 6, gap, hh + 8);
+    g.clip();
+
+    function one(side) {
+      g.save();
+      /* 往两侧滑：左叶往左、右叶往右 */
+      g.translate(x + side * (leaf / 2 + slide), y);
+      /* 石面 */
+      g.beginPath();
+      g.rect(-leaf / 2, -hh, leaf, hh);
+      g.fillStyle = lin(g, -leaf / 2, -hh, leaf / 2, 0, [0, '#3c4a66', 0.45, '#323e58', 1, '#242e44']);
+      g.fill();
+
+      /* 错缝石块：横四行，每行错开半块 */
+      g.strokeStyle = 'rgba(14,20,32,.42)';
+      g.lineWidth = 1.1;
+      var rows = 5;
+      for (var i = 1; i < rows; i++) {
+        var yy = -hh + (hh / rows) * i;
+        g.beginPath(); g.moveTo(-leaf / 2, yy); g.lineTo(leaf / 2, yy); g.stroke();
+      }
+      for (var j = 0; j < rows; j++) {
+        var yy0 = -hh + (hh / rows) * j;
+        var off = (j % 2) ? leaf * 0.16 : -leaf * 0.16;
+        g.beginPath();
+        g.moveTo(off, yy0);
+        g.lineTo(off, yy0 + hh / rows);
+        g.stroke();
+      }
+      /* 石面上的高光边（左上受光） */
+      g.strokeStyle = 'rgba(150,176,206,.16)';
+      g.lineWidth = 1.4;
+      g.beginPath();
+      g.moveTo(-leaf / 2 + 1, 0);
+      g.lineTo(-leaf / 2 + 1, -hh);
+      g.stroke();
+
+      /* 阴刻星纹：很浅，只在光里能看见 */
+      g.save();
+      g.translate(0, -hh * 0.52);
+      starPath(g, 0, 0, leaf * 0.26, 0);
+      g.strokeStyle = 'rgba(120,180,230,' + (0.14 * (1 - open)).toFixed(3) + ')';
+      g.lineWidth = 1.4;
+      g.stroke();
+      g.restore();
+
+      /* 三处小符文刻痕 */
+      for (var r2 = 0; r2 < 3; r2++) {
+        var ry = -hh * (0.18 + r2 * 0.22);
+        var lit = (1 - open) * (0.18 + 0.10 * Math.sin((ts || 0) / 900 + r2 + side));
+        g.fillStyle = 'rgba(130,205,245,' + lit.toFixed(3) + ')';
+        g.fillRect(-leaf * 0.10, ry, leaf * 0.20, 2);
+      }
+
+      /* 顶部积雪 */
+      g.fillStyle = 'rgba(238,248,255,.92)';
+      g.fillRect(-leaf / 2, -hh - 3, leaf, 4);
+      g.fillStyle = 'rgba(255,255,255,.55)';
+      g.fillRect(-leaf / 2, -hh + 1, leaf, 1.4);
+      g.restore();
+    }
+    one(-1); one(1);
+    g.restore();
+
+    /* 门缝：关着的时候是一道暗线，打开过程中变成一道光 */
+    if (open < 0.98) {
+      var seamA = (1 - open) * 0.5;
+      g.beginPath();
+      g.rect(x - 1 - seamA, y - hh, 2 + seamA * 2, hh);
+      g.fillStyle = open > 0.02
+        ? 'rgba(150,230,255,' + (0.18 + open * 0.5).toFixed(3) + ')'
+        : 'rgba(16,22,34,.55)';
+      g.fill();
+    }
+  }
+
+  /* 星钥：开门口浮在门前，捡走之前一直在转 */
+  function drawKey(g, x, y, ts) {
+    var bob = Math.sin(ts / 620) * 4;
+    g.save();
+    g.translate(x, y + bob);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.beginPath();
+    g.ellipse(0, 0, 34, 34, 0, 0, 7);
+    g.fillStyle = rad(g, 0, 0, 34, [0, 'rgba(140,225,255,.34)', 1, 'rgba(120,200,255,0)']);
+    g.fill();
+    g.restore();
+    g.rotate(Math.sin(ts / 1400) * 0.28);
+    /* 钥匙本体：环 + 杆 + 齿，中心嵌一颗星 */
+    g.strokeStyle = '#c9a45c';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.arc(0, -12, 9, 0, 7);
+    g.stroke();
+    g.strokeStyle = '#8ce1ff';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(0, -12, 9, 0, 7);
+    g.stroke();
+    g.fillStyle = '#c9a45c';
+    g.fillRect(-2.4, -4, 4.8, 24);
+    g.fillRect(2.4, 12, 8, 3.4);
+    g.fillRect(2.4, 18, 6, 3.4);
+    /* 环里的小星星 */
+    starPath(g, 0, -12, 5, ts / 900);
+    g.fillStyle = '#eafcff';
+    g.fill();
     g.restore();
   }
 
@@ -2012,7 +2427,14 @@ window.NorthMap = (function () {
     chest: CHEST,
     drawPit: drawPit,
     drawChest: drawChest,
-    drawIcon: drawIcon
+    drawIcon: drawIcon,
+    /* v5.0 */
+    gate: GATE,
+    drawPad: drawPad,
+    drawBeam: drawBeam,
+    drawGateDoor: drawGateDoor,
+    drawKey: drawKey,
+    starPath: starPath
   };
 
   return MAP;

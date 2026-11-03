@@ -92,6 +92,10 @@ window.TownLife = (function () {
   /* ============================================================
    * 2. 状态
    * ============================================================ */
+  /* v5.0：极夜时把小镇的灯整体压暗（1 = 正常）。
+     只影响看得见的光，不参与任何逻辑判定 —— 昼夜相位、天气都照旧。 */
+  var storyDim = 1;
+
   var st = {
     ready: false,
     vt: 0,                 // 平滑后的虚拟一天位置 0..1
@@ -934,11 +938,11 @@ window.TownLife = (function () {
       if (W.tree && stage >= 1) {
         /* 光落在树脚下那圈雪地上，而不是打在树身上——打在树上会把树照成一片惨白 */
         var tr = 96 + stage * 16;
-        glow(ctx, W.tree.x, W.tree.y + 16, tr, (0.08 + stage * 0.030) * (0.50 + night * 0.55));
+        glow(ctx, W.tree.x, W.tree.y + 16, tr, (0.08 + stage * 0.030) * (0.50 + night * 0.55) * storyDim);
         /* 树身上只补一层很淡的暖雾：环境光把整棵树压暗了，这里把它「抬」回一点点，
            让点亮的树在夜里仍然是主角，但不至于糊成一团白。 */
-        glow(ctx, W.tree.x, W.tree.y - 100, 104 + stage * 12, (0.05 + stage * 0.020) * night);
-        drawTreeLights(ctx, W.tree, stage, night);
+        glow(ctx, W.tree.x, W.tree.y - 100, 104 + stage * 12, (0.05 + stage * 0.020) * night * storyDim);
+        drawTreeLights(ctx, W.tree, stage, night * storyDim);
       }
 
       /* 自己脚下：夜里不至于看不见自己 */
@@ -1167,7 +1171,7 @@ window.TownLife = (function () {
   }
 
   return {
-    version: '4.10.1',
+    version: '5.1.0',
     tick: tick,
     drawFootprints: drawFootprints,
     drawBuildingLife: drawBuildingLife,
@@ -1181,6 +1185,7 @@ window.TownLife = (function () {
     drawTreeHalo: drawTreeHalo,
     coupleView: coupleView,
     snapshot: snapshot,
+    setStoryDim: function (v) { storyDim = (typeof v === 'number' && v >= 0 && v <= 1) ? v : 1; },
     setClock: setClock,
     releaseClock: releaseClock,
     setWeather: setWeather,

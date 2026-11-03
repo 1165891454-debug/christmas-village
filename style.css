@@ -1404,3 +1404,15 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
   -webkit-appearance: none; appearance: none;
 }
 .admin-select:focus { outline: 1px solid rgba(140,200,255,.6); }
+
+/* ---------- v5.0 剧情演出画布 ---------- */
+#cine {
+  position: fixed; inset: 0; z-index: 63;
+  width: 100vw; height: 100vh;
+  background: #02040a;
+  opacity: 0;
+  transition: opacity .9s ease;
+  pointer-events: none;
+}
+#cine.on { opacity: 1; }
+#cine.show { opacity: 1; }

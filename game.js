@@ -84,7 +84,8 @@ window.Game = (function () {
     parts: [], interId: null, outdoorPos: null,
     adminGuardUntil: 0, mapId: null, mapReturn: null, spots: {}, photoOpt: null,
     portalFx: null, traveling: false, adminForcePortal: false, dig: null, camFocus: null,
-    northTestBusy: false,
+    northTestBusy: false, gateCharge: 0, gateHintAt: 0, gateLastT: 0, gateOpenFx: 0,
+    cineBusy: false, storySaid: {},
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -2028,6 +2029,11 @@ window.Game = (function () {
       var o = list[i];
       if (bx < o.x + o.w && bx + bw > o.x && by < o.y + o.h && by + bh > o.y) return true;
     }
+    /* v5.1：纪念雕塑的台基是实心的（只站在它出现之后才算），
+       否则玩家会"站在碑里"，两个人叠在一起很难看。 */
+    if (!inter && !mp && memoVisible()) {
+      if (bx < MEMO.x + 30 && bx + bw > MEMO.x - 30 && by < MEMO.y - 1 && by + bh > MEMO.y - 16) return true;
+    }
     return false;
   }
 
@@ -2183,6 +2189,7 @@ window.Game = (function () {
     autoPickEggs();
     updateQuest();
     maybeOpenNorth();
+    maybeSunriseAuto();
 
     /* ---- v4.5：树点亮之后不再自动播结局 ----
      * 以前这里是 startEnding()：树一满、任务一到，整段 15 句对白自己就开演了。
@@ -2201,6 +2208,8 @@ window.Game = (function () {
           : '✨ 树已经全亮了！和 ' + NAME[S.otherSlot] + ' 一起到圣诞老人跟前，跟他说一声「开 Party 吧」。', 5600);
       }
     }
+
+    if (S.mapId === NORTH_ID) northGateTick(dt);
 
     S.curInteract = findInteract();
 
@@ -4619,8 +4628,19 @@ window.Game = (function () {
         }
         if (ndi.chest && NorthMap.chest) {
           consider('northChest', NorthMap.chest.x, NorthMap.chest.y, 76,
-            ndi.opened ? '🧰 看看打开的箱子' : '🔓 试着打开箱子', NorthMap.chest);
+            ndi.opened ? '🧰 看看打开的箱子'
+              : (ndi.key ? '🔓 用星钥开箱' : '🔓 试着打开箱子'), NorthMap.chest);
         }
+        /* v5.0：星门开了之后，门缝里浮着一把星钥，要自己走过去拿 */
+        if (ndi.gateOpen && !ndi.key && NorthMap.gate) {
+          consider('northKey', NorthMap.gate.arch.x, NorthMap.gate.arch.y - 20, 96,
+            '🗝 取下星钥', NorthMap.gate.arch);
+        }
+      }
+      /* v5.0：带着极光盒子到冰岛，在湖边把它打开 */
+      if (mp.id === 'iceland' && northHas('auroraBox') && !northHas('auroraDone')) {
+        consider('auroraBox', AURORA_SPOT.x, AURORA_SPOT.y, AURORA_SPOT.r,
+          '🌌 把极光盒子放在冰上', AURORA_SPOT);
       }
       consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, mp.exitLabel || '🚉 回小镇', mp.exitPos);
       if (S.remote.seen && S.remote.inter === hereKey()) {
@@ -4647,6 +4667,10 @@ window.Game = (function () {
       consider('door', dr.x, dr.y, 78, enterable ? ('🚪 进入 ' + dr.name) : ('👀 ' + dr.name), dr);
     });
     consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
+    /* v5.1：北境纪念雕塑 —— 走近才能读铭牌，不占任务、不给道具 */
+    if (memoVisible()) {
+      consider('memo', MEMO.x, MEMO.y + 6, MEMO_R, '📖 读一读纪念碑', MEMO);
+    }
     /* v4.9.0：小镇北边林子里的那道符文门（章节 + 夜晚解锁，开过就一直在） */
     if (northOpen()) {
       consider('northPortal', NORTH_PORTAL.x, NORTH_PORTAL.y + 34, NORTH_PORTAL.r,
@@ -4729,7 +4753,29 @@ window.Game = (function () {
       var commLine = null;
       try { commLine = talkComm(it.ref.id); } catch (e) { if (window.console) console.warn('[comm]', it.ref.id, e); }
       var first = pool[idx % pool.length];
-      openDialog(it.ref.name, commLine ? [first, commLine] : [first]);
+      /* v5.0：这一阶段专属的一句 —— 只在第一次对话时出现，之后回到日常。
+         不把它做成"必读"，玩家想跳过也随时能跳过。 */
+      var storyLine = null;
+      try {
+        if (window.Story) {
+          var sKey = it.ref.id + ':' + storyTalkStage();
+          if (!S.storySaid) S.storySaid = {};
+          if (!S.storySaid[sKey]) {
+            var sl = Story.npcLines(it.ref.id, storyTalkStage());
+            if (sl && sl.length) {
+              storyLine = sl[Math.floor(Math.random() * sl.length)];
+              S.storySaid[sKey] = 1;
+            }
+          }
+        }
+      } catch (e) { }
+      /* 顺序很重要：有委托交付时，委托那句必须还是第二句
+         （玩家点两下就要看到"交付完成"，不能让剧情台词把它挤到第三句）。 */
+      var dlg;
+      if (commLine) dlg = [first, commLine];
+      else if (storyLine) dlg = [storyLine, first];
+      else dlg = [first];
+      openDialog(it.ref.name, dlg);
       S.npcIdx[it.ref.id] = idx + 1;
       if (!S.quest.talked[it.ref.id]) {
         S.quest.talked[it.ref.id] = 1;
@@ -4737,10 +4783,16 @@ window.Game = (function () {
       }
     } else if (it.type === 'northPortal') {
       northPortalEnter();
+    } else if (it.type === 'memo') {
+      readMemorial();
     } else if (it.type === 'station') {
       openStationPanel();
     } else if (it.type === 'northDig') {
       startDig(it.ref);
+    } else if (it.type === 'auroraBox') {
+      useAuroraBox();
+    } else if (it.type === 'northKey') {
+      takeNorthKey();
     } else if (it.type === 'northSled') {
       lookSled();
     } else if (it.type === 'northLetter') {
@@ -4946,6 +4998,13 @@ window.Game = (function () {
   function ticketCondMet(id) {
     var tk = ticketOf(id);
     if (!tk || !tk.cond || !tk.cond.length) return false;
+    /* ★ v5.1 剧情校准：冰岛票是「剧情票」，不是「条件票」。
+       基础条件（4 个地方 / 树第 6 阶 / 14 段回忆）只代表**有资格**，
+       真正发车票要等北境宝箱开了、拿到禾的地图 ——
+       地图告诉你们该往哪儿走，车站才会多出这一张。
+       顺序：基础条件齐 → 极夜 → 北境 → 宝箱 → 车票 → 冰岛 → 极光。
+       老存档里已经发出去的票不收回（见 hasTicket：存档里有就是有）。 */
+    if (id === 'iceland' && !northMapGot()) return false;
     var i;
     if (tk.all) {
       for (i = 0; i < tk.cond.length; i++) if (!condMet(tk.cond[i])) return false;
@@ -5431,20 +5490,31 @@ window.Game = (function () {
     { level: 1, name: '传送门已开' },
     { level: 2, name: '已拿到雪铲' },
     { level: 3, name: '四个挖掘点已挖' },
-    { level: 4, name: '宝箱已挖出' },
-    { level: 5, name: '宝箱已开启（v5.0）' }
+    { level: 4, name: '最终宝箱已挖出' },
+    { level: 5, name: '双人星门已开 + 星钥' },
+    { level: 6, name: '宝箱已开启（三件奖励）' },
+    { level: 7, name: '去过冰岛（带着极光盒子）' },
+    { level: 8, name: '极光演出完成' },
+    { level: 9, name: '小镇恢复光明' },
+    { level: 10, name: '最终圣诞筹备' }
   ];
 
   /* 从真实字段**反推**当前隐藏任务走到第几章（0 = 还没开始） */
   function northQuestStage() {
     var n = northData();
-    if (!n || !n.open) return 0;
-    if (n.opened || n.key) return 5;
+    var w = curWorld() || {};
+    if (w.finalPrep) return 10;
+    if (n.revived) return 9;
+    if (n.auroraDone) return 8;
+    if (n.auroraBox && w.travel && w.travel.iceland) return 7;
+    if (n.opened) return 6;
+    if (n.gateOpen) return 5;
     if (n.chest) return 4;
     var d = n.digs || {};
     if (d.soft && d.stone && d.dull && d.prints) return 3;
     if (n.shovel) return 2;
-    return 1;
+    if (n.open) return 1;
+    return 0;
   }
   function northStageName(lv) {
     if (!lv) return '还没开始（0）';
@@ -5476,7 +5546,7 @@ window.Game = (function () {
 
   function adminNorthSkip(level) {
     if (!devOrAdmin()) return;
-    level = Math.max(1, Math.min(5, Math.floor(Number(level) || 5)));
+    level = Math.max(1, Math.min(10, Math.floor(Number(level) || 10)));
     if (S.northTestBusy) return;
     S.northTestBusy = true;
     var now = Date.now();
@@ -5504,7 +5574,22 @@ window.Game = (function () {
         if (!n.digs.treasure) n.digs.treasure = now;
         if (!n.chest) n.chest = now;
       }
-      if (level >= 5) { n.opened = true; n.key = n.key || now; }
+      if (level >= 5) { n.gateOpen = n.gateOpen || now; n.key = n.key || now; }
+      if (level >= 6) {
+        n.opened = n.opened || now;
+        n.map = n.map || now;
+        n.coat = n.coat || now;
+        n.auroraBox = n.auroraBox || now;
+      }
+      if (level >= 7) {
+        w.tickets = w.tickets || {};
+        if (!w.tickets.iceland) w.tickets.iceland = now;
+        w.travel = w.travel || {};
+        if (!w.travel.iceland) w.travel.iceland = now;
+      }
+      if (level >= 8) { n.auroraDone = n.auroraDone || now; n.completed = n.completed || now; }
+      if (level >= 9) { n.revived = n.revived || now; }
+      if (level >= 10) { w.finalPrep = w.finalPrep || now; }
       w.northTest.level = level;
       w.northTest.at = now;
       return w;
@@ -6254,12 +6339,16 @@ window.Game = (function () {
     var n = northState();
     return !!(n && n.open);
   }
-  /* 夜里 + 章节够 → 开一次门（写进共享存档，两台设备同时看到） */
+  /* 夜里 + 章节够 + 基础条件齐 → 开一次门（写进共享存档，两台设备同时看到）
+     v5.1：加上了「冰岛基础条件」这道前置。剧情顺序是
+       基础条件齐 → 极夜开始 → NPC 发现异常 → 北境入口出现，
+     所以不能让一个还没走完前八章的存档提前看见门。 */
   function maybeOpenNorth() {
     if (northAlwaysOn()) return;            // 测试期不写存档，保证进度干净
     if (northOpen()) return;
     if (S.mapId || S.interId || S.ending) return;      // 只在镇上判断
-    if ((chapterNo() || 0) < NORTH_GATE && ((curWorld() || {}).chapter || 0) < NORTH_GATE) return;
+    if (((curWorld() || {}).chapter || 0) < NORTH_GATE) return;
+    if (!iceStoryReady()) return;            // 基础条件没齐，极夜都还没开始
     var st = window.TownLife && TownLife.snapshot ? TownLife.snapshot() : null;
     if (!st || st.phase !== 'night') return;
     if (S.northTrying) return;
@@ -6361,6 +6450,46 @@ window.Game = (function () {
    *   north.key     北境星钥（v5.0 用）
    * 所有写操作都走 mutate（world 事务），所以两个人不会重复领同一份。
    * ============================================================ */
+  /* 径向渐变助手（v5.0 新增的两处绘制都要用；game.js 里原本没有） */
+  function rad(g, x, y, r, stops) {
+    var gr = g.createRadialGradient(x, y, 0, x, y, r);
+    for (var i = 0; i < stops.length; i += 2) gr.addColorStop(stops[i], stops[i + 1]);
+    return gr;
+  }
+
+  /* ---------- v5.0 剧情：阶段与极夜 ----------
+     v5.1 校准：阶段 / 极夜 / 台词档位全部交给 story.js 从 world 推导。
+     这里只做三件事：取当前存档、取当前阶段、把「基础条件是否满足」问出来。
+     不新增任何章节字段 —— 极夜不是开关，是浓度。 */
+  function storyStage() {
+    if (!window.Story) return 0;
+    return window.Story.stageOf(curWorld() || {});
+  }
+  function polarLevel() {
+    if (!window.Story) return 0;
+    return window.Story.polarOf(curWorld() || {});
+  }
+  /* NPC 剧情台词档位：-1 = 现在还没有剧情台词（保持第 1~8 章的日常） */
+  function storyTalkStage() {
+    if (!window.Story) return -1;
+    return window.Story.talkStageOf(curWorld() || {});
+  }
+  /* 冰岛基础条件（4 个地方 / 树第 6 阶 / 14 段回忆）—— 原有的三个条件，一个没改 */
+  function iceBaseReady() {
+    if (!window.Story) return false;
+    return window.Story.baseReady(curWorld() || {});
+  }
+  /* 极夜该不该开始：基础条件 + 剧情章节 */
+  function iceStoryReady() {
+    if (!window.Story) return false;
+    return window.Story.storyReady(curWorld() || {});
+  }
+  /* 禾的地图到手没有：冰岛车票的剧情闸门 */
+  function northMapGot() {
+    var n = northData();
+    return !!(n && n.map);
+  }
+
   function northData() { return northState() || {}; }
   function northHas(key) { var n = northData(); return !!(n && n[key]); }
   function northDug(id) { var n = northData(); return !!(n && n.digs && n.digs[id]); }
@@ -6448,6 +6577,95 @@ window.Game = (function () {
     }
   }
 
+  /* ============================================================
+   * v5.0 双人星门
+   * ------------------------------------------------------------
+   * 规则（和用户的设定一一对应）：
+   *   · 两个人分别站到左右两块星纹上，站稳（不能走动）
+   *   · 持续 2 秒，符文自下而上点亮，两座台之间抽出能量线
+   *   · 中途任何一人走开 → 充能立刻停止并慢慢退回
+   *   · 充满之后写一次共享存档（gateOpen + 星钥），事务保证只发一次
+   *   · 开门是永久的，不需要重复踩
+   *
+   * 为什么充能值不写 Firebase：
+   *   两台设备都能从"双方同步过来的坐标"独立算出同一个充能进度，
+   *   每帧写共享存档既没必要也会把数据库打爆。真正必须共享的是**结果**，
+   *   那一步走 mutate 事务，所以不会重复发放。
+   * ============================================================ */
+  var GATE_MS = 2000;                   // 需要站稳多久
+
+  function gatePadOf(x, y) {
+    var g = window.NorthMap && NorthMap.gate;
+    if (!g) return null;
+    var da = Math.sqrt(Math.pow(x - g.a.x, 2) + Math.pow(y - g.a.y, 2));
+    var db = Math.sqrt(Math.pow(x - g.b.x, 2) + Math.pow(y - g.b.y, 2));
+    if (da <= g.r) return { id: 'a', d: da };
+    if (db <= g.r) return { id: 'b', d: db };
+    return null;
+  }
+
+  function northGateTick(dt) {
+    if (!S.gateCharge) S.gateCharge = 0;
+    /* 已经开过：不再充能（但门保持开着） */
+    if (northHas('gateOpen')) { S.gateCharge = 0; return; }
+
+    var mine = gatePadOf(S.self.x, S.self.y);
+    var iStand = !!mine && !S.self.moving;
+    var oStand = false, other = null;
+    if (S.remote.seen && S.remote.inter === NORTH_ID) {
+      other = gatePadOf(S.remote.x, S.remote.y);
+      oStand = !!other && !S.remote.moving;
+    }
+
+    /* 两个人在**不同的**台子上才算 */
+    var ok = iStand && oStand && mine.id !== other.id;
+
+    if (ok) {
+      var before = S.gateCharge;
+      S.gateCharge = Math.min(1, S.gateCharge + dt * 1000 / GATE_MS);
+      /* 第一次踩上来给一句提示，别让人猜 */
+      if (before < 0.02 && Date.now() - (S.gateHintAt || 0) > 6000) {
+        S.gateHintAt = Date.now();
+        toast('⭐ 两边都亮着 —— 别动，等它充满', 3000);
+      }
+      if (S.gateCharge >= 1) openNorthGate();
+    } else {
+      /* 走了就退，但不瞬间清零：给一点容错，网络抖一下不至于白站 */
+      S.gateCharge = Math.max(0, S.gateCharge - dt * 0.85);
+    }
+  }
+
+  function openNorthGate() {
+    if (S.gateOpening) return;
+    if (northHas('gateOpen')) return;
+    S.gateOpening = true;
+    S.gateCharge = 1;
+    try { Snd.sfx('spark'); } catch (e) { }
+    mutate(function (w) {
+      w.north = w.north || {};
+      if (w.north.gateOpen) return undefined;      // 对方先一步开过了
+      w.north.gateOpen = Date.now();
+      return w;
+    }).then(function (ok) {
+      S.gateOpening = false;
+      if (!ok) { S.gateCharge = 0; return; }
+      S.gateOpenFx = Date.now();
+      toast('🗝 门开了。门缝里浮出一样东西。', 5200);
+      logAdmin('北境双人星门', 'gateOpen', null, null, true);
+      var arch = (window.NorthMap && NorthMap.gate) ? NorthMap.gate.arch : { x: S.self.x, y: S.self.y };
+      S.camFocus = { x: arch.x, y: arch.y - 40, until: Date.now() + 2200 };
+    }, function () {
+      S.gateOpening = false;
+    });
+  }
+
+  /* 门开进度 0~1：用共享的时间戳算，谁看到都一样 */
+  function gateOpenAmt() {
+    var n = northData();
+    if (!n || !n.gateOpen) return 0;
+    return Math.min(1, (Date.now() - n.gateOpen) / 2400);
+  }
+
   /* ---------- 那封信 ---------- */
   var LETTER_LINES = [
     '信纸脆得像干叶子，一碰就掉渣。字迹是铅笔写的，很轻：',
@@ -6490,16 +6708,135 @@ window.Game = (function () {
     ]);
   }
 
+  /* ---------- 最终宝箱：开启演出 ----------
+     3.6 秒，分五段：
+       0.0~0.9  锁孔与两道星槽依次亮起
+       0.9~1.6  箱子震动、光从缝里漏出来
+       1.6~2.4  锁扣弹开，盖子转开
+       2.4~3.2  箱内白光溢出、三样东西浮起来
+       3.2~3.6  收尾，镜头停一下
+     期间 pause()，玩家不会乱走；结束才写共享存档（保证只发一次）。 */
+  var CHEST_FX_MS = 3600;
+  function chestOpenAmt() {
+    if (!S.chestFx) return 0;
+    var t = (Date.now() - S.chestFx.t0) / CHEST_FX_MS;
+    return Math.max(0, Math.min(1, (t - 0.30) / 0.32));
+  }
+
+  function drawChestFlash(ctx, x, y, ts) {
+    var t = (Date.now() - S.chestFx.t0) / CHEST_FX_MS;
+    if (t < 0.18 || t > 0.95) return;
+    var a = Math.sin(Math.min(1, (t - 0.18) / 0.77) * Math.PI);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath();
+    ctx.ellipse(x, y - 46, 150 * a + 40, 110 * a + 30, 0, 0, 7);
+    ctx.fillStyle = rad(ctx, x, y - 46, 170, [
+      0, 'rgba(236,252,255,' + (0.34 * a).toFixed(3) + ')',
+      0.5, 'rgba(150,225,255,' + (0.16 * a).toFixed(3) + ')',
+      1, 'rgba(120,200,255,0)'
+    ]);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function openChestTry() {
     if (!northHas('chest')) return;
-    if (northHas('opened')) { openDialog('🧰 宝箱', ['箱子已经开了。']); return; }
-    openDialog('🧰 古老宝箱', [
-      '你伸手去抬箱盖。铜扣纹丝不动。',
-      '锁扣上那道蓝光忽然亮了一下，又慢慢暗回去 —— 像是认得你，却不打算让开。',
-      '箱盖上有一对凹进去的星形槽，一左一右，隔着同样的距离。',
-      '……好像还缺少一把钥匙。'
-    ]);
+    if (northHas('opened')) {
+      openDialog('🧰 古老宝箱', [
+        '箱子已经开了。里面空了，只剩下衬里的旧绒布。',
+        '盖子上那两颗星还亮着，很淡。'
+      ]);
+      return;
+    }
+    if (!northHas('key')) {
+      openDialog('🧰 古老宝箱', [
+        '你伸手去抬箱盖。铜扣纹丝不动。',
+        '锁扣上那道蓝光忽然亮了一下，又慢慢暗回去 —— 像是认得你，却不打算让开。',
+        '箱盖上有一对凹进去的星形槽，一左一右，隔着同样的距离。',
+        '……好像还缺少一把钥匙。'
+      ]);
+      return;
+    }
+    if (S.chestFx) return;
+    S.chestFx = { t0: Date.now() };
+    pause();
+    try { Snd.sfx('spark'); } catch (e) { }
+    S.camFocus = { x: NorthMap.chest.x, y: NorthMap.chest.y - 20, until: Date.now() + CHEST_FX_MS + 600 };
+    setTimeout(finishChestOpen, CHEST_FX_MS);
   }
+
+  function finishChestOpen() {
+    S.chestFx = null;
+    var now = Date.now();
+    var got = false;
+    mutate(function (w) {
+      w.north = w.north || {};
+      if (w.north.opened) return undefined;      // 对方先开过了 —— 奖励只发一次
+      w.north.opened = now;
+      if (!w.north.map) w.north.map = now;
+      if (!w.north.coat) w.north.coat = now;
+      if (!w.north.auroraBox) w.north.auroraBox = now;
+      got = true;
+      return w;
+    }).then(function (ok) {
+      refreshHUD();
+      if (!ok || !got) {
+        openDialog('🧰 古老宝箱', ['箱子已经开了 —— 是' + name2() + '先一步打开的。']);
+        return;
+      }
+      try { Snd.sfx('craft'); } catch (e) { }
+      showItemGet('map', '禾的地图', '边角标着比北境更北的地方');
+      setTimeout(function () { showItemGet('coat', '北境御寒衣', '穿上它，风就咬不动你了'); }, 1400);
+      setTimeout(function () { showItemGet('auroraBox', '极光盒子', '盒盖上刻着一道光'); }, 2800);
+      setTimeout(function () {
+        openDialog('🧰 箱子里', [
+          '箱盖打开的那一下，没有声音。',
+          '里面没有金币，也没有珠宝 —— 三样东西，摆得整整齐齐，像是有人临走前特意放好的。',
+          '一张卷起来的地图，边角画着比北境更北的地方，墨迹被呵气洇开过。',
+          '一件叠好的厚外套，领口缝着一圈白毛，还带着一点点松木味。',
+          '还有一个巴掌大的木盒。盒盖上刻着一道光，从底一直划到顶。',
+          '地图背面有一行小字：「光不是消失了。它只是退回它来的地方。」'
+        ]);
+        /* v5.1：地图指向的下一站 —— 车站的冰岛票就是在这一刻正式解锁的 */
+        if (hasTicket('iceland')) {
+          syncTickets();
+          setTimeout(function () {
+            toast('🎫 地图指向正北 —— 车站多了一张「北境之票」', 5600);
+            try { Snd.sfx('ding'); } catch (e) { }
+          }, 900);
+        } else {
+          setTimeout(function () {
+            toast('🗺️ 地图指向正北，可那趟车还没开 —— 先把镇上的日子再走远一点', 6000);
+          }, 900);
+        }
+      }, 4200);
+    }, function () {
+      toast('⚠️ 开箱没写进存档，再试一次', 3000);
+    });
+  }
+
+  /* ---------- 星钥 ---------- */
+  function takeNorthKey() {
+    if (northHas('key')) return;
+    mutate(function (w) {
+      w.north = w.north || {};
+      if (w.north.key) return undefined;
+      w.north.key = Date.now();
+      return w;
+    }).then(function (ok) {
+      if (!ok) return;
+      try { Snd.sfx('craft'); } catch (e) { }
+      showItemGet('key', '北境星钥', '钥齿是一颗星 · 宝箱在等它');
+      openDialog('🗝 北境星钥', [
+        '钥匙从门缝里浮出来，落进你手心的时候还是温的。',
+        '钥齿是一颗五角星 —— 和宝箱盖上那两个凹槽，一模一样。',
+        name2() + '说：「他连钥匙都留在这儿了……是笃定会有人来。」'
+      ]);
+      refreshHUD();
+    }, function () { });
+  }
+  function name2() { return NAME[S.otherSlot] || '同伴'; }
 
   /* ---------- 雪铲：和木匠换 ---------- */
   var SHOVEL_NEED = { wood: 8, materials: 2 };
@@ -6556,6 +6893,411 @@ window.Game = (function () {
       openDialog(npc.name, ['「刚才那一下没谈成，回头再说。」']);
     });
     return true;
+  }
+
+  /* ============================================================
+   * v5.0 演出：冰岛极光 / 小镇天亮
+   * ------------------------------------------------------------
+   * 一块全屏 canvas（#cine）+ 一个 rAF 循环，和游戏渲染完全分开：
+   *   · 期间 pause()，玩家不会在黑屏里乱走
+   *   · 静态层（星野 / 山脊 / 冰湖）在 story.js 里烘过，每帧只画极光
+   *   · 结束才写共享存档，所以两个人一起看也只记一次
+   * ============================================================ */
+  var AURORA_SPOT = { x: 1240, y: 1004, r: 104 };
+  var cineRun = null;
+
+  function runCine(kind, seconds, onDone) {
+    var cv = $('#cine');
+    if (!cv || !cv.getContext || !window.Story) { if (onDone) onDone(); return; }
+    var ctx2 = cv.getContext('2d');
+    if (!ctx2) { if (onDone) onDone(); return; }
+    var w = Math.max(320, window.innerWidth || 390);
+    var h = Math.max(320, window.innerHeight || 844);
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    pause();
+    cv.classList.remove('hidden');
+    requestAnimationFrame(function () { cv.classList.add('on'); });
+    var t0 = performance.now();
+    var total = seconds * 1000;
+    if (cineRun) cancelAnimationFrame(cineRun);
+    function frame(now) {
+      var t = (now - t0) / 1000;
+      /* v5.1：进度改成线性（t / 总时长），
+         因为演出现在是五段式：前奏、开盒、第一道光、高潮、定格，
+         每段的时长比例写在 story.js 里，这里只负责把时间喂进去。 */
+      var p = Math.min(1, t / seconds);
+      try {
+        if (kind === 'aurora') Story.drawAurora(ctx2, w, h, t, p);
+        else Story.drawSunrise(ctx2, w, h, t, p);
+      } catch (e) { if (window.console) console.warn('[cine]', e); }
+      if (now - t0 < total) { cineRun = requestAnimationFrame(frame); return; }
+      cineRun = null;
+      cv.classList.remove('on');
+      setTimeout(function () {
+        cv.classList.add('hidden');
+        unpause();
+        if (onDone) onDone();
+      }, 900);
+    }
+    cineRun = requestAnimationFrame(frame);
+  }
+
+  /* ---------- 冰岛：打开极光盒子 ---------- */
+  function canUseAuroraBox() {
+    if (!northHas('auroraBox')) return false;
+    if (northHas('auroraDone')) return false;
+    if (S.mapId !== 'iceland') return false;
+    return true;
+  }
+  function partnerNear(px, py, r) {
+    if (!S.remote.seen || S.remote.inter !== S.mapId) return false;
+    var d = Math.sqrt(Math.pow(S.remote.x - px, 2) + Math.pow(S.remote.y - py, 2));
+    return d <= (r || 150);
+  }
+  function useAuroraBox() {
+    if (!canUseAuroraBox() || S.cineBusy) return;
+    if (!partnerNear(AURORA_SPOT.x, AURORA_SPOT.y, 170)) {
+      openDialog('🌌 极光盒子', [
+        '盒子在手里微微发烫，像是知道到地方了。',
+        '……可这件事，一个人做不完。',
+        '得等' + name2() + '站到旁边来。'
+      ]);
+      return;
+    }
+    S.cineBusy = true;
+    closeAllPanelsSilent();
+    pause();
+    openDialog('🌌 极光盒子', [
+      '你把盒子放在冰面上。它没有落地，浮在一寸高的地方。',
+      '盒盖上的那道光，从底端开始亮起来。',
+      name2() + '退开半步，又伸手抓住了你的袖子。'
+    ]);
+    var go = function () {
+      runCine('aurora', (window.Story && Story.AURORA_SECONDS) || 26, function () {
+        var now = Date.now();
+        mutate(function (w) {
+          w.north = w.north || {};
+          if (w.north.auroraDone) return undefined;
+          w.north.auroraDone = now;
+          w.north.completed = now;
+          return w;
+        }).then(function (ok) {
+          S.cineBusy = false;
+          refreshHUD();
+          logAdmin('冰岛极光演出', 'auroraDone', null, null, !!ok);
+          openDialog('🌌', [
+            '光是往上走的。先是一缕，然后是一片。',
+            '整片天都在动 —— 绿色压在蓝色下面，紫色从边上漫过来，像有人在天上翻一床被子。',
+            '冰面把它们全收进去了，连褶皱都没漏。',
+            name2() + '说：「……他当年，是不是也看到了这个？」',
+            '你说：「他看到了。只是他没来得及带回去。」',
+            '盒子已经空了。安安静静躺在冰上，像一只用旧的碗。',
+            '该回家了。'
+          ]);
+        }, function () { S.cineBusy = false; toast('⚠️ 演出没记进存档，再试一次', 3000); });
+      });
+    };
+    /* 让那段开场对白读完再切演出 */
+    setTimeout(function () {
+      closeAllPanelsSilent();
+      go();
+    }, 3600);
+  }
+
+  /* ---------- 回镇：天亮 ---------- */
+  function maybeSunrise(fromMapId) {
+    if (fromMapId !== 'iceland') return;
+    if (!northHas('auroraDone')) return;
+    if (northHas('revived')) return;
+    setTimeout(startSunrise, 1400);
+  }
+  /* v5.1：兜底。极光是**两个人共享**的进度，所以「天亮」也不能只属于
+     走回小镇的那一个人 —— 另一个人可能一直待在镇上、可能刷新过、
+     也可能正站在冰岛出口附近发呆。只要极光已经演完、人又在镇上，
+     就补一次天亮；每 4 秒最多试一次，绝不重复写存档（revived 有事务去重）。 */
+  var sunriseTryAt = 0;
+  function maybeSunriseAuto() {
+    if (!window.Story) return;
+    if (S.cineBusy || S.traveling || S.paused) return;
+    if (S.mapId || S.interId || S.ending || S.photo) return;
+    if (northHas('revived')) return;
+    var nd = northData();
+    var at = Number(nd && nd.auroraDone) || 0;
+    if (!at || Date.now() - at < 4200) return;      // 刚从冰岛回来的人，走 maybeSunrise 那条
+    if (Date.now() - sunriseTryAt < 4000) return;
+    sunriseTryAt = Date.now();
+    startSunrise();
+  }
+  function startSunrise() {
+    if (S.cineBusy) return;
+    if (northHas('revived')) return;
+    S.cineBusy = true;
+    runCine('sunrise', 9.5, function () {
+      var now = Date.now();
+      mutate(function (w) {
+        w.north = w.north || {};
+        if (w.north.revived) return undefined;
+        w.north.revived = now;
+        return w;
+      }).then(function () {
+        S.cineBusy = false;
+        refreshHUD();
+        logAdmin('小镇恢复光明', 'revived', null, null, true);
+        openDialog('🌤', [
+          '你睁开眼的时候，屋檐在滴水。',
+          '不是雪化了 —— 是光回来了。',
+          '街上的灯一盏一盏灭掉，因为已经不需要了。',
+          '圣诞老人站在门口，眯着眼睛看天，看了很久。',
+          '然后他回头喊：「都出来吧 —— 天亮了。」'
+        ]);
+        setTimeout(finalPrepOffer, 2200);
+      }, function () { S.cineBusy = false; });
+    });
+  }
+
+  /* ---------- 最终筹备 ---------- */
+  function finalPrepOffer() {
+    if ((curWorld() || {}).finalPrep) return;
+    mutate(function (w) {
+      if (w.finalPrep) return undefined;
+      w.finalPrep = Date.now();
+      return w;
+    }).then(function (ok) {
+      if (!ok) return;
+      refreshHUD();
+      toast('🎄 最终圣诞筹备，开始了', 5200);
+      openDialog('🎄 圣诞筹备', [
+        '面包师把第一炉面包端出来，热气糊了半条街。',
+        '木匠在广场上钉架子，小精灵抱着一卷彩带跑来跑去。',
+        '「等等 ——」邮差忽然停下，「圣诞节快到了。」',
+        '所有人都安静了一秒，然后笑起来。',
+        '今年要准备的东西，比往年都多：树、灯、礼物、吃的，还有……把这些日子讲给彼此听。'
+      ]);
+    });
+  }
+
+  /* ---------- 小镇里的北境纪念雕塑（v5.1 重做） ----------
+     第一版（v5.0）是"石台 + 两个黑影 + 一颗星"，远看像路灯，而且正好立在
+     广场东边的路牌底下 —— 玩家的名牌一压，什么都看不见了。
+
+     这一版解决三件事：
+       1) 位置：挪到广场**西南空地**（640,748）。不在任何一条路上，不挡 NPC、
+          不挡建筑门口、离路牌和长椅都超过 100px。走近才需要，路过也能看清。
+       2) 造型：三级石阶 + 收腰碑身 + 碑身正面刻字板 + **两个人形**站在碑顶
+          + 背后一块收尖的石碑（让轮廓有分量，不再是两根柱子）+ 顶上那颗星。
+       3) 状态光：极夜期间星是冷青绿、微微起伏；天亮之后转成暖金，安静地亮着。
+          只有 3 个光点是按时间算出来的，不建粒子数组、不每帧 new 对象。
+     ============================================================ */
+  var MEMO = { x: 640, y: 748 };
+  var MEMO_R = 96;                        // 阅读半径
+  function memoVisible() { return northHas('auroraDone') || northHas('revived'); }
+
+  function drawMemorial(ctx, ts) {
+    var revived = northHas('revived');
+    var lit = 0.5 + 0.5 * Math.sin(ts / 900);
+    var readLit = Math.max(0, 1 - (Date.now() - (S.memoLit || 0)) / 3000);   // 读完铭牌的一小段高光
+    var k = 1.15;
+    var starCol = revived ? '255,214,140' : '130,236,208';
+
+    ctx.save();
+    ctx.translate(MEMO.x, MEMO.y);
+    ctx.scale(k, k);
+
+    /* 地面投影 */
+    ctx.beginPath();
+    ctx.ellipse(0, 1, 34, 8, 0, 0, 7);
+    ctx.fillStyle = 'rgba(26,38,58,.24)';
+    ctx.fill();
+
+    /* --- 一级台阶 --- */
+    ctx.fillStyle = '#38465e';
+    ctx.fillRect(-32, -10, 64, 10);
+    ctx.fillStyle = '#4e5f7d';
+    ctx.fillRect(-32, -10, 64, 4);
+    ctx.fillStyle = '#e9f3ff';
+    ctx.fillRect(-29, -11.6, 58, 2.2);
+
+    /* --- 二级台阶 --- */
+    ctx.fillStyle = '#41516c';
+    ctx.fillRect(-26, -18, 52, 8);
+    ctx.fillStyle = '#5b6d8e';
+    ctx.fillRect(-26, -18, 52, 3.2);
+    ctx.fillStyle = '#eaf4ff';
+    ctx.fillRect(-23, -19.6, 46, 2);
+
+    /* --- 碑身（收腰） --- */
+    var bg = ctx.createLinearGradient(-20, 0, 20, 0);
+    bg.addColorStop(0, '#5f7291');
+    bg.addColorStop(0.35, '#6d80a2');
+    bg.addColorStop(0.75, '#55678a');
+    bg.addColorStop(1, '#465773');
+    ctx.beginPath();
+    ctx.moveTo(-20, -18); ctx.lineTo(-17, -54); ctx.lineTo(17, -54); ctx.lineTo(20, -18);
+    ctx.closePath();
+    ctx.fillStyle = bg;
+    ctx.fill();
+    /* 左侧高光棱 */
+    ctx.fillStyle = 'rgba(214,230,255,.22)';
+    ctx.beginPath();
+    ctx.moveTo(-20, -18); ctx.lineTo(-17, -54); ctx.lineTo(-14.5, -54); ctx.lineTo(-17.2, -18);
+    ctx.closePath(); ctx.fill();
+
+    /* 碑顶盖 + 雪 */
+    ctx.fillStyle = '#7487ac';
+    ctx.fillRect(-19, -57, 38, 4);
+    ctx.fillStyle = '#eaf4ff';
+    ctx.fillRect(-17, -58.6, 34, 2.2);
+
+    /* --- 正面铭牌（刻字板 + 一条极光线） --- */
+    ctx.fillStyle = '#2f3d55';
+    ctx.fillRect(-13, -48, 26, 24);
+    ctx.fillStyle = '#48597a';
+    ctx.fillRect(-13, -48, 26, 1.6);
+    ctx.fillStyle = '#c8a86a';
+    ctx.fillRect(-13, -48, 26, 1.0);
+    var plateGlow = 0.30 + 0.35 * lit * (revived ? 0.45 : 1) + readLit * 0.45;
+    for (var ln = 0; ln < 4; ln++) {
+      var ly = -43.5 + ln * 4.2;
+      var lw = ln === 3 ? 9 : (ln === 0 ? 15 : 12 + (ln % 2) * 3);
+      ctx.fillStyle = 'rgba(' + (revived ? '255,226,168' : '176,236,222') + ',' + plateGlow.toFixed(3) + ')';
+      ctx.fillRect(-lw / 2, ly, lw, 1.3);
+    }
+    /* 铭牌上那道极光弧线 */
+    ctx.strokeStyle = 'rgba(' + starCol + ',' + (0.22 + readLit * 0.4).toFixed(3) + ')';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-10, -46.4);
+    ctx.quadraticCurveTo(0, -51.5, 10, -46.4);
+    ctx.stroke();
+
+    /* --- 碑身两侧的冰晶刻纹 --- */
+    ctx.fillStyle = 'rgba(198,244,255,.55)';
+    [[-16.6, -30], [16.6, -30], [-16.2, -38], [16.2, -38]].forEach(function (p) {
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1] - 2.6);
+      ctx.lineTo(p[0] + 1.6, p[1]);
+      ctx.lineTo(p[0], p[1] + 2.6);
+      ctx.lineTo(p[0] - 1.6, p[1]);
+      ctx.closePath();
+      ctx.fill();
+    });
+
+    /* --- 背后那块收尖的石碑：给整体一个"碑"的轮廓 --- */
+    ctx.beginPath();
+    ctx.moveTo(-15, -56);
+    ctx.lineTo(-11, -84);
+    ctx.lineTo(0, -95);
+    ctx.lineTo(11, -84);
+    ctx.lineTo(15, -56);
+    ctx.closePath();
+    ctx.fillStyle = '#3f4f6b';
+    ctx.fill();
+    ctx.fillStyle = 'rgba(150,178,214,.18)';
+    ctx.beginPath();
+    ctx.moveTo(-15, -56); ctx.lineTo(-11, -84); ctx.lineTo(-6.5, -79); ctx.lineTo(-9.5, -56);
+    ctx.closePath(); ctx.fill();
+    /* 碑面上一道竖着的极光刻线 */
+    ctx.strokeStyle = 'rgba(' + starCol + ',' + (0.26 + lit * 0.2).toFixed(3) + ')';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0.5, -58.5);
+    ctx.lineTo(-1.5, -70);
+    ctx.lineTo(1.5, -80);
+    ctx.lineTo(0.5, -90);
+    ctx.stroke();
+
+    /* --- 两个人形：Charles 稍高，Julie 稍矮，手牵着 --- */
+    function statueFigure(dx, hh, ww, coat, hair, scarf) {
+      ctx.save();
+      ctx.translate(dx, -60);
+      /* 大衣：上窄下宽 */
+      ctx.beginPath();
+      ctx.moveTo(-ww / 2, 0);
+      ctx.lineTo(-ww * 0.40, -hh * 0.62);
+      ctx.lineTo(ww * 0.40, -hh * 0.62);
+      ctx.lineTo(ww / 2, 0);
+      ctx.closePath();
+      ctx.fillStyle = coat;
+      ctx.fill();
+      /* 围巾 */
+      if (scarf) {
+        ctx.fillStyle = scarf;
+        ctx.fillRect(-ww * 0.42, -hh * 0.64, ww * 0.84, hh * 0.10);
+      }
+      /* 头 + 头发 */
+      ctx.fillStyle = '#f0c8a4';
+      ctx.beginPath();
+      ctx.arc(0, -hh * 0.74, ww * 0.30, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = hair;
+      ctx.beginPath();
+      ctx.arc(0, -hh * 0.77, ww * 0.31, Math.PI * 1.02, Math.PI * 1.98);
+      ctx.fill();
+      ctx.restore();
+    }
+    statueFigure(-5.2, 30, 10.5, '#35507c', '#241b17', '#a8443c');
+    statueFigure(5.2, 28, 10, '#b9a394', '#20160f', '#8f4348');
+    /* 牵着的手 */
+    ctx.fillStyle = '#e8c09c';
+    ctx.fillRect(-1.2, -68, 2.4, 2.2);
+    /* 肩上的雪 */
+    ctx.fillStyle = 'rgba(238,248,255,.75)';
+    ctx.fillRect(-9.4, -77.5, 5.2, 1.6);
+    ctx.fillRect(4.2, -76.5, 5.0, 1.6);
+
+    /* --- 顶上那颗星 --- */
+    ctx.save();
+    ctx.translate(0, -100);
+    var sg = ctx.createRadialGradient(0, 0, 0, 0, 0, 16);
+    sg.addColorStop(0, 'rgba(' + starCol + ',' + (0.26 + lit * 0.18 + readLit * 0.2).toFixed(3) + ')');
+    sg.addColorStop(1, 'rgba(' + starCol + ',0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(-16, -16, 32, 32);
+    if (window.NorthMap && NorthMap.starPath) {
+      NorthMap.starPath(ctx, 0, 0, 6.2, ts / 2600);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(0, -6.2); ctx.lineTo(1.8, -1.9); ctx.lineTo(6.2, -1.9);
+      ctx.lineTo(2.7, 1.0); ctx.lineTo(4.0, 5.6); ctx.lineTo(0, 3.0);
+      ctx.lineTo(-4.0, 5.6); ctx.lineTo(-2.7, 1.0); ctx.lineTo(-6.2, -1.9);
+      ctx.lineTo(-1.8, -1.9); ctx.closePath();
+    }
+    ctx.fillStyle = 'rgba(' + starCol + ',' + (0.72 + lit * 0.28).toFixed(2) + ')';
+    ctx.fill();
+    ctx.restore();
+
+    /* --- 极夜里从星上飘下来的三个光点（时间推导，没有粒子数组） --- */
+    if (!revived) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (var i = 0; i < 3; i++) {
+        var ph = ((ts / 3400 + i * 0.33) % 1);
+        var a = (1 - ph) * 0.5;
+        ctx.fillStyle = 'rgba(' + starCol + ',' + a.toFixed(2) + ')';
+        ctx.fillRect(Math.sin(ph * 4.2 + i * 2.1) * 12 - 0.7, -98 + ph * 46, 1.5, 1.5);
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /* 读铭牌：不做任务、不给道具，只是让这段话说出来 + 碑面亮一下 */
+  function readMemorial() {
+    S.memoLit = Date.now();
+    try { Snd.sfx('ding'); } catch (e) { }
+    openDialog('🪨 纪念碑', [
+      '石碑不高，刚够人抬起头看。',
+      '碑顶站着两个小人，肩并着肩，手牵着。星星在他们头顶上，一直没有熄过。',
+      '正面刻着几行字 ——',
+      '「致所有曾经踏入北境的人。」',
+      '「有些光，只有两个人一起才能找到。」',
+      (northHas('revived')
+        ? '石头被太阳晒得有点暖。'
+        : '石头的缝里结着霜，星光是冷青色的。')
+    ]);
   }
 
   function northTransition() {
@@ -6749,6 +7491,7 @@ window.Game = (function () {
 
   function leaveMap() {
     var d = curMap();
+    var fromId = S.mapId;
     S.mapId = null;
     var back = S.mapReturn || { x: 1033, y: 468, dir: 0 };
     S.self.x = back.x; S.self.y = back.y; S.self.dir = back.dir || 0;
@@ -6761,6 +7504,8 @@ window.Game = (function () {
     try {
       S.backend.setPos(Math.round(S.self.x), Math.round(S.self.y), S.self.dir, false, 0).catch(function () { });
     } catch (e) { }
+    /* v5.0：从冰岛看完极光回来 → 天亮 */
+    try { maybeSunrise(fromId); } catch (e) { }
   }
 
   /* ---------- 室内 / 室外 ---------- */
@@ -7823,6 +8568,25 @@ window.Game = (function () {
         World.drawEnvelope(ctx, { x: NorthMap.letter.x, y: NorthMap.letter.y, color: '#e8dcc0' }, ts, false);
         ctx.restore();
       }
+      /* v5.0 北境：两座星纹台与它们之间的能量线（都是地面痕迹，压在人物之下） */
+      if (md.id === NORTH_ID && window.NorthMap && NorthMap.drawPad) {
+        var gd = NorthMap.gate;
+        var pc = S.gateCharge || 0;
+        var occA = false, occB = false;
+        var pm = gatePadOf(S.self.x, S.self.y);
+        if (pm) { if (pm.id === 'a') occA = true; else occB = true; }
+        if (S.remote.seen && S.remote.inter === NORTH_ID) {
+          var po = gatePadOf(S.remote.x, S.remote.y);
+          if (po) { if (po.id === 'a') occA = true; else occB = true; }
+        }
+        var pa = occA ? Math.max(0.30, pc) : 0;
+        var pb = occB ? Math.max(0.30, pc) : 0;
+        ctx.save();
+        NorthMap.drawPad(ctx, gd.a.x, gd.a.y, pa, ts, 'a');
+        NorthMap.drawPad(ctx, gd.b.x, gd.b.y, pb, ts, 'b');
+        if (pc > 0.02) NorthMap.drawBeam(ctx, gd.a.x, gd.a.y, gd.b.x, gd.b.y, pc, ts);
+        ctx.restore();
+      }
       /* v4.10 北境：挖过的坑是地面痕迹，压在人物之下 */
       if (md.id === NORTH_ID && window.NorthMap && NorthMap.drawPit) {
         var ndp = northData(), dgp = ndp.digs || {};
@@ -7844,11 +8608,33 @@ window.Game = (function () {
         World.drawEnvelope(ctx, { x: md.eggPos.x, y: md.eggPos.y, color: memObj.color }, ts, gotLetter);
       }
 
+      /* v5.0：石门的两扇门叶（会随 gateOpen 慢慢滑开） */
+      if (md.id === NORTH_ID && window.NorthMap && NorthMap.drawGateDoor) {
+        var gd2 = NorthMap.gate;
+        drawables.push({ y: gd2.arch.y, fn: function () {
+          ctx.save();
+          NorthMap.drawGateDoor(ctx, gd2.arch.x, gd2.arch.y, gateOpenAmt(), ts);
+          ctx.restore();
+        } });
+        /* 星钥：开了门还没拿走的时候，浮在门缝前面 */
+        if (northHas('gateOpen') && !northHas('key')) {
+          drawables.push({ y: gd2.arch.y + 2, fn: function () {
+            ctx.save();
+            NorthMap.drawKey(ctx, gd2.arch.x, gd2.arch.y - 62, ts);
+            ctx.restore();
+          } });
+        }
+      }
       /* v4.10 北境：挖出来的宝箱要参与前后排序，人绕到它后面会被挡住 */
       if (md.id === NORTH_ID && window.NorthMap && northHas('chest')) {
         drawables.push({ y: NorthMap.chest.y, fn: function () {
           ctx.save();
-          NorthMap.drawChest(ctx, NorthMap.chest.x, NorthMap.chest.y, ts, northHas('opened'));
+          var co = northHas('opened') ? 1 : chestOpenAmt();
+          /* 开箱过程中箱子在震：横向抖两三个像素，幅度随进度收 */
+          var sh = 0;
+          if (co > 0.02 && co < 0.98) sh = Math.sin(Date.now() / 38) * 2.4 * (1 - Math.abs(co - 0.5) * 2);
+          NorthMap.drawChest(ctx, NorthMap.chest.x + sh, NorthMap.chest.y, ts, co, northHas('key'));
+          if (S.chestFx) drawChestFlash(ctx, NorthMap.chest.x, NorthMap.chest.y, ts);
           ctx.restore();
         } });
       }
@@ -7904,6 +8690,10 @@ window.Game = (function () {
         drawables.push({ y: -9999, fn: function () { TownLife.drawTreeHalo(ctx, World.tree, treeStage()); } });
       }
       drawables.push({ y: World.tree.y, fn: function () { World.drawBigTree(ctx, World.tree, treeStage(), ts); } });
+      /* v5.0：北境纪念雕塑（北境那条线走完之后才出现；v5.1 换了位置和造型） */
+      if (memoVisible()) {
+        drawables.push({ y: MEMO.y, fn: function () { ctx.save(); drawMemorial(ctx, ts); ctx.restore(); } });
+      }
       /* v4.9.0：北境入口 —— 和树 / 路灯一样参与前后排序，人走过去会被门挡住 */
       if (northOpen() && window.NorthMap && NorthMap.drawPortal) {
         drawables.push({ y: NORTH_PORTAL.y, fn: function () {
@@ -7996,6 +8786,32 @@ window.Game = (function () {
     }
 
     drawParticles(ctx);
+
+    /* v5.0 极夜：小镇的光一点一点退掉。
+       不做成"一键变黑"，而是按剧情等级叠一层冷色压光 —— 等级由北境进度推出来，
+       没有单独的开关，所以两台设备看到的是同一个天色。 */
+    var PLV = polarLevel();
+    if (window.TownLife && TownLife.setStoryDim) {
+      /* 极夜越深，树灯与窗灯越弱（3 级开始明显），恢复后回到 1 */
+      TownLife.setStoryDim(PLV >= 4 ? 0.42 : PLV === 3 ? 0.62 : PLV === 2 ? 0.82 : 1);
+    }
+    if (PLV > 0 && !S.mapId && !S.interId) {
+      var pa = [0, 0.16, 0.30, 0.44, 0.56][Math.min(4, PLV)] || 0;
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(4,8,18,' + pa.toFixed(3) + ')';
+      ctx.fillRect(S.cam.x - 4, S.cam.y - 4, S.view.w / zoomNow() + 8, S.view.h / zoomNow() + 8);
+      /* 边缘再压一点冷蓝，像光被抽走 */
+      var vg2 = ctx.createRadialGradient(
+        S.cam.x + S.view.w / zoomNow() / 2, S.cam.y + S.view.h / zoomNow() / 2, S.view.h / zoomNow() * 0.2,
+        S.cam.x + S.view.w / zoomNow() / 2, S.cam.y + S.view.h / zoomNow() / 2, S.view.h / zoomNow() * 0.9);
+      vg2.addColorStop(0, 'rgba(8,16,40,0)');
+      vg2.addColorStop(1, 'rgba(6,12,32,' + (pa * 0.8).toFixed(3) + ')');
+      ctx.fillStyle = vg2;
+      ctx.fillRect(S.cam.x - 4, S.cam.y - 4, S.view.w / zoomNow() + 8, S.view.h / zoomNow() + 8);
+      ctx.restore();
+    }
+
     ctx.restore();
 
     var vg = ctx.createRadialGradient(S.view.w / 2, S.view.h / 2, Math.min(S.view.w, S.view.h) * 0.42, S.view.w / 2, S.view.h / 2, Math.max(S.view.w, S.view.h) * 0.75);
@@ -8295,6 +9111,13 @@ window.Game = (function () {
       indoors: !!S.interId, memoryCount: foundCount(),
       traveling: !!S.traveling, portalFx: !!S.portalFx, dig: !!S.dig,
       travelCount: S.travelCount || 0,
+      gateCharge: S.gateCharge || 0, gateOpen: northHas('gateOpen'),
+      chestFx: !!S.chestFx,
+      /* v5.1：只读的剧情推导快照，给验收脚本断言（不给写入口） */
+      story: {
+        stage: storyStage(), polar: polarLevel(), talk: storyTalkStage(),
+        base: iceBaseReady(), story: iceStoryReady(), mapGot: northMapGot()
+      },
       party: partySnapshot()
     };
   }
