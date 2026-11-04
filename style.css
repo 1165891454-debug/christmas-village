@@ -624,6 +624,165 @@ body.playing #screen-game { border-radius: 0; }
   .lobby-tip { display: none; }
 }
 
+/* ============================================================
+   v5.3 — 标题画面：左选角 / 右操作
+   ============================================================ */
+.lobby-inner { gap: 14px; }
+.lobby-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.lobby-title { display: grid; gap: 0; }
+.lobby-title b {
+  font-size: clamp(30px, 7.6vw, 54px);
+  letter-spacing: .02em; line-height: 1;
+}
+.lobby-title span {
+  font-size: clamp(13px, 2.6vw, 21px);
+  letter-spacing: .30em; text-indent: .30em;
+  color: #ffd98a; font-weight: 600; margin-top: 6px;
+}
+
+/* ---- 立绘选角 ---- */
+.role-stage {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px; align-items: end;
+}
+.role-portrait {
+  position: relative; appearance: none; cursor: pointer;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  display: grid; justify-items: center; gap: 0;
+  border-radius: 18px;
+  transition: transform .16s ease, filter .2s ease;
+  filter: brightness(.72) saturate(.9);
+}
+.role-portrait .role-cv {
+  width: 100%; max-width: 168px; height: auto;
+  display: block;
+  /* 立绘不做相框：只在他/她脚下铺一小片雪光，
+     让角色像是直接站在镇子的雪地上，而不是贴在一张卡片里。 */
+  background: radial-gradient(64% 34% at 50% 92%, rgba(160,206,255,.22), rgba(160,206,255,0) 72%);
+  transition: filter .2s ease, transform .16s ease;
+}
+.role-portrait.is-active {
+  filter: none; transform: translateY(-5px) scale(1.05);
+}
+.role-portrait.is-active .role-cv {
+  filter: drop-shadow(0 0 16px rgba(255,206,120,.30)) drop-shadow(0 10px 18px rgba(0,0,0,.45));
+}
+.role-portrait:active { transform: scale(.985); }
+.role-plate {
+  margin-top: 6px; display: grid; justify-items: center; gap: 2px;
+  text-align: center; pointer-events: none;
+  padding: 4px 14px 5px; border-radius: 12px;
+  /* 一块很软的暗底：名字不管压在树上还是雪上都读得清 */
+  background: radial-gradient(96% 130% at 50% 58%, rgba(4,9,18,.88) 0%, rgba(4,9,18,.62) 52%, rgba(4,9,18,0) 82%);
+}
+.role-plate b {
+  font-size: 14px; font-weight: 800; letter-spacing: .04em;
+  color: #fff6e2; text-shadow: 0 1px 10px rgba(0,0,0,.8);
+}
+.role-plate i {
+  font-style: normal; font-size: 10.5px; line-height: 1.35;
+  color: rgba(232,240,252,.78); text-shadow: 0 1px 8px rgba(0,0,0,.95);
+}
+/* 选中标记：脚下一颗星，上下轻轻浮动 */
+.role-mark {
+  position: absolute; left: 50%; transform: translate(-50%, 0) scale(.6);
+  bottom: 52px; font-size: 17px; color: #ffd98a;
+  opacity: 0; transition: opacity .2s ease, transform .2s ease;
+  text-shadow: 0 0 12px rgba(255,214,130,.85);
+  animation: roleMarkFloat 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.role-portrait.is-active .role-mark { opacity: 1; transform: translate(-50%, 0) scale(1); }
+@keyframes roleMarkFloat {
+  0%, 100% { margin-bottom: 0; }
+  50% { margin-bottom: 5px; }
+}
+.role-hint {
+  margin: 2px 0 0; text-align: center;
+  font-size: 11.5px; color: rgba(223,232,245,.62);
+  text-shadow: 0 1px 8px rgba(0,0,0,.9);
+}
+
+/* ---- 右侧操作 ---- */
+.lobby-actions { display: grid; gap: 9px; align-content: start; }
+.lobby-actions .btn { min-height: 46px; }
+.lobby-actions .btn.primary.big { min-height: 54px; font-size: 16px; }
+.act-sep { display: flex; align-items: center; gap: 10px; margin: 2px 0; }
+.act-sep::before, .act-sep::after { content: ''; height: 1px; flex: 1; background: rgba(255,255,255,.13); }
+.act-sep span { font-size: 11px; color: rgba(223,232,245,.45); }
+.join-box { display: grid; gap: 6px; margin-top: 2px; }
+.join-box label { font-size: 11.5px; color: rgba(223,232,245,.6); }
+.join-row { display: flex; gap: 8px; }
+.join-row input { flex: 1 1 auto; min-width: 0; }
+.join-row .btn { flex: 0 0 auto; padding: 0 16px; }
+#lobby-error { margin: 4px 0 0; text-align: center; }
+
+/* ---- 房间开好了 ---- */
+#room-ready {
+  position: fixed; inset: 0; z-index: 72;
+  display: grid; place-items: center;
+  padding: 16px;
+  background: radial-gradient(60% 60% at 50% 45%, rgba(6,12,24,.55), rgba(4,8,16,.86));
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: rrIn .28s ease both;
+}
+@keyframes rrIn { from { opacity: 0; } to { opacity: 1; } }
+.rr-card {
+  width: min(420px, 100%);
+  display: grid; gap: 10px; justify-items: center;
+  padding: 22px 20px 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(34,50,78,.96), rgba(18,28,48,.98));
+  border: 1.5px solid rgba(240,192,64,.55);
+  box-shadow: 0 24px 60px rgba(0,0,0,.62), inset 0 1px 0 rgba(255,235,200,.18);
+  animation: rrPop .34s cubic-bezier(.2,1.3,.4,1) both;
+}
+@keyframes rrPop { from { transform: scale(.9); opacity: 0; } to { transform: none; opacity: 1; } }
+.rr-kicker { margin: 0; font-size: 11.5px; letter-spacing: .34em; text-indent: .34em; color: #f0c040; font-weight: 700; }
+.rr-code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: clamp(26px, 7vw, 38px); font-weight: 800; letter-spacing: .12em;
+  color: #fff6e2; padding: 6px 16px; border-radius: 12px;
+  background: rgba(10,18,32,.7);
+  border: 1px dashed rgba(255,224,138,.5);
+  text-shadow: 0 0 18px rgba(255,214,130,.35);
+  user-select: all; -webkit-user-select: all;
+}
+.rr-note { margin: 0; text-align: center; font-size: 12.5px; line-height: 1.7; color: rgba(223,232,245,.75); }
+.rr-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.rr-card .btn.primary.big { width: 100%; margin-top: 2px; }
+.rr-hint { margin: 0; font-size: 11px; color: rgba(223,232,245,.45); text-align: center; }
+
+/* 横屏：左标题+立绘，右操作卡 */
+@media (min-width: 720px) {
+  .lobby-inner { flex-direction: row; align-items: center; gap: 28px; padding: 18px 26px calc(18px + var(--safe-b)); }
+  .lobby-left { flex: 1 1 auto; }
+  .lobby-card { flex: 0 0 380px; max-width: 42vw; }
+  .role-stage { gap: 16px; }
+  .role-portrait .role-cv { max-width: 176px; }
+}
+/* 矮屏横屏：把标题压扁、立绘缩小，保证一屏放得下 */
+@media (max-height: 460px) and (min-width: 720px) {
+  .lobby-title b { font-size: clamp(24px, 3.6vw, 34px); }
+  .lobby-title span { font-size: 11px; letter-spacing: .24em; }
+  .lobby-sub { display: none; }
+  .role-portrait .role-cv { max-width: 118px; }
+  .role-plate i { display: none; }
+  .role-plate { padding: 2px 10px 3px; }
+  .role-hint { display: none; }
+  .lobby-actions .btn { min-height: 40px; }
+  .lobby-actions .btn.primary.big { min-height: 46px; font-size: 15px; }
+  .lobby-foot { display: none; }
+  .role-mark { bottom: 34px; }
+}
+/* 竖屏手机：立绘小一点，操作卡占满宽度 */
+@media (max-width: 460px) {
+  .role-portrait .role-cv { max-width: 140px; }
+  .lobby-title b { font-size: clamp(28px, 9vw, 38px); }
+  .lobby-title span { font-size: 10.5px; letter-spacing: .22em; }
+  .lobby-sub { font-size: 12.5px; }
+}
+
 /* ---------- 面板体系（统一头部 + 关闭 + 滚动） ---------- */
 #panel-scrim {
   position: absolute; inset: 0; z-index: 19;
@@ -1445,3 +1604,120 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
 }
 #chapter-cards .chap-card:nth-child(3) b { font-size: 17px; letter-spacing: .22em; text-indent: .22em; color: #fff3d8; }
 #chapter-cards .chap-card:nth-child(3) span { font-size: 13px; letter-spacing: .3em; text-indent: .3em; color: #ffe7b8; font-weight: 600; }
+
+/* ============================================================
+   v5.3 章节完成卡片
+   ------------------------------------------------------------
+   一章真正走完时，画面压暗、卡片从 0.86 展开到 1，
+   内容按 80ms 一级依次浮现 —— 有仪式感但不拖沓（6.5 秒自动收）。
+   ============================================================ */
+#chapter-done {
+  position: fixed; inset: 0; z-index: 74;
+  display: grid; place-items: center;
+  padding: 18px;
+  pointer-events: none;
+}
+#chapter-done .cd-mask {
+  position: absolute; inset: 0;
+  background: radial-gradient(70% 60% at 50% 48%, rgba(6,12,24,.42), rgba(3,6,14,.78));
+  opacity: 0; transition: opacity .45s ease;
+  backdrop-filter: blur(1.2px); -webkit-backdrop-filter: blur(1.2px);
+}
+#chapter-done .cd-card {
+  position: relative;
+  width: min(430px, 100%);
+  display: grid; justify-items: center; gap: 0;
+  padding: 24px 26px 18px;
+  border-radius: 20px;
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255,224,150,.16), rgba(255,224,150,0) 60%),
+    linear-gradient(180deg, rgba(38,54,84,.97), rgba(20,30,50,.985));
+  border: 1.5px solid rgba(240,192,64,.62);
+  box-shadow: 0 26px 68px rgba(0,0,0,.66), inset 0 1px 0 rgba(255,238,205,.22);
+  transform: scale(.86); opacity: 0;
+  transition: transform .44s cubic-bezier(.2,1.24,.36,1), opacity .3s ease;
+  overflow: hidden;
+}
+#chapter-done.on .cd-mask { opacity: 1; }
+#chapter-done.on .cd-card { transform: none; opacity: 1; }
+/* 卡片自己不拦路：只有卡片本体接收点击，其余区域照常能操作游戏。
+   （"轻触继续"点卡片；想干别的就直接点，卡片 6.5 秒后自己收） */
+#chapter-done .cd-card { pointer-events: auto; }
+
+/* 顶部一圈很淡的放射光，别太亮。
+   注意它是 210% 宽，必须自己吃掉指针事件，否则会挡住卡片外的按钮。 */
+.cd-rays {
+  pointer-events: none;
+  position: absolute; left: 50%; top: -46%; width: 210%; height: 130%;
+  transform: translateX(-50%);
+  background: conic-gradient(from 200deg at 50% 50%,
+    rgba(255,224,150,0) 0deg, rgba(255,224,150,.10) 26deg, rgba(255,224,150,0) 52deg,
+    rgba(255,224,150,0) 120deg, rgba(255,224,150,.08) 150deg, rgba(255,224,150,0) 180deg,
+    rgba(255,224,150,0) 250deg, rgba(255,224,150,.10) 280deg, rgba(255,224,150,0) 310deg);
+  pointer-events: none;
+}
+.cd-badge {
+  width: 54px; height: 54px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: linear-gradient(180deg, #f6d98d, #c99a3e);
+  box-shadow: 0 6px 18px rgba(180,130,40,.45), inset 0 -2px 0 rgba(120,80,20,.35);
+  margin-bottom: 10px;
+  transform: scale(.5); opacity: 0;
+  transition: transform .5s cubic-bezier(.2,1.5,.4,1) .08s, opacity .3s ease .08s;
+}
+#chapter-done.on .cd-badge { transform: none; opacity: 1; }
+.cd-badge b {
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 22px; font-weight: 800; color: #3a2606; letter-spacing: .02em;
+}
+.cd-kicker {
+  margin: 0; font-size: 10.5px; font-weight: 700; letter-spacing: .34em; text-indent: .34em;
+  color: #f0c040; opacity: 0; transform: translateY(6px);
+  transition: opacity .4s ease .16s, transform .4s ease .16s;
+}
+.cd-en {
+  margin: 5px 0 0; font-size: 15px; font-weight: 800; letter-spacing: .22em; text-indent: .22em;
+  color: #fff6e2; opacity: 0; transform: translateY(6px);
+  transition: opacity .4s ease .22s, transform .4s ease .22s;
+  text-shadow: 0 0 18px rgba(255,214,130,.35);
+}
+.cd-cn {
+  margin: 12px 0 0; font-size: 20px; font-weight: 800; letter-spacing: .08em;
+  color: #fffaf0; opacity: 0; transform: translateY(6px);
+  transition: opacity .4s ease .3s, transform .4s ease .3s;
+}
+#chapter-done.on .cd-kicker,
+#chapter-done.on .cd-en,
+#chapter-done.on .cd-cn { opacity: 1; transform: none; }
+.cd-sep {
+  display: flex; align-items: center; gap: 9px; width: 62%; margin: 14px 0 12px;
+  opacity: 0; transition: opacity .4s ease .38s;
+}
+#chapter-done.on .cd-sep { opacity: 1; }
+.cd-sep i { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(240,192,64,0), rgba(240,192,64,.7)); }
+.cd-sep i:last-child { background: linear-gradient(90deg, rgba(240,192,64,.7), rgba(240,192,64,0)); }
+.cd-sep b { font-size: 11px; color: #f0c040; }
+.cd-sum {
+  margin: 0; font-size: 13px; line-height: 1.85; text-align: center;
+  color: rgba(238,244,255,.86); max-width: 30ch;
+  opacity: 0; transform: translateY(6px);
+  transition: opacity .45s ease .46s, transform .45s ease .46s;
+}
+#chapter-done.on .cd-sum { opacity: 1; transform: none; }
+.cd-tap {
+  margin: 16px 0 0; font-size: 10.5px; letter-spacing: .18em;
+  color: rgba(223,232,245,.42);
+  opacity: 0; transition: opacity .45s ease .8s;
+}
+#chapter-done.on .cd-tap { opacity: 1; }
+
+/* 手机横屏：卡片不能顶到上下边缘 */
+@media (max-height: 460px) {
+  .cd-card { padding: 14px 20px 10px; width: min(400px, 92%); }
+  .cd-badge { width: 42px; height: 42px; margin-bottom: 6px; }
+  .cd-badge b { font-size: 18px; }
+  .cd-cn { font-size: 17px; margin-top: 8px; }
+  .cd-sep { margin: 9px 0 8px; }
+  .cd-sum { font-size: 12px; line-height: 1.7; }
+  .cd-tap { margin-top: 9px; }
+}

@@ -216,6 +216,7 @@
 
     return {
       mode: 'firebase',
+      slot: function () { return mySlot; },
       createRoom: function (prefer) {
         var code = randomCode(10);
         var slot = (prefer === 'b') ? 'b' : 'a';
@@ -330,6 +331,7 @@
 
     return {
       mode: 'demo',
+      slot: function () { return mySlot; },
       createRoom: function (prefer) {
         data = freshRoom(); save();
         mySlot = (prefer === 'b') ? 'b' : 'a';
@@ -425,6 +427,17 @@
   }
 
   function enterGame(code) {
+    /* 两个人都选了同一个角色时，另一方会被放到另一个位置。
+       这里明确说一声，别让人莫名其妙变成别人。 */
+    try {
+      var got = backend.slot ? backend.slot() : null;
+      if (got && got !== preferSlot) {
+        setTimeout(function () {
+          toast((preferSlot === 'a' ? 'Charles' : 'Julie') + ' 已经被对方选走了 —— 你以 ' +
+            (got === 'a' ? 'Charles' : 'Julie') + ' 的身份走进小镇 ✦', 5600);
+        }, 1400);
+      }
+    } catch (e) { }
     var roomLabel = backend.mode === 'demo' ? '演示模式' : ('房间 ' + code);
     $('#room-code').textContent = roomLabel;
     var hud = $('#hud-room');
@@ -461,6 +474,7 @@
   }
 
   function afterJoined(code) {
+    pendingRoom = code;
     /* 记住这台设备上次进的是哪个房间：iPhone 加到主屏幕后是拿 manifest 的
        start_url 打开的（没有 ?room=），没有这一条就只能在大厅里干瞪眼。
        只存房间码，不存任何进度；进度永远只在 Firebase 里。 */
@@ -560,6 +574,74 @@
     el.classList.toggle('hidden', !msg);
   }
 
+  /* ============================================================
+   * v5.3 标题画面
+   * ------------------------------------------------------------
+   * 立绘直接用游戏里那套角色烘焙帧（Chars.frameCanvas），
+   * 不另做一套美术 —— 选了谁，进游戏就是谁，长相完全一致。
+   * ============================================================ */
+  function paintPortraits() {
+    if (!window.Chars || !Chars.frameCanvas) return;
+    var cards = document.querySelectorAll('.role-portrait');
+    Array.prototype.forEach.call(cards, function (card) {
+      var cv = card.querySelector('.role-cv');
+      if (!cv || !cv.getContext) return;
+      var g = cv.getContext('2d');
+      var src = null;
+      try { src = Chars.frameCanvas(card.dataset.slot === 'b' ? 'f' : 'm', 0, 0, 0, 'winter'); } catch (e) { }
+      if (!src) return;
+      var W = cv.width, H = cv.height;
+      g.clearRect(0, 0, W, H);
+      var k = Math.min(W / src.width, H / src.height) * 0.99;
+      var dw = src.width * k, dh = src.height * k;
+      g.imageSmoothingEnabled = true;
+      g.drawImage(src, (W - dw) / 2, H - dh, dw, dh);
+    });
+  }
+
+  function copyText(txt, okMsg) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { toast(okMsg || '已复制'); },
+        function () { window.prompt('长按复制：', txt); });
+    } else window.prompt('长按复制：', txt);
+  }
+
+  var lobbyBusy = false;
+  function setLobbyBusy(on, label) {
+    var p = $('#btn-play'), c = $('#btn-create'), j = $('#btn-join'), l = $('#btn-last-room');
+    if (p) { p.disabled = !!on; p.textContent = on ? (label || '正在进屋…') : '开始游戏'; }
+    if (c) c.disabled = !!on;
+    if (j) j.disabled = !!on;
+    if (l) l.disabled = !!on;
+  }
+
+  /* 房间开好了：进小镇之后，把号码亮在主界面上（可复制、可关掉） */
+  function showRoomReady(code) {
+    var el = $('#room-ready'), cd = $('#room-ready-code');
+    if (cd) cd.textContent = code;
+    if (el) el.classList.remove('hidden');
+    setLobbyBusy(false);
+  }
+
+  function createFlow() {
+    if (lobbyBusy) return;
+    if (!backend) initFirebaseBackend();
+    if (!backend) return;
+    lobbyBusy = true;
+    setLobbyBusy(true, '正在开房间…');
+    var err = $('#lobby-error'); if (err) err.classList.add('hidden');
+    backend.createRoom(preferSlot).then(function (code) {
+      lobbyBusy = false;
+      setLobbyBusy(false);
+      afterJoined(code);        // 走原来那条进房路径：记住房间、进小镇
+      showRoomReady(code);      // 再把号码浮在上面，方便发给对方
+    }).catch(function (e) {
+      lobbyBusy = false;
+      setLobbyBusy(false);
+      lobbyError('房间没开成，再试一次就好。' + (e && e.message ? '（' + e.message + '）' : ''));
+    });
+  }
+
   // ---------- 启动 ----------
   function boot() {
     var snow = $('#snow');
@@ -574,7 +656,8 @@
 
     /* 大厅角色选择：只记录偏好；真正占位时只在「该位置是空的」情况下生效，
        不会把已经在玩的对方顶掉。 */
-    var roleCards = document.querySelectorAll('.role-card');
+    var roleCards = document.querySelectorAll('.role-portrait');
+    paintPortraits();
     if (roleCards.length) {
       Array.prototype.forEach.call(roleCards, function (c) {
         c.addEventListener('click', function () {
@@ -584,21 +667,53 @@
             x.classList.toggle('is-active', on);
             x.setAttribute('aria-checked', on ? 'true' : 'false');
           });
+          try { localStorage.setItem('omo_lobby_slot_v1', preferSlot); } catch (e) { }
+          var hint = $('#role-hint');
+          if (hint) hint.textContent = preferSlot === 'b'
+            ? '你就是 Julie —— 长发、米白外套的那位'
+            : '你就是 Charles —— 深蓝外套、戴眼镜的那位';
         });
       });
+      /* 上次选过谁，下次打开还是谁（只是偏好，不会强占别人的位置） */
+      try {
+        var saved = localStorage.getItem('omo_lobby_slot_v1');
+        if (saved === 'b' || saved === 'a') {
+          preferSlot = saved;
+          Array.prototype.forEach.call(roleCards, function (x) {
+            var on = x.dataset.slot === preferSlot;
+            x.classList.toggle('is-active', on);
+            x.setAttribute('aria-checked', on ? 'true' : 'false');
+          });
+        }
+      } catch (e) { }
     }
 
     $('#btn-demo').addEventListener('click', function () {
       backend = createDemoBackend();
       startBackend();
     });
-    $('#btn-create').addEventListener('click', function () {
-      if (!backend) initFirebaseBackend();
-      $('#lobby-error').classList.add('hidden');
-      backend.createRoom(preferSlot).then(function (code) {
-        pendingRoom = code;
-        afterJoined(code);
-      }).catch(function (e) { lobbyError('创建失败：' + e.message); });
+    /* 主按钮「开始游戏」：上次进过房间就直接回那个小镇，否则开一个新房间。
+       走的是原来那两条稳定路径，没有新增任何存档 / 房间机制。 */
+    $('#btn-play').addEventListener('click', function () {
+      if (lobbyBusy) return;
+      var lr = lastRoom();
+      if (lr) joinByCode(lr);
+      else createFlow();
+    });
+    $('#btn-create').addEventListener('click', createFlow);
+    /* 房间号亮出来的那一屏 */
+    var rrEnter = $('#btn-enter');
+    if (rrEnter) rrEnter.addEventListener('click', function () {
+      var el = $('#room-ready');
+      if (el) el.classList.add('hidden');
+    });
+    var rrCopy = $('#btn-copy-code');
+    if (rrCopy) rrCopy.addEventListener('click', function () {
+      if (pendingRoom) copyText(pendingRoom, '房间号已复制，发给她吧 🎁');
+    });
+    var rrLink = $('#btn-copy-link');
+    if (rrLink) rrLink.addEventListener('click', function () {
+      if (pendingRoom) copyText(inviteUrl(pendingRoom), '邀请链接已复制，直接发给她就行 🎁');
     });
     function joinByCode(code) {
       code = String(code || '').trim().toLowerCase();

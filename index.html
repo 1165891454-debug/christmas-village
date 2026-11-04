@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=5.2.0" />
+  <link rel="stylesheet" href="style.css?v=5.3.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -134,45 +134,51 @@
       </div>
 
       <div class="lobby-inner">
-        <div class="lobby-hero">
-          <p class="lobby-kicker">我们的圣诞小镇</p>
-          <h1 class="lobby-title">Omo's<br><span>Christmas Village</span></h1>
-          <p class="lobby-sub">两个人的小镇，一座等你们点亮的圣诞树。</p>
-          <p class="lobby-tip">一人创建房间，把邀请链接发给对方；两部手机进入同一个小镇。</p>
+        <!-- 左：标题 + 选角 -->
+        <div class="lobby-left">
+          <header class="lobby-hero">
+            <p class="lobby-kicker">我们的圣诞小镇</p>
+            <h1 class="lobby-title"><b>OMO'S</b><span>CHRISTMAS VILLAGE</span></h1>
+            <p class="lobby-sub">两个人的小镇，一棵等你们点亮的圣诞树。</p>
+          </header>
+
+          <div class="role-stage" role="radiogroup" aria-label="选择角色">
+            <button class="role-portrait is-active" data-slot="a" role="radio" aria-checked="true" type="button">
+              <canvas class="role-cv" width="240" height="360" aria-hidden="true"></canvas>
+              <span class="role-mark" aria-hidden="true">✦</span>
+              <span class="role-plate"><b>Charles</b><i>黑色短发 · 黑框眼镜 · 深蓝外套</i></span>
+            </button>
+            <button class="role-portrait" data-slot="b" role="radio" aria-checked="false" type="button">
+              <canvas class="role-cv" width="240" height="360" aria-hidden="true"></canvas>
+              <span class="role-mark" aria-hidden="true">✦</span>
+              <span class="role-plate"><b>Julie</b><i>长发 · 米白外套 · 红格纹围巾</i></span>
+            </button>
+          </div>
+          <p id="role-hint" class="role-hint">点一下立绘，就能选他 / 她</p>
         </div>
 
-        <div class="lobby-card">
-          <div class="role-head">
-            <span class="role-head-title">你想做谁？</span>
-            <span class="role-head-sub">选定后角色不能互换</span>
+        <!-- 右：开始游戏 / 创建 / 加入 -->
+        <aside class="lobby-card lobby-actions">
+          <button id="btn-play" class="btn primary big">开始游戏</button>
+          <button id="btn-last-room" class="btn ghost big hidden">回到上次的小镇 · <span id="last-room-code"></span></button>
+
+          <div class="act-sep"><span>或</span></div>
+
+          <button id="btn-create" class="btn ghost big">开一个新房间</button>
+
+          <div class="join-box">
+            <label for="input-code">对方给了你房间号？</label>
+            <div class="join-row">
+              <input id="input-code" type="text" inputmode="latin" placeholder="输入房间号" maxlength="10" autocomplete="off" />
+              <button id="btn-join" class="btn">加入</button>
+            </div>
           </div>
-          <div class="role-pick" role="radiogroup" aria-label="选择角色">
-            <button class="role-card is-active" data-slot="a" role="radio" aria-checked="true">
-              <span class="role-face role-a">C</span>
-              <span class="role-name">Charles</span>
-              <span class="role-desc">黑框眼镜 · 深蓝外套</span>
-            </button>
-            <button class="role-card" data-slot="b" role="radio" aria-checked="false">
-              <span class="role-face role-b">J</span>
-              <span class="role-name">Julie</span>
-              <span class="role-desc">长发 · 白色毛线帽</span>
-            </button>
-          </div>
 
-          <button id="btn-last-room" class="btn ghost big hidden">🏠 回到上次的房间 · <span id="last-room-code"></span></button>
-
-          <button id="btn-create" class="btn primary big">🏡 创建我们的房间</button>
-
-          <div class="or-row"><span>或者，输入房间码</span></div>
-
-          <div class="join-row">
-            <input id="input-code" type="text" inputmode="latin" placeholder="房间码" maxlength="10" autocomplete="off" />
-            <button id="btn-join" class="btn">加入</button>
-          </div>
           <p id="lobby-error" class="error hidden"></p>
-          <p class="lobby-foot">2026 年 12 月 25 日 · 只属于你们两个人</p>
-        </div>
+          <p class="lobby-foot">2026 · 只属于你们两个人</p>
+        </aside>
       </div>
+
     </section>
 
     <!-- ============================================================
@@ -645,6 +651,35 @@
       <p class="muted">接管会保留该角色原来的服装和进度。</p>
       <button id="btn-back-lobby" class="btn ghost">返回大厅，创建新房间</button>
     </section>
+  <!-- v5.3 章节完成卡片：一章真正走完时，在屏幕正中停一下 -->
+  <div id="chapter-done" class="hidden" role="dialog" aria-live="polite" aria-label="章节完成">
+    <div class="cd-mask"></div>
+    <div class="cd-card">
+      <div class="cd-rays" aria-hidden="true"></div>
+      <div class="cd-badge"><b id="cd-no">01</b></div>
+      <p class="cd-kicker">CHAPTER <span id="cd-no2">01</span> COMPLETED</p>
+      <p class="cd-en" id="cd-en">FIRST STEPS</p>
+      <h2 class="cd-cn" id="cd-cn">第一章 · 回到小镇</h2>
+      <div class="cd-sep" aria-hidden="true"><i></i><b>✦</b><i></i></div>
+      <p class="cd-sum" id="cd-sum"></p>
+      <p class="cd-tap">轻触继续</p>
+    </div>
+  </div>
+
+  <!-- v5.3 房间开好了：把号码亮出来，方便发给对方（进游戏后浮在上面） -->
+  <div id="room-ready" class="hidden">
+    <div class="rr-card">
+      <p class="rr-kicker">房间开好了</p>
+      <div class="rr-code" id="room-ready-code">————</div>
+      <p class="rr-note">把这串房间号发给对方 ——<br>她在「加入」里输进去，就会走进同一个小镇。</p>
+      <div class="rr-actions">
+        <button id="btn-copy-code" class="btn" type="button">复制房间号</button>
+        <button id="btn-copy-link" class="btn ghost" type="button">复制邀请链接</button>
+      </div>
+      <button id="btn-enter" class="btn primary big" type="button">知道了，开始吧</button>
+      <p class="rr-hint" id="room-ready-hint">把号码发给她 · 两个人会走进同一个小镇</p>
+    </div>
+  </div>
   </main>
 
   <div id="toast" class="toast hidden"></div>
@@ -685,18 +720,18 @@
     <div class="tc-line"></div>
   </div>
 
-  <script src="firebase-config.js?v=5.2.0"></script>
-  <script src="memories.js?v=5.2.0"></script>
-  <script src="chars.js?v=5.2.0"></script>
-  <script src="sprites.js?v=5.2.0"></script>
-  <script src="world.js?v=5.2.0"></script>
-  <script src="north.js?v=5.2.0"></script>
-  <script src="maps.js?v=5.2.0"></script>
-  <script src="specialties.js?v=5.2.0"></script>
-  <script src="life.js?v=5.2.0"></script>
-  <script src="story.js?v=5.2.0"></script>
-  <script src="game.js?v=5.2.0"></script>
-  <script src="app.js?v=5.2.0"></script>
+  <script src="firebase-config.js?v=5.3.0"></script>
+  <script src="memories.js?v=5.3.0"></script>
+  <script src="chars.js?v=5.3.0"></script>
+  <script src="sprites.js?v=5.3.0"></script>
+  <script src="world.js?v=5.3.0"></script>
+  <script src="north.js?v=5.3.0"></script>
+  <script src="maps.js?v=5.3.0"></script>
+  <script src="specialties.js?v=5.3.0"></script>
+  <script src="life.js?v=5.3.0"></script>
+  <script src="story.js?v=5.3.0"></script>
+  <script src="game.js?v=5.3.0"></script>
+  <script src="app.js?v=5.3.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

@@ -1060,19 +1060,19 @@ window.Game = (function () {
   function harvestsEver() { var w = curWorld() || {}; return w.harvests || 0; }
 
   var CHAPTERS = [
-    { t: '回到小镇', tip: '先和圣诞老人打个招呼（车站旁边那棵大树下）',
+    { t: '回到小镇', en: 'FIRST STEPS', sum: '你们推开小屋的门，炉子还是温的。这个冬天，就从这儿开始。', tip: '先和圣诞老人打个招呼（车站旁边那棵大树下）',
       ok: function () { return !!S.quest.talked.santa; },
       prog: function () { return S.quest.talked.santa ? '✓' : '还没聊过'; } },
-    { t: '认识邻居', tip: '镇上现在有八个人。先认识五个：圣诞老人、雪人、小精灵、老板娘、邮差阿信、面包师麦香、牧羊女小禾、老木匠老鲁',
+    { t: '认识邻居', en: 'THE NEIGHBOURS', sum: '八个人，八种口音。镇上的人开始记住你们的名字了。', tip: '镇上现在有八个人。先认识五个：圣诞老人、雪人、小精灵、老板娘、邮差阿信、面包师麦香、牧羊女小禾、老木匠老鲁',
       ok: function () { return talkCount() >= 5 && visitedCount() >= 2; },
       prog: function () { return '聊过 ' + Math.min(5, talkCount()) + '/5 · 进过 ' + Math.min(2, visitedCount()) + '/2 间屋子'; } },
-    { t: '屋里的旧照片', tip: '四间屋子（小屋 / 咖啡馆 / 温室 / 工坊）的角落各藏一段回忆，先找到三段',
+    { t: '屋里的旧照片', en: 'OLD PHOTOGRAPHS', sum: '四间屋子的角落里，各藏着一张你们走过的地方。', tip: '四间屋子（小屋 / 咖啡馆 / 温室 / 工坊）的角落各藏一段回忆，先找到三段',
       ok: function () { return roomFoundCount() >= 3; },
       prog: function () { return '室内回忆 ' + Math.min(3, roomFoundCount()) + '/3'; } },
-    { t: '第一颗种子', tip: '进星星温室：先在补给台领今天的种子，再挑两块地种下（花 30 分钟、树 6 小时，离开也会长）',
+    { t: '第一颗种子', en: 'THE FIRST SEED', sum: '泥土是冷的，可种下去的那一下，你们都听见了声音。', tip: '进星星温室：先在补给台领今天的种子，再挑两块地种下（花 30 分钟、树 6 小时，离开也会长）',
       ok: function () { return dailyTaken() && plantedNow() >= 2; },
       prog: function () { return '今日补给 ' + (dailyTaken() ? '✓' : '×') + ' · 已种下 ' + Math.min(2, plantedNow()) + '/2'; } },
-    { t: '开一片牧场', tip: '去左边牧场抱一捆干草，喂一次牛、羊或鸡',
+    { t: '开一片牧场', en: 'A LITTLE PASTURE', sum: '牛、羊、鸡各自占了半个角落。镇子一下子热闹起来。', tip: '去左边牧场抱一捆干草，喂一次牛、羊或鸡',
       ok: function () {
         var w = curWorld() || {};
         return !!(w.ranch && w.ranch.gotHay) && ranchFedAny();
@@ -1081,25 +1081,25 @@ window.Game = (function () {
         var w = curWorld() || {};
         return '干草 ' + (w.ranch && w.ranch.gotHay ? '✓' : '×') + ' · 喂食 ' + (ranchFedAny() ? '✓' : '×');
       } },
-    { t: '第一次收成', tip: '温室里的花熟了就去收——一次收成给鲜花和种子；种树要等 6 小时，但木材更值钱',
+    { t: '第一次收成', en: 'FIRST HARVEST', sum: '花开了。你们把第一束插在窗台上，谁也没说话。', tip: '温室里的花熟了就去收——一次收成给鲜花和种子；种树要等 6 小时，但木材更值钱',
       ok: function () { return harvestsEver() >= 1; },
       prog: function () { return '收成 ' + Math.min(1, harvestsEver()) + '/1'; } },
-    { t: '收下第一份产物', tip: '喂过的动物第二天来收：牛奶 / 羊毛 / 鸡蛋',
+    { t: '收下第一份产物', en: 'MILK AND WOOL', sum: '清晨的牛奶还是温的，羊毛上沾着草屑。日子有了味道。', tip: '喂过的动物第二天来收：牛奶 / 羊毛 / 鸡蛋',
       ok: function () { return ranchGoodsCount() >= 1 && foundCount() >= 4; },
       prog: function () { return '产物 ' + Math.min(1, ranchGoodsCount()) + '/1 · 回忆 ' + Math.min(4, foundCount()) + '/4'; } },
-    { t: '邮局开张', tip: '去工坊：木材做纸 → 纸+木材+鲜花做礼盒 → 到「寄件」台寄出第一个包裹',
+    { t: '邮局开张', en: 'THE POST OFFICE', sum: '第一个包裹寄出去了。地址是你们自己一笔一笔写的。', tip: '去工坊：木材做纸 → 纸+木材+鲜花做礼盒 → 到「寄件」台寄出第一个包裹',
       ok: function () { return sentCount() >= 1; },
       prog: function () { return '寄出包裹 ' + Math.min(1, sentCount()) + '/1 · 已知地址 ' + addrCount(); } },
-    { t: '把树种起来', tip: '温室种树收木材 → 工坊做一件手工 → 树下装饰',
+    { t: '把树种起来', en: 'THE TREE GROWS', sum: '树又长高了一截，影子也跟着长了。', tip: '温室种树收木材 → 工坊做一件手工 → 树下装饰',
       ok: function () { return treeStage() >= 1 && (worldRes().materials || 0) >= 1; },
       prog: function () { return '树 ' + treeStageName(treeStage()) + ' · 手工 ' + Math.min(1, worldRes().materials || 0) + '/1'; } },
-    { t: '凑齐三张车票', tip: '车票不会一次给全：先把小镇的日子过得再热闹一点',
+    { t: '凑齐三张车票', en: 'THREE TICKETS', sum: '三张票，三个方向。世界比这座镇子大得多。', tip: '车票不会一次给全：先把小镇的日子过得再热闹一点',
       ok: function () { return ticketOwnedCount() >= 3; },
       prog: function () { return '车票 ' + Math.min(3, ticketOwnedCount()) + '/3 · 回忆 ' + foundCount(); } },
-    { t: '远方的回信', tip: '寄出去的包裹会带着当地特产回来，收满三种',
+    { t: '远方的回信', en: 'LETTERS HOME', sum: '包裹带着远方的味道回来了 —— 松木、海风、还有一点点陌生。', tip: '寄出去的包裹会带着当地特产回来，收满三种',
       ok: function () { return mailCount() >= 3 && specCount() >= 3; },
       prog: function () { return '回信 ' + Math.min(3, mailCount()) + '/3 · 特产 ' + Math.min(3, specCount()) + '/3'; } },
-    { t: '点亮整棵树', tip: '树长到第 6 阶（完全点亮）、三种牧场产物都收过、六种远方特产摆上架',
+    { t: '点亮整棵树', en: 'ALL LIGHTS ON', sum: '整棵树都亮了。可镇子北边，好像有什么正在暗下去。', tip: '树长到第 6 阶（完全点亮）、三种牧场产物都收过、六种远方特产摆上架',
       ok: function () { return treeStage() >= TREE_STAGE_MAX && foundCount() >= 11 && ranchGoodsCount() >= 3 && specCount() >= 6; },
       prog: function () {
         return '树 ' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）' +
@@ -1134,6 +1134,7 @@ window.Game = (function () {
     }).then(function (ok) {
       S.advancing = false;
       if (!ok) return;
+      try { noteChapterProgress(); } catch (e) { }
       refreshHUD();
       var nxt = CHAPTERS[to];
       if (nxt) toast('📖 第 ' + (to + 1) + ' 章：' + nxt.t + ' —— ' + nxt.tip +
@@ -1146,6 +1147,123 @@ window.Game = (function () {
       }
     }).catch(function () { S.advancing = false; });
     S.lastQuestText = '';
+  }
+
+  /* ============================================================
+   * v5.3 章节完成卡片
+   * ------------------------------------------------------------
+   * 触发条件是「章节号真的往前 +1」，不是「章节号变了」：
+   *   · 只有 advanceChapter 成功（这一章的条件真的满足了）才会 +1；
+   *   · 管理员跳章（world.chapterTest 存在）时一律不播；
+   *   · 每台设备各记「结算到第几章」（localStorage，按房间分开），
+   *     所以刷新不会重播、两个人各看一次、离线期间漏掉的回来补一次。
+   * 卡片只是 DOM 浮层：不 pause、不写存档、不打断任何演出。
+   * ============================================================ */
+  var chapterSeen = -1;        // 这台设备已经"结算"到第几章（0 基章节号）
+  var chapterQueue = [];       // 等着播的章节（0 基）
+  var chapterCardOpen = false;
+  var chapterCardTimer = 0;
+
+  function chapterSeenKey() { return 'omo_chapter_seen_' + (S.code || 'local'); }
+  function loadChapterSeen() {
+    try {
+      var v = parseInt(localStorage.getItem(chapterSeenKey()), 10);
+      return isFinite(v) ? v : -1;
+    } catch (e) { return -1; }
+  }
+  function saveChapterSeen(v) {
+    try { localStorage.setItem(chapterSeenKey(), String(v)); } catch (e) { }
+  }
+
+  /* 每帧对一次章节号。第一次调用只记基线（新设备 / 新房间不会一进来就弹卡）。 */
+  function noteChapterProgress() {
+    var w = curWorld();
+    if (!w) {
+      /* 房间刚建、还没有 world 对象：按「第 1 章」记基线。
+         否则第一次 mutate 之后拿到的是"已经被改过的章节"，会被当成基线而漏播。 */
+      if (chapterSeen < 0) {
+        var p0 = loadChapterSeen();
+        chapterSeen = (p0 >= 0) ? p0 : 0;
+        saveChapterSeen(chapterSeen);
+      }
+      return;
+    }
+    var ch = Math.max(0, w.chapter || 0);
+    if (chapterSeen < 0) {
+      chapterSeen = loadChapterSeen();
+      /* 这台设备第一次见这个房间：只记基线，不补播历史章节 */
+      if (chapterSeen < 0) { chapterSeen = ch; saveChapterSeen(ch); return; }
+    }
+    if (ch < chapterSeen) {           // 管理员恢复 / 退回：把基线拉回来，不播卡
+      chapterSeen = ch; saveChapterSeen(ch); return;
+    }
+    if (ch === chapterSeen) return;
+    var done = ch - 1;                // 刚刚走完的那一章
+    var isTest = chapterTestActive(); // 管理员跳章：不是"正式完成"
+    chapterSeen = ch; saveChapterSeen(ch);
+    if (isTest) return;
+    if (done < 0 || done >= CHAPTERS.length) return;
+    chapterQueue.push(done);
+    /* 一口气推进了好几章（离线补偿 / 一次性满足多条）时只留最后一张，
+       否则会连播好几屏，把玩家按在原地。 */
+    while (chapterQueue.length > 2) chapterQueue.shift();
+    if (!chapterCardOpen) showNextChapterCard();
+  }
+
+  /* 1..20 → 一、二、…… 十、十一。章节标题用中文数字，更像"章节" */
+  var CN_NUM = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  function cnNum(n) {
+    if (n <= 10) return CN_NUM[n] || String(n);
+    if (n < 20) return '十' + CN_NUM[n - 10];
+    return String(n);
+  }
+
+  function showNextChapterCard() {
+    if (!chapterQueue.length) { chapterCardOpen = false; return; }
+    /* 特殊演出正在放（极光 / 天亮 / 合影 / 转场）或者玩家正开着面板 / 对话框时先让路。
+       卡片是"庆祝"，不该把人从正在做的事里拽出来。 */
+    if (S.cineBusy || S.ending || S.photo || S.traveling || S.paused) {
+      chapterCardOpen = false;
+      setTimeout(showNextChapterCard, 1200);
+      return;
+    }
+    var el = $('#chapter-done');
+    if (!el) { chapterQueue.length = 0; chapterCardOpen = false; return; }
+    var idx = chapterQueue.shift();
+    var c = CHAPTERS[idx];
+    if (!c) { showNextChapterCard(); return; }
+    var no = (idx + 1 < 10 ? '0' : '') + (idx + 1);
+    var set = function (sel, txt) { var n = $(sel); if (n) n.textContent = txt; };
+    set('#cd-no', no);
+    set('#cd-no2', no);
+    set('#cd-en', c.en || '');
+    set('#cd-cn', '第' + cnNum(idx + 1) + '章 · ' + c.t);
+    set('#cd-sum', c.sum || c.tip || '');
+    chapterCardOpen = true;
+    el.classList.remove('hidden');
+    requestAnimationFrame(function () { el.classList.add('on'); });
+    try { Snd.sfx('ding'); } catch (e) { }
+    if (!el.dataset.bound) {
+      el.dataset.bound = '1';
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        closeChapterCard();
+      });
+    }
+    clearTimeout(chapterCardTimer);
+    chapterCardTimer = setTimeout(closeChapterCard, 6500);
+  }
+
+  function closeChapterCard() {
+    var el = $('#chapter-done');
+    if (!el || !chapterCardOpen) return;
+    clearTimeout(chapterCardTimer);
+    chapterCardOpen = false;
+    el.classList.remove('on');
+    setTimeout(function () {
+      el.classList.add('hidden');
+      if (chapterQueue.length) showNextChapterCard();
+    }, 320);
   }
 
   /* v4.3 / v4.6：章节不再「一天只让推一章」，条件到了就推。
@@ -1494,6 +1612,9 @@ window.Game = (function () {
   function onData(d) {
     S.data = d;
     if (!S.active || !d) return;
+    /* v5.3：存档一到就先对一次章节基线 —— 不能等到下一帧，
+       否则"刚进来就完成一章"会被当成基线而漏播卡片。 */
+    try { noteChapterProgress(); } catch (e) { }
     /* 首次拿到存档时对一次位：如果上次是停在某张旅行地图里，
        刷新/重进后直接回到那张地图，而不是被扔回小镇广场。 */
     if (!S.posRestored) {
@@ -2191,6 +2312,7 @@ window.Game = (function () {
     checkVisitZones();
     autoPickEggs();
     updateQuest();
+    noteChapterProgress();
     maybeOpenNorth();
     maybeSunriseAuto();
     /* v5.2：读过「天亮」的存档，一进游戏就该是白天（不受昼夜计时影响）。
@@ -7729,7 +7851,11 @@ window.Game = (function () {
   }
 
   /* ---------- 面板 / 对话 ---------- */
-  function pause() { S.paused = true; }
+  function pause() {
+    S.paused = true;
+    /* v5.3：玩家要干别的（开面板 / 对话 / 演出）时，章节卡片先让开 */
+    if (typeof chapterCardOpen !== 'undefined' && chapterCardOpen) closeChapterCard();
+  }
   function unpause() { S.paused = false; }
 
   /* 所有面板集中登记：关闭时统一处理，新增面板不会漏关 */
@@ -9394,6 +9520,18 @@ window.Game = (function () {
       if (!devHook()) return false;
       S.devHoldSunrise = !!v;
       return true;
+    },
+    /* 只读：某章的完成卡片文案（验收脚本用来核对 12 章都有专属内容） */
+    devChapterCard: function (i) {
+      if (!devHook()) return null;
+      var c = CHAPTERS[i];
+      if (!c) return null;
+      return {
+        no: ((i + 1) < 10 ? '0' : '') + (i + 1),
+        en: c.en || '',
+        cn: '第' + cnNum(i + 1) + '章 · ' + c.t,
+        sum: c.sum || ''
+      };
     },
     devNorthQuest: function () {
       var w = curWorld() || {};
