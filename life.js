@@ -90,10 +90,57 @@ window.TownLife = (function () {
   }
 
   /* ============================================================
+   * 1b. v5.2 极夜调色
+   * ------------------------------------------------------------
+   * 极夜不是「把屏幕调暗」，而是「天亮不起来了」：
+   *   · 环境色整体往冷蓝紫收（天空、远景、近景都收）；
+   *   · 环境光的下限逐级抬高：1 级像傍晚、4 级像最深的夜；
+   *   · 同时把路灯 / 窗光 / 树灯的**下限**抬起来 ——
+   *     极夜里唯一能看清东西的就是这些灯，绝不能压成一片纯黑。
+   * 0.02 + 0.60·k^1.4 的四级取值：
+   *   1 级 0.10 / 2 级 0.25 / 3 级 0.43 / 4 级 0.62（封顶 0.74）
+   * ============================================================ */
+  var POLAR_TOP = [16, 22, 48];
+  var POLAR_BOT = [26, 36, 62];
+  var POLAR_AMB = [28, 42, 82];
+  /* 极夜等级 0~4（由 game.js 每帧喂进来，纯视觉，不写存档） */
+  var polarLevel = 0;
+  /* 天亮之后锁死在白天 —— 北境故事结束，小镇不该再自己入夜 */
+  var dayLock = false;
+
+  function applyPolar(level) {
+    var k = Math.min(1, Math.max(0, level) / 4);
+    var mix = 0.28 + 0.50 * k;
+    st.top = mix3(st.top, POLAR_TOP, mix);
+    st.bot = mix3(st.bot, POLAR_BOT, mix * 0.94);
+    st.amb = mix3(st.amb, POLAR_AMB, mix);
+    st.aa = Math.min(0.74, Math.max(st.aa, 0.02 + 0.60 * Math.pow(k, 1.4)));
+    st.lamp = Math.max(st.lamp, 0.34 + 0.20 * k);
+    st.win = Math.max(st.win, 0.44 + 0.24 * k);
+  }
+  /* game.js 每帧喂当前极夜等级（0~4）。纯视觉，不写任何存档。 */
+  function setPolar(level) {
+    var v = Math.max(0, Math.min(4, Math.round(level || 0)));
+    st.polar = v;
+    if (v !== polarLevel) {
+      polarLevel = v;
+      updateEnv(0.016, Date.now());     // 面板/存档刚变时立刻生效，不等下一帧
+    }
+  }
+  /* 天亮后锁死白天：北境故事结束，小镇不该再自己入夜 */
+  function setDayLock(on) {
+    dayLock = !!on;
+    st.dayLock = dayLock;
+    if (dayLock) { st.vt = 0.42; st.vtInit = true; updateEnv(0.016, Date.now()); }
+  }
+
+  /* ============================================================
    * 2. 状态
    * ============================================================ */
   /* v5.0：极夜时把小镇的灯整体压暗（1 = 正常）。
-     只影响看得见的光，不参与任何逻辑判定 —— 昼夜相位、天气都照旧。 */
+     只影响看得见的光，不参与任何逻辑判定 —— 昼夜相位、天气都照旧。
+     v5.2：极夜不再靠「压暗」表达，而是靠整套环境色（见 applyPolar）；
+     这个系数只留给树灯的微调，范围收窄到 0.9~1，避免把树压成一团黑。 */
   var storyDim = 1;
 
   var st = {
@@ -108,7 +155,9 @@ window.TownLife = (function () {
     snow: 0, snowTarget: 0,
     aurora: 0, auroraTarget: 0,
     clock: 0,              // 模块内累计秒（只给动画用）
-    frame: 0
+    frame: 0,
+    polar: 0,              // 当前极夜等级（快照用）
+    dayLock: false
   };
 
   /* ============================================================
@@ -140,6 +189,14 @@ window.TownLife = (function () {
   function updateEnv(dt, now) {
     /* ---- 时间 ---- */
     if (!st.vtInit) { st.vt = vtOf(now); st.vtInit = true; }
+    else if (st.dayLock) {
+      /* v5.2：天亮之后锁在白天（0.42 = 上午）。不再跟着真实时间走，
+         所以玩家回镇、刷新、隔天再进来，看到的都是晴天。 */
+      var dl = 0.42 - st.vt;
+      if (dl > 0.5) dl -= 1; else if (dl < -0.5) dl += 1;
+      st.vt += dl * (1 - Math.exp(-dt * 1.6));
+      if (Math.abs(dl) < 0.002) st.vt = 0.42;
+    }
     else if (!st.frozen) {
       var target = vtOf(now);
       var d = target - st.vt;
@@ -164,6 +221,13 @@ window.TownLife = (function () {
     st.lamp = lerp(a.lamp, b.lamp, f);
     st.win = lerp(a.win, b.win, f);
     st.phase = phaseOf(t);
+
+    /* ---- v5.2 极夜：在昼夜色之上再压一层冷蓝紫 ----
+       只改「环境色 + 环境光强度 + 灯的必要亮度」，不改昼夜相位，
+       所以极夜期间时间照走、天气照旧，只是天一直不亮。
+       关键：lamp/win 有下限 —— 极夜里唯一能看清东西的就是灯，
+       绝不允许把小镇压成一片纯黑。 */
+    if (polarLevel > 0) applyPolar(polarLevel);
 
     /* ---- 天气 ---- */
     var slot = Math.floor((now - EPOCH) / WX_MS);
@@ -1079,6 +1143,11 @@ window.TownLife = (function () {
     return {
       phase: st.phase,
       vt: +st.vt.toFixed(4),
+      /* v5.2：极夜等级与天亮锁 —— 验收脚本要看得到 */
+      polar: st.polar,
+      dayLock: st.dayLock,
+      sky: 'rgb(' + (st.top[0] | 0) + ',' + (st.top[1] | 0) + ',' + (st.top[2] | 0) + ')',
+      skyBot: 'rgb(' + (st.bot[0] | 0) + ',' + (st.bot[1] | 0) + ',' + (st.bot[2] | 0) + ')',
       /* v4.7.1：把两个周期暴露出来，验收脚本可以直接断言
          「一天 30 分钟、天气还是 4 分钟一档」，不用去猜常量。 */
       dayMs: DAY_MS,
@@ -1115,6 +1184,10 @@ window.TownLife = (function () {
   }
 
   function setClock(t, hold) {
+    /* v5.2：这是测试/调试口，用来强制任意时刻 —— 所以它同时解除「天亮锁白天」，
+       否则验收脚本 seed 了 revived 之后就再也摆不出夜晚了。
+       正式流程里没有任何地方调用它，玩家不会因此看到天黑回来。 */
+    dayLock = false; st.dayLock = false;
     st.vt = ((t % 1) + 1) % 1;
     st.vtInit = true;
     st.frozen = hold !== false;
@@ -1171,7 +1244,7 @@ window.TownLife = (function () {
   }
 
   return {
-    version: '5.1.0',
+    version: '5.2.0',
     tick: tick,
     drawFootprints: drawFootprints,
     drawBuildingLife: drawBuildingLife,
@@ -1186,6 +1259,9 @@ window.TownLife = (function () {
     coupleView: coupleView,
     snapshot: snapshot,
     setStoryDim: function (v) { storyDim = (typeof v === 'number' && v >= 0 && v <= 1) ? v : 1; },
+    setPolar: setPolar,
+    setDayLock: setDayLock,
+    isDayLocked: function () { return dayLock; },
     setClock: setClock,
     releaseClock: releaseClock,
     setWeather: setWeather,

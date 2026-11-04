@@ -1153,6 +1153,9 @@ window.Game = (function () {
      不靠「明天再来」这四个字。 */
   function updateQuest() {
     if (S.advancing) return;                     // 上一次翻页还没写进云端，别叠
+    /* v5.2：管理员正在逐章测试时，章节完全听测试面板的 ——
+       不然刚退回去一章，下一帧又被条件推回来，根本测不了。 */
+    if (chapterTestActive()) return;
     var ch = chapterNo();
     if (ch >= CHAPTERS.length) {
       if (S.quest.step < 6) { S.quest.step = 6; syncQuest(); }
@@ -2190,6 +2193,14 @@ window.Game = (function () {
     updateQuest();
     maybeOpenNorth();
     maybeSunriseAuto();
+    /* v5.2：读过「天亮」的存档，一进游戏就该是白天（不受昼夜计时影响）。
+       只在本局第一次生效 —— 之后测试脚本调 setClock 仍然能摆出夜晚。 */
+    if (!S.dayLockApplied) {
+      S.dayLockApplied = true;
+      if (northHas('revived')) {
+        try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
+      }
+    }
 
     /* ---- v4.5：树点亮之后不再自动播结局 ----
      * 以前这里是 startEnding()：树一满、任务一到，整段 15 句对白自己就开演了。
@@ -4745,35 +4756,39 @@ window.Game = (function () {
           return;
         }
       }
-      var stage = treeStage();
-      var pool = (stage >= 4 && it.ref.lateLines && it.ref.lateLines.length) ? it.ref.lateLines : it.ref.lines;
-      if (!pool || !pool.length) pool = ['……'];
+      /* v5.2：剧情开始之后（极夜出现），NPC 的**整段台词**都换成当前
+         剧情节拍的那一套；还没进入剧情时仍用原来的日常台词。
+         节拍由 world 字段推导（Story.tierOf），所以管理员跳章之后
+         下一次对话立刻就是新档位，不会残留旧档的对白。 */
+      var talk = null;
+      try {
+        if (window.Story && window.Story.npcTalk) talk = Story.npcTalk(curWorld() || {}, it.ref.id);
+      } catch (e) { }
       var idx = (S.npcIdx[it.ref.id] || 0);
+      var pool, first;
+      if (talk && talk.pool && talk.pool.length) {
+        pool = talk.pool;
+        if (!S.storySaid) S.storySaid = loadSaid();
+        if (!S.storySaid[talk.key]) {
+          first = pool[0];                       // 这一档的关键句，只播一次
+          markSaid(talk.key);
+        } else {
+          var rest = pool.length > 1 ? pool.slice(1) : pool;
+          first = rest[idx % rest.length];       // 之后回到这一档的日常句
+        }
+      } else {
+        var stage = treeStage();
+        pool = (stage >= 4 && it.ref.lateLines && it.ref.lateLines.length) ? it.ref.lateLines : it.ref.lines;
+        if (!pool || !pool.length) pool = ['……'];
+        first = pool[idx % pool.length];
+      }
       /* 委托那句是「附加」的：它自己出问题，也不能把正常对话一起拖没 */
       var commLine = null;
       try { commLine = talkComm(it.ref.id); } catch (e) { if (window.console) console.warn('[comm]', it.ref.id, e); }
-      var first = pool[idx % pool.length];
-      /* v5.0：这一阶段专属的一句 —— 只在第一次对话时出现，之后回到日常。
-         不把它做成"必读"，玩家想跳过也随时能跳过。 */
-      var storyLine = null;
-      try {
-        if (window.Story) {
-          var sKey = it.ref.id + ':' + storyTalkStage();
-          if (!S.storySaid) S.storySaid = {};
-          if (!S.storySaid[sKey]) {
-            var sl = Story.npcLines(it.ref.id, storyTalkStage());
-            if (sl && sl.length) {
-              storyLine = sl[Math.floor(Math.random() * sl.length)];
-              S.storySaid[sKey] = 1;
-            }
-          }
-        }
-      } catch (e) { }
       /* 顺序很重要：有委托交付时，委托那句必须还是第二句
          （玩家点两下就要看到"交付完成"，不能让剧情台词把它挤到第三句）。 */
       var dlg;
       if (commLine) dlg = [first, commLine];
-      else if (storyLine) dlg = [storyLine, first];
       else dlg = [first];
       openDialog(it.ref.name, dlg);
       S.npcIdx[it.ref.id] = idx + 1;
@@ -5356,6 +5371,7 @@ window.Game = (function () {
     renderAdminMats();
     renderAdminNorth();
     renderAdminTestline();
+    renderAdminChapter();
   }
 
   /* 礼品图鉴的真实口径：车票 / 回忆 / 地址 / 特产，四本册子都是 world 里现成的字段 */
@@ -5430,8 +5446,9 @@ window.Game = (function () {
       (st && st.open ? '✓ 已经永久解锁' : '✗ 还没有解锁过') + '</span></div>');
     rows.push('<div class="admin-sec"><b>解锁条件</b><span>章节 ≥ ' + (NORTH_GATE + 1) +
       ' 且处于夜晚 → 出现一次，之后永久保留（不要求现实等待）</span></div>');
-    rows.push('<div class="admin-sec"><b>章节进度</b><span>第 ' + (chapterNo() + 1) + ' 章　' +
-      (chapterNo() >= NORTH_GATE ? '✓ 已满足' : '还差 ' + (NORTH_GATE - chapterNo()) + ' 章') + '</span></div>');
+    rows.push('<div class="admin-sec"><b>章节进度</b><span>第 ' + (chapterRaw() + 1) + ' 章　' +
+      (chapterRaw() >= NORTH_GATE ? '✓ 已满足' : '还差 ' + (NORTH_GATE - chapterRaw()) + ' 章') +
+      (chapterTestActive() ? '　（测试中）' : '') + '</span></div>');
     rows.push('<div class="admin-sec"><b>测试模式</b><span>' +
       (northAlwaysOn() ? '⚠️ 常显中（不写存档）' : '关（按规则走）') + '</span></div>');
     rows.push('<div class="admin-sec"><b>我在线</b><span>✓ ' + esc(NAME[S.mySlot]) + ' · ' +
@@ -5542,6 +5559,119 @@ window.Game = (function () {
       rows.push('<div class="admin-sec off"><b>测试跳过</b><span>没有进行中的跳过（「恢复」会提示没有可恢复的进度）</span></div>');
     }
     box.innerHTML = rows.join('');
+  }
+
+  /* ============================================================
+   * v5.2 管理员 · 主线测试（逐章推进 / 退回 / 恢复）
+   * ------------------------------------------------------------
+   * 和「隐藏任务测试」是两件事：
+   *   隐藏任务测试改的是 world.north（北境那条线的进度）；
+   *   这里改的是 world.chapter（主线章节号）。
+   *
+   * 为什么不能只改 world.chapter：
+   *   updateQuest() 每帧都在检查「下一章的条件满足了吗」，一满足就自动推章。
+   *   如果只是把章节号往回拨，下一帧就会被推回去，根本测不了。
+   *   所以一旦进入测试（world.chapterTest 存在），就**暂停自动推章**，
+   *   章节完全听测试面板的；点「恢复」把章节号放回测试前，并删掉测试记录。
+   *
+   * 安全边界：
+   *   · 只写 world.chapter / world.chapterTest 两个字段，走 mutate（world 事务）；
+   *   · 不发章节奖励（不调用 advanceChapter）—— 测试不该凭空多出木头和鲜花；
+   *   · 不碰资源 / 旅行记录 / 回忆 / 车票 / north；
+   *   · 恢复 = 把 orig 原样写回去，测试记录一并删除。
+   * ============================================================ */
+  var CHAPTER_TEST_MAX = CHAPTERS.length;      // 章节号 0 基，最大 = 章节总数
+
+  function chapterRaw() {
+    var w = curWorld() || {};
+    return Math.max(0, w.chapter || 0);
+  }
+  function chapterTestActive() {
+    var w = curWorld() || {};
+    return !!(w.chapterTest && typeof w.chapterTest === 'object');
+  }
+  function chapterNameOf(n) {
+    var c = CHAPTERS[n];
+    return c ? ('第 ' + (n + 1) + ' 章 · ' + c.t) : '全部章节已完成';
+  }
+  /* 剧情档位的人话名字（和 story.js 的 TIER 对齐） */
+  function storyTierName(t) {
+    if (t == null || t < 0) return '序章（还没进入北境线）';
+    return ['极夜开始', '北境入口出现', '北境探索中', '双人星门开启',
+      '宝箱开启（拿到三件）', '极光之后', '小镇天亮', '最终圣诞筹备'][t] || ('档 ' + t);
+  }
+
+  function renderAdminChapter() {
+    var box = $('#admin-chapter-status');
+    if (!box) return;
+    var w = curWorld() || {};
+    var ct = w.chapterTest;
+    var cur = chapterRaw();
+    var tier = window.Story ? Story.tierOf(w) : -1;
+    var rows = [];
+    rows.push('<div class="admin-sec"><b>当前章节</b><span>' + esc(chapterNameOf(cur)) +
+      '　（' + cur + ' / ' + CHAPTER_TEST_MAX + '）</span></div>');
+    rows.push('<div class="admin-sec"><b>剧情阶段</b><span>' + esc(storyTierName(tier)) + '</span></div>');
+    rows.push('<div class="admin-sec ' + (ct ? 'ok' : 'off') + '"><b>测试状态</b><span>' +
+      (ct ? ('✓ 测试中：自动推章已暂停　原始章节 ' + (ct.orig + 1) + ' 章　' + esc(new Date(ct.at || 0).toLocaleTimeString()))
+        : '没有进行中的章节测试（章节按正常规则自动推进）') + '</span></div>');
+    if (ct) {
+      rows.push('<div class="admin-sec"><b>下一步</b><span>点「恢复」把章节放回第 ' + (ct.orig + 1) + ' 章，测试记录一并删除</span></div>');
+    }
+    box.innerHTML = rows.join('');
+  }
+
+  function adminChapterAct(kind) {
+    if (!devOrAdmin()) return;
+    if (S.chapterTestBusy) return;
+    S.chapterTestBusy = true;
+    var before = chapterRaw();
+    if (kind === 'restore') {
+      if (!chapterTestActive()) {
+        S.chapterTestBusy = false;
+        toast('没有进行中的章节测试：现在就是正常进度', 3200);
+        renderAdminChapter();
+        return;
+      }
+      mutate(function (w) {
+        if (!w.chapterTest) return w;               // 另一台已经恢复过了
+        w.chapter = Math.max(0, w.chapterTest.orig || 0);
+        delete w.chapterTest;
+        return w;
+      }).then(function (ok) {
+        S.chapterTestBusy = false;
+        var after = chapterRaw();
+        logAdmin('主线测试·恢复', 'chapter', before + 1, after + 1, !!ok);
+        if (!ok) toast('⚠️ 恢复没写进存档，再试一次', 3200);
+        else toast('↩️ 章节已恢复到测试前：第 ' + (after + 1) + ' 章', 3800);
+        refreshHUD(); renderAdminChapter(); renderAdminTestline();
+      }, function () { S.chapterTestBusy = false; toast('⚠️ 恢复失败，再试一次', 3000); });
+      return;
+    }
+    var delta = (kind === 'prev') ? -1 : 1;
+    mutate(function (w) {
+      var cur = Math.max(0, w.chapter || 0);
+      if (!w.chapterTest) w.chapterTest = { at: Date.now(), orig: cur, level: cur };
+      var next = Math.max(0, Math.min(CHAPTER_TEST_MAX, cur + delta));
+      w.chapter = next;
+      w.chapterTest.level = next;
+      w.chapterTest.at = Date.now();
+      return w;
+    }).then(function (ok) {
+      S.chapterTestBusy = false;
+      var after = chapterRaw();
+      logAdmin('主线测试·' + (delta > 0 ? '推进' : '退回'), 'chapter', before + 1, after + 1, !!ok);
+      if (!ok) { toast('⚠️ 没写进存档，再试一次', 3000); return; }
+      if (after === before) {
+        toast(delta > 0 ? '已经是最后一章了' : '已经是第一章了', 2600);
+      } else {
+        toast((delta > 0 ? '📖 推进到 ' : '📖 退回到 ') + chapterNameOf(after) + '（测试用）', 4200);
+      }
+      refreshHUD();
+      renderAdminChapter();
+      renderAdminTestline();
+      renderAdminNorth();
+    }, function () { S.chapterTestBusy = false; toast('⚠️ 操作失败，再试一次', 3000); });
   }
 
   function adminNorthSkip(level) {
@@ -6061,6 +6191,13 @@ window.Game = (function () {
       nb[k].dataset.bound = '1';
       nb[k].addEventListener('click', function () { adminNorthAct(this.getAttribute('data-north')); });
     }
+    /* v5.2 主线测试：推进 / 退回 / 恢复 */
+    var cb = document.querySelectorAll('[data-chapter-act]');
+    for (var cq = 0; cq < cb.length; cq++) {
+      if (cb[cq].dataset.bound) continue;
+      cb[cq].dataset.bound = '1';
+      cb[cq].addEventListener('click', function () { adminChapterAct(this.getAttribute('data-chapter-act')); });
+    }
     /* 测试时间推进的四个按钮（只有进了管理员会话才点得到，面板关了就消失） */
     var tb = document.querySelectorAll('[data-time-adv]');
     for (var j = 0; j < tb.length; j++) {
@@ -6488,6 +6625,27 @@ window.Game = (function () {
   function northMapGot() {
     var n = northData();
     return !!(n && n.map);
+  }
+
+  /* ---------- 「这段关键对白听过了」的本地记账 ----------
+     只影响「同一句关键台词要不要再播」，不参与任何游戏进度判定，
+     所以放在 localStorage（按房间分开），不写 Firebase、不占共享存档。
+     两台设备各记各的 —— 谁听过谁就不再听第二遍。 */
+  function saidKeyOf() { return 'omo_said_' + (S.code || 'local'); }
+  function loadSaid() {
+    try {
+      var raw = localStorage.getItem(saidKeyOf());
+      if (raw) {
+        var o = JSON.parse(raw);
+        if (o && typeof o === 'object') return o;
+      }
+    } catch (e) { }
+    return {};
+  }
+  function markSaid(k) {
+    if (!S.storySaid) S.storySaid = loadSaid();
+    S.storySaid[k] = 1;
+    try { localStorage.setItem(saidKeyOf(), JSON.stringify(S.storySaid)); } catch (e) { }
   }
 
   function northData() { return northState() || {}; }
@@ -7021,6 +7179,7 @@ window.Game = (function () {
   var sunriseTryAt = 0;
   function maybeSunriseAuto() {
     if (!window.Story) return;
+    if (S.devHoldSunrise) return;            // 验收脚本用：临时扣住兜底天亮，方便取景
     if (S.cineBusy || S.traveling || S.paused) return;
     if (S.mapId || S.interId || S.ending || S.photo) return;
     if (northHas('revived')) return;
@@ -7035,6 +7194,12 @@ window.Game = (function () {
     if (S.cineBusy) return;
     if (northHas('revived')) return;
     S.cineBusy = true;
+    /* v5.2：日出过程加三张章节字幕卡（淡入 / 停留 / 淡出），不遮角色与小镇。 */
+    runChapterCards();
+    /* 天亮锁要在黑场淡出之前落下，否则演出结束那一瞬间会闪回夜晚。 */
+    setTimeout(function () {
+      try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
+    }, 8600);
     runCine('sunrise', 9.5, function () {
       var now = Date.now();
       mutate(function (w) {
@@ -7044,6 +7209,8 @@ window.Game = (function () {
         return w;
       }).then(function () {
         S.cineBusy = false;
+        /* 双保险：无论上面那次定时有没有跑到，这里再锁一次白天 */
+        try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
         refreshHUD();
         logAdmin('小镇恢复光明', 'revived', null, null, true);
         openDialog('🌤', [
@@ -7056,6 +7223,29 @@ window.Game = (function () {
         setTimeout(finalPrepOffer, 2200);
       }, function () { S.cineBusy = false; });
     });
+  }
+
+  /* 三张章节收尾字幕：THE FORGOTTEN NORTH → THE LIGHT RETURNS → 完结。
+     纯 DOM，和 #cine 同一层；不抢渲染循环，也不会挡住角色（都在画面上半部）。 */
+  function runChapterCards() {
+    var wrap = $('#chapter-cards');
+    if (!wrap) return;
+    var cards = wrap.querySelectorAll('.chap-card');
+    if (!cards.length) return;
+    wrap.classList.remove('hidden');
+    var timings = [
+      { in: 500, out: 3400 },
+      { in: 3800, out: 6700 },
+      { in: 7100, out: 9700 }
+    ];
+    for (var i = 0; i < cards.length; i++) {
+      (function (el, tm) {
+        el.classList.remove('on');
+        setTimeout(function () { el.classList.add('on'); }, tm.in);
+        setTimeout(function () { el.classList.remove('on'); }, tm.out);
+      })(cards[i], timings[i] || timings[timings.length - 1]);
+    }
+    setTimeout(function () { wrap.classList.add('hidden'); }, 10200);
   }
 
   /* ---------- 最终筹备 ---------- */
@@ -8787,28 +8977,56 @@ window.Game = (function () {
 
     drawParticles(ctx);
 
-    /* v5.0 极夜：小镇的光一点一点退掉。
-       不做成"一键变黑"，而是按剧情等级叠一层冷色压光 —— 等级由北境进度推出来，
-       没有单独的开关，所以两台设备看到的是同一个天色。 */
+    /* v5.2 极夜：分级调色，而不是"一键变黑"。
+       真正的分级在 TownLife.setPolar() 里做（环境色 + 环境光下限 + 灯的下限），
+       这里只补两件小镇独有的东西：
+         1) 一层很淡的冷色叠加，把整幅画统一到极夜的冷调里；
+         2) 3 级开始，画面顶端渗一点极光的青绿 —— 头顶那片天在发亮。 */
     var PLV = polarLevel();
+    if (window.TownLife && TownLife.setPolar) TownLife.setPolar(PLV);
     if (window.TownLife && TownLife.setStoryDim) {
-      /* 极夜越深，树灯与窗灯越弱（3 级开始明显），恢复后回到 1 */
-      TownLife.setStoryDim(PLV >= 4 ? 0.42 : PLV === 3 ? 0.62 : PLV === 2 ? 0.82 : 1);
+      /* 树灯只做极轻微的收敛（0.9~1）：环境已经够冷了，树是镇上最后的暖光 */
+      TownLife.setStoryDim(PLV >= 4 ? 0.90 : 1);
     }
     if (PLV > 0 && !S.mapId && !S.interId) {
-      var pa = [0, 0.16, 0.30, 0.44, 0.56][Math.min(4, PLV)] || 0;
+      var vw = S.view.w / zoomNow(), vh = S.view.h / zoomNow();
+      var pa = [0, 0.06, 0.12, 0.19, 0.26][Math.min(4, PLV)] || 0;
       ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(4,8,18,' + pa.toFixed(3) + ')';
-      ctx.fillRect(S.cam.x - 4, S.cam.y - 4, S.view.w / zoomNow() + 8, S.view.h / zoomNow() + 8);
-      /* 边缘再压一点冷蓝，像光被抽走 */
-      var vg2 = ctx.createRadialGradient(
-        S.cam.x + S.view.w / zoomNow() / 2, S.cam.y + S.view.h / zoomNow() / 2, S.view.h / zoomNow() * 0.2,
-        S.cam.x + S.view.w / zoomNow() / 2, S.cam.y + S.view.h / zoomNow() / 2, S.view.h / zoomNow() * 0.9);
-      vg2.addColorStop(0, 'rgba(8,16,40,0)');
-      vg2.addColorStop(1, 'rgba(6,12,32,' + (pa * 0.8).toFixed(3) + ')');
-      ctx.fillStyle = vg2;
-      ctx.fillRect(S.cam.x - 4, S.cam.y - 4, S.view.w / zoomNow() + 8, S.view.h / zoomNow() + 8);
+      /* 上冷下更冷的竖向渐变，比一层平铺的黑更像"天光被抽走" */
+      var cold = ctx.createLinearGradient(0, S.cam.y, 0, S.cam.y + vh);
+      cold.addColorStop(0, 'rgba(26,38,84,' + (pa * 1.15).toFixed(3) + ')');
+      cold.addColorStop(0.55, 'rgba(18,28,64,' + pa.toFixed(3) + ')');
+      cold.addColorStop(1, 'rgba(10,16,40,' + (pa * 1.1).toFixed(3) + ')');
+      ctx.fillStyle = cold;
+      ctx.fillRect(S.cam.x - 4, S.cam.y - 4, vw + 8, vh + 8);
+
+      /* 3 级起：四周再压一层冷紫暗角，让画面"往中间缩" —— 极夜的压迫感 */
+      if (PLV >= 3) {
+        var vk = (PLV === 3) ? 0.6 : 1;
+        var vg2 = ctx.createRadialGradient(
+          S.cam.x + vw / 2, S.cam.y + vh * 0.52, Math.min(vw, vh) * 0.26,
+          S.cam.x + vw / 2, S.cam.y + vh * 0.52, Math.max(vw, vh) * 0.78);
+        vg2.addColorStop(0, 'rgba(10,14,38,0)');
+        vg2.addColorStop(0.7, 'rgba(8,12,34,' + (0.16 * vk).toFixed(3) + ')');
+        vg2.addColorStop(1, 'rgba(6,10,30,' + (0.34 * vk).toFixed(3) + ')');
+        ctx.fillStyle = vg2;
+        ctx.fillRect(S.cam.x - 4, S.cam.y - 4, vw + 8, vh + 8);
+      }
+
+      /* 3 级起：头顶渗极光。小镇是俯视视角，所以不做横跨天空的光带，
+         只从画面顶端往下渗一层青绿，像"头顶那片天在发亮"。 */
+      if (PLV >= 3) {
+        ctx.globalCompositeOperation = 'lighter';
+        var reach = Math.min(vh * 0.44, 340);
+        var gk = (PLV - 3 + 1) / 2;          // 3 级 0.5、4 级 1
+        var gg = ctx.createLinearGradient(0, S.cam.y - 10, 0, S.cam.y - 10 + reach);
+        gg.addColorStop(0, 'rgba(96,240,196,' + (0.13 * gk).toFixed(3) + ')');
+        gg.addColorStop(0.32, 'rgba(110,226,196,' + (0.085 * gk).toFixed(3) + ')');
+        gg.addColorStop(0.68, 'rgba(150,190,255,' + (0.045 * gk).toFixed(3) + ')');
+        gg.addColorStop(1, 'rgba(140,180,255,0)');
+        ctx.fillStyle = gg;
+        ctx.fillRect(S.cam.x - 4, S.cam.y - 10, vw + 8, reach);
+      }
       ctx.restore();
     }
 
@@ -9116,7 +9334,10 @@ window.Game = (function () {
       /* v5.1：只读的剧情推导快照，给验收脚本断言（不给写入口） */
       story: {
         stage: storyStage(), polar: polarLevel(), talk: storyTalkStage(),
-        base: iceBaseReady(), story: iceStoryReady(), mapGot: northMapGot()
+        tier: (window.Story ? Story.tierOf(curWorld() || {}) : -1),
+        base: iceBaseReady(), story: iceStoryReady(), mapGot: northMapGot(),
+        chapterTest: chapterTestActive(), chapterRaw: chapterRaw(),
+        dayLock: !!(window.TownLife && TownLife.isDayLocked && TownLife.isDayLocked())
       },
       party: partySnapshot()
     };
@@ -9167,6 +9388,13 @@ window.Game = (function () {
     },
     devEnterNorth: function () { if (!devHook()) return false; enterNorth(); return true; },
     /* v4.10.1 隐藏任务测试：只读快照，给验收脚本断言用（不提供写入口） */
+    /* 验收专用：临时扣住「兜底天亮」，方便在镇上取极夜 4 级的画面。
+       只在 ?dev=1 下有效，正式流程里这个标志永远是 false。 */
+    devHoldSunrise: function (v) {
+      if (!devHook()) return false;
+      S.devHoldSunrise = !!v;
+      return true;
+    },
     devNorthQuest: function () {
       var w = curWorld() || {};
       return {

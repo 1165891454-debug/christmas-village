@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=5.1.0" />
+  <link rel="stylesheet" href="style.css?v=5.2.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -449,6 +449,18 @@
               <p class="muted small-note">跳过只写共享存档里的 <b>world.north</b>（走 world 事务，两台设备同时生效），并先把跳过前的进度整份备份到 <b>world.northTest</b>；「恢复」就是把它原样放回去。车票、回忆、特产、冰岛解锁条件一律不碰。</p>
             </div>
 
+            <div class="admin-block admin-north admin-testline" id="admin-chapter">
+              <div class="admin-block-head">📖 主线测试 <span class="admin-block-sub">MAIN STORY TEST · TEST ONLY</span></div>
+              <p class="admin-warn">⚠ 测试功能：只改「章节号」，不发放任何正式奖励，也不碰资源 / 旅行 / 回忆</p>
+              <div id="admin-chapter-status" class="admin-north-status"></div>
+              <div class="admin-actions">
+                <button class="btn ghost small" type="button" data-chapter-act="prev">← 退回一章</button>
+                <button class="btn primary small" type="button" data-chapter-act="next">推进一章 →</button>
+                <button class="btn ghost small" type="button" data-chapter-act="restore">恢复测试前进度</button>
+              </div>
+              <p class="muted small-note">章节推进期间，主线不会因为条件满足而自己往前跳（否则刚退回一章又会被推回去）。点「恢复」把章节号放回测试前，测试记录一并删掉。这份记录在 <b>world.chapterTest</b> 里，两台设备同步。</p>
+            </div>
+
             <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。<br />素材 +5 每 60 秒最多存一次完整备份，避免连点把存档撑大；每次操作都会记进本机日志。</p>
           </div>
         </div>
@@ -648,6 +660,13 @@
   <!-- v5.0 剧情演出：冰岛极光 / 小镇天亮 -->
   <canvas id="cine" class="hidden" aria-hidden="true"></canvas>
 
+  <!-- v5.2 日出章节字幕：三张卡，淡入淡出，只在上半部，不挡角色 -->
+  <div id="chapter-cards" class="hidden" aria-hidden="true">
+    <div class="chap-card"><b>THE FORGOTTEN NORTH</b><span>北境之地</span></div>
+    <div class="chap-card"><b>THE LIGHT RETURNS</b><span>光明，终于回来了。</span></div>
+    <div class="chap-card"><b>北境之地</b><span>—— 完结 ——</span></div>
+  </div>
+
   <!-- v4.10 获得物品：旧雪铲 / 那封信 -->
   <div id="item-card" class="hidden" aria-hidden="true">
     <canvas id="item-card-icon" width="64" height="64"></canvas>
@@ -666,18 +685,18 @@
     <div class="tc-line"></div>
   </div>
 
-  <script src="firebase-config.js?v=5.1.0"></script>
-  <script src="memories.js?v=5.1.0"></script>
-  <script src="chars.js?v=5.1.0"></script>
-  <script src="sprites.js?v=5.1.0"></script>
-  <script src="world.js?v=5.1.0"></script>
-  <script src="north.js?v=5.1.0"></script>
-  <script src="maps.js?v=5.1.0"></script>
-  <script src="specialties.js?v=5.1.0"></script>
-  <script src="life.js?v=5.1.0"></script>
-  <script src="story.js?v=5.1.0"></script>
-  <script src="game.js?v=5.1.0"></script>
-  <script src="app.js?v=5.1.0"></script>
+  <script src="firebase-config.js?v=5.2.0"></script>
+  <script src="memories.js?v=5.2.0"></script>
+  <script src="chars.js?v=5.2.0"></script>
+  <script src="sprites.js?v=5.2.0"></script>
+  <script src="world.js?v=5.2.0"></script>
+  <script src="north.js?v=5.2.0"></script>
+  <script src="maps.js?v=5.2.0"></script>
+  <script src="specialties.js?v=5.2.0"></script>
+  <script src="life.js?v=5.2.0"></script>
+  <script src="story.js?v=5.2.0"></script>
+  <script src="game.js?v=5.2.0"></script>
+  <script src="app.js?v=5.2.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

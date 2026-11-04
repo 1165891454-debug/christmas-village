@@ -2612,9 +2612,9 @@ window.TravelMaps = (function () {
     g.lineTo(x + w2, y);
     g.closePath();
     var gr = g.createLinearGradient(x - w2, y - h2, x + w2 * 0.6, y);
-    gr.addColorStop(0, '#f6fdff');
-    gr.addColorStop(0.40, '#d6effb');
-    gr.addColorStop(1, '#7fb6d8');
+    gr.addColorStop(0, '#dceff9');
+    gr.addColorStop(0.40, '#bcdff0');
+    gr.addColorStop(1, '#6fa6c8');
     g.fillStyle = gr; g.fill();
     /* 受光的那一刀 */
     g.strokeStyle = 'rgba(255,255,255,.62)'; g.lineWidth = 1.2;
@@ -2802,6 +2802,41 @@ window.TravelMaps = (function () {
         { x: 1190, y: 0, w: 36, h: 28 }, { x: 1350, y: 0, w: 42, h: 30 },
         { x: 1440, y: 0, w: 26, h: 22 }
       ], 2.4, 3.1), '#1b3149', 766, 0.20, 704);
+      /* ---- v5.2 远景孤峰：比最远的山脊更淡、更冷，只露出一个尖 ----
+         冰岛的辨识度很大一部分来自这种"单独一座、又尖又薄"的山
+         （草帽山那种形状）。只放两座，放多就成装饰了。 */
+      function distantPeak(px, baseY2, pw, ph, tint) {
+        g.beginPath();
+        g.moveTo(px - pw, baseY2);
+        g.lineTo(px - pw * 0.18, baseY2 - ph);
+        g.lineTo(px + pw * 0.10, baseY2 - ph * 0.72);
+        g.lineTo(px + pw * 0.62, baseY2 - ph * 0.30);
+        g.lineTo(px + pw, baseY2);
+        g.closePath();
+        g.fillStyle = tint;
+        g.fill();
+        /* 受光的那一面：极光从北边打过来，左坡亮一点 */
+        g.beginPath();
+        g.moveTo(px - pw * 0.18, baseY2 - ph);
+        g.lineTo(px - pw, baseY2);
+        g.lineTo(px - pw * 0.06, baseY2);
+        g.closePath();
+        g.fillStyle = 'rgba(150,196,226,.16)';
+        g.fill();
+        /* 尖顶的一点雪 */
+        g.beginPath();
+        g.moveTo(px - pw * 0.18, baseY2 - ph);
+        g.lineTo(px - pw * 0.34, baseY2 - ph * 0.74);
+        g.lineTo(px - pw * 0.02, baseY2 - ph * 0.78);
+        g.lineTo(px + pw * 0.08, baseY2 - ph * 0.70);
+        g.closePath();
+        g.fillStyle = 'rgba(214,238,255,.30)';
+        g.fill();
+      }
+      distantPeak(608, 764, 96, 96, 'rgba(28,48,72,.72)');
+      distantPeak(1178, 766, 74, 74, 'rgba(30,52,78,.66)');
+
+
 
       /* 中景：真的盖着雪的山 */
       iceRidge(g, iceRidgePts(812, [
@@ -2816,23 +2851,6 @@ window.TravelMaps = (function () {
         { x: 1140, y: 0, w: 48, h: 36 }, { x: 1250, y: 0, w: 26, h: 20 },
         { x: 1400, y: 0, w: 40, h: 30 }
       ], 3.2, 7.7), '#122438', 812, 0.34, 738);
-
-      /* 最近：几乎全黑的一条，把湖和山分开 */
-      iceRidge(g, iceRidgePts(842, [
-        { x: 100, y: 0, w: 240, h: 34 }, { x: 430, y: 0, w: 260, h: 40 },
-        { x: 760, y: 0, w: 220, h: 28 }, { x: 1060, y: 0, w: 270, h: 42 },
-        { x: 1350, y: 0, w: 240, h: 32 }
-      ], [
-        { x: 220, y: 0, w: 40, h: 20 }, { x: 500, y: 0, w: 44, h: 24 },
-        { x: 640, y: 0, w: 26, h: 16 }, { x: 900, y: 0, w: 36, h: 18 },
-        { x: 1180, y: 0, w: 46, h: 26 }, { x: 1420, y: 0, w: 32, h: 18 }
-      ], 2.0, 11.3), '#0a1626', 842, 0.16, 802);
-
-      /* 山脚的雾：把中景和冰湖之间糊一层，不然两排山都浮着 */
-      g.fillStyle = lin(g, 0, 760, 0, 850, [
-        0, 'rgba(126,164,200,0)', 0.55, 'rgba(112,158,196,.13)', 1, 'rgba(96,140,178,.04)'
-      ]);
-      g.fillRect(0, 760, W, 90);
 
       /* ================= 冰湖 ================= */
       g.fillStyle = lin(g, 0, ICE.lakeTop, 0, ICE.lakeBot, [
@@ -2887,9 +2905,9 @@ window.TravelMaps = (function () {
         g.fill();
       }
       /* 浮着的冰山：近大远小 */
-      icefloe(g, 250, 852, 74, 46, 5);
+      icefloe(g, 250, 852, 60, 38, 5);
       icefloe(g, 556, 866, 58, 34, 9);
-      icefloe(g, 792, 856, 86, 52, 13);
+      icefloe(g, 792, 856, 70, 43, 13);
       icefloe(g, 1150, 870, 66, 40, 21);
       icefloe(g, 1400, 852, 52, 30, 27);
       /* 靠岸的冰排：贴着水边的一条白 */
@@ -2916,7 +2934,7 @@ window.TravelMaps = (function () {
         [700, 872], [640, 880], [560, 882], [480, 878], [410, 870],
         [356, 858], [316, 832], [318, 800], [368, 778], [452, 768]];
       icePoly(GL_OUT, lin(g, 430, 760, 640, 882, [
-        0, '#ffffff', 0.30, '#eaf8ff', 0.62, '#c6e2f5', 1, '#84b6d6'
+        0, '#e8f5ff', 0.30, '#d8eefa', 0.62, '#b6d8ee', 1, '#7caece'
       ]));
       g.save();
       g.beginPath();
@@ -2982,10 +3000,10 @@ window.TravelMaps = (function () {
       g.lineTo(1512, 878);
       g.closePath();
       var cliff = g.createLinearGradient(0, 716, 0, 878);
-      cliff.addColorStop(0, '#fbfeff');
-      cliff.addColorStop(0.26, '#e8f6fe');
-      cliff.addColorStop(0.66, '#bcdcf1');
-      cliff.addColorStop(1, '#6ba3c6');
+      cliff.addColorStop(0, '#e6f4fb');
+      cliff.addColorStop(0.26, '#d4ecf8');
+      cliff.addColorStop(0.66, '#acd0e8');
+      cliff.addColorStop(1, '#639bbf');
       g.fillStyle = cliff; g.fill();
       g.save();
       g.clip();
