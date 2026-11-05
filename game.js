@@ -85,6 +85,7 @@ window.Game = (function () {
     adminGuardUntil: 0, mapId: null, mapReturn: null, spots: {}, photoOpt: null,
     portalFx: null, traveling: false, adminForcePortal: false, dig: null, camFocus: null,
     northTestBusy: false, gateCharge: 0, gateHintAt: 0, gateLastT: 0, gateOpenFx: 0,
+    northHintBusy: false, polarBusy: false, farmBusy: false,
     cineBusy: false, storySaid: {},
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
@@ -1029,8 +1030,13 @@ window.Game = (function () {
   function ranchGoodsCount() { return Object.keys(ranchEver()).length; }
   function chapterNo() {
     var w = curWorld() || {};
-    var n = w.chapter || 0;
-    return n > 8 ? 8 : n;
+    var n = Math.floor(w.chapter || 0);
+    if (!isFinite(n) || n < 0) return 0;
+    /* v5.4：以前这里写死 n > 8 ? 8 : n。
+       后果是第 10 章以后 updateQuest 永远回看第 9 章：
+       条件满足了也推不动，左上角还一直显示第九章。
+       现在只夹在「章节总数」以内（防止手改存档写出越界值）。 */
+    return n > CHAPTERS.length ? CHAPTERS.length : n;
   }
   function chapterDayStr() { var w = curWorld() || {}; return w.chapterDay || ''; }
 
@@ -1059,60 +1065,147 @@ window.Game = (function () {
   }
   function harvestsEver() { var w = curWorld() || {}; return w.harvests || 0; }
 
+  /* v5.4：每一章拆成 1~4 个「子目标」，判定与显示**同源** ——
+     ok() 就是「所有子目标都成立」，任务面板显示的就是同一组 checks。
+     以前文案写「树下装饰」、判定却看 materials，就是因为两边各写了一套。 */
+  function ck(label, ok, prog, where) {
+    return { label: label, ok: ok, prog: prog, where: where || '' };
+  }
   var CHAPTERS = [
-    { t: '回到小镇', en: 'FIRST STEPS', sum: '你们推开小屋的门，炉子还是温的。这个冬天，就从这儿开始。', tip: '先和圣诞老人打个招呼（车站旁边那棵大树下）',
-      ok: function () { return !!S.quest.talked.santa; },
-      prog: function () { return S.quest.talked.santa ? '✓' : '还没聊过'; } },
-    { t: '认识邻居', en: 'THE NEIGHBOURS', sum: '八个人，八种口音。镇上的人开始记住你们的名字了。', tip: '镇上现在有八个人。先认识五个：圣诞老人、雪人、小精灵、老板娘、邮差阿信、面包师麦香、牧羊女小禾、老木匠老鲁',
-      ok: function () { return talkCount() >= 5 && visitedCount() >= 2; },
-      prog: function () { return '聊过 ' + Math.min(5, talkCount()) + '/5 · 进过 ' + Math.min(2, visitedCount()) + '/2 间屋子'; } },
-    { t: '屋里的旧照片', en: 'OLD PHOTOGRAPHS', sum: '四间屋子的角落里，各藏着一张你们走过的地方。', tip: '四间屋子（小屋 / 咖啡馆 / 温室 / 工坊）的角落各藏一段回忆，先找到三段',
-      ok: function () { return roomFoundCount() >= 3; },
-      prog: function () { return '室内回忆 ' + Math.min(3, roomFoundCount()) + '/3'; } },
-    { t: '第一颗种子', en: 'THE FIRST SEED', sum: '泥土是冷的，可种下去的那一下，你们都听见了声音。', tip: '进星星温室：先在补给台领今天的种子，再挑两块地种下（花 30 分钟、树 6 小时，离开也会长）',
-      ok: function () { return dailyTaken() && plantedNow() >= 2; },
-      prog: function () { return '今日补给 ' + (dailyTaken() ? '✓' : '×') + ' · 已种下 ' + Math.min(2, plantedNow()) + '/2'; } },
-    { t: '开一片牧场', en: 'A LITTLE PASTURE', sum: '牛、羊、鸡各自占了半个角落。镇子一下子热闹起来。', tip: '去左边牧场抱一捆干草，喂一次牛、羊或鸡',
-      ok: function () {
-        var w = curWorld() || {};
-        return !!(w.ranch && w.ranch.gotHay) && ranchFedAny();
-      },
-      prog: function () {
-        var w = curWorld() || {};
-        return '干草 ' + (w.ranch && w.ranch.gotHay ? '✓' : '×') + ' · 喂食 ' + (ranchFedAny() ? '✓' : '×');
-      } },
-    { t: '第一次收成', en: 'FIRST HARVEST', sum: '花开了。你们把第一束插在窗台上，谁也没说话。', tip: '温室里的花熟了就去收——一次收成给鲜花和种子；种树要等 6 小时，但木材更值钱',
-      ok: function () { return harvestsEver() >= 1; },
-      prog: function () { return '收成 ' + Math.min(1, harvestsEver()) + '/1'; } },
-    { t: '收下第一份产物', en: 'MILK AND WOOL', sum: '清晨的牛奶还是温的，羊毛上沾着草屑。日子有了味道。', tip: '喂过的动物第二天来收：牛奶 / 羊毛 / 鸡蛋',
-      ok: function () { return ranchGoodsCount() >= 1 && foundCount() >= 4; },
-      prog: function () { return '产物 ' + Math.min(1, ranchGoodsCount()) + '/1 · 回忆 ' + Math.min(4, foundCount()) + '/4'; } },
-    { t: '邮局开张', en: 'THE POST OFFICE', sum: '第一个包裹寄出去了。地址是你们自己一笔一笔写的。', tip: '去工坊：木材做纸 → 纸+木材+鲜花做礼盒 → 到「寄件」台寄出第一个包裹',
-      ok: function () { return sentCount() >= 1; },
-      prog: function () { return '寄出包裹 ' + Math.min(1, sentCount()) + '/1 · 已知地址 ' + addrCount(); } },
-    { t: '把树种起来', en: 'THE TREE GROWS', sum: '树又长高了一截，影子也跟着长了。', tip: '温室种树收木材 → 工坊做一件手工 → 树下装饰',
-      ok: function () { return treeStage() >= 1 && (worldRes().materials || 0) >= 1; },
-      prog: function () { return '树 ' + treeStageName(treeStage()) + ' · 手工 ' + Math.min(1, worldRes().materials || 0) + '/1'; } },
-    { t: '凑齐三张车票', en: 'THREE TICKETS', sum: '三张票，三个方向。世界比这座镇子大得多。', tip: '车票不会一次给全：先把小镇的日子过得再热闹一点',
-      ok: function () { return ticketOwnedCount() >= 3; },
-      prog: function () { return '车票 ' + Math.min(3, ticketOwnedCount()) + '/3 · 回忆 ' + foundCount(); } },
-    { t: '远方的回信', en: 'LETTERS HOME', sum: '包裹带着远方的味道回来了 —— 松木、海风、还有一点点陌生。', tip: '寄出去的包裹会带着当地特产回来，收满三种',
-      ok: function () { return mailCount() >= 3 && specCount() >= 3; },
-      prog: function () { return '回信 ' + Math.min(3, mailCount()) + '/3 · 特产 ' + Math.min(3, specCount()) + '/3'; } },
-    { t: '点亮整棵树', en: 'ALL LIGHTS ON', sum: '整棵树都亮了。可镇子北边，好像有什么正在暗下去。', tip: '树长到第 6 阶（完全点亮）、三种牧场产物都收过、六种远方特产摆上架',
-      ok: function () { return treeStage() >= TREE_STAGE_MAX && foundCount() >= 11 && ranchGoodsCount() >= 3 && specCount() >= 6; },
-      prog: function () {
-        return '树 ' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）' +
-          ' · 回忆 ' + Math.min(11, foundCount()) + '/11 · 产物 ' + Math.min(3, ranchGoodsCount()) + '/3' +
-          ' · 特产 ' + specCount() + '/' + ((T() && T().count) || 41);
-      } }
+    { t: '回到小镇', en: 'FIRST STEPS', sum: '你们推开小屋的门，炉子还是温的。这个冬天，就从这儿开始。',
+      tip: '先和圣诞老人打个招呼（车站旁边那棵大树下）',
+      checks: [
+        ck('和圣诞老人打招呼', function () { return !!S.quest.talked.santa; },
+          function () { return S.quest.talked.santa ? '✓' : '0/1'; }, '广场大树下 · 圣诞老人')
+      ] },
+
+    { t: '认识邻居', en: 'THE NEIGHBOURS', sum: '八个人，八种口音。镇上的人开始记住你们的名字了。',
+      tip: '和镇上的五个人说话，再进屋看看（四间屋子都进得去）',
+      checks: [
+        ck('和镇上的人说话', function () { return talkCount() >= 5; },
+          function () { return Math.min(5, talkCount()) + '/5'; }, '广场 / 邮局 / 牧场 / 工坊'),
+        ck('进过屋子', function () { return visitedCount() >= 2; },
+          function () { return Math.min(2, visitedCount()) + '/2'; }, '小屋 / 咖啡馆 / 温室 / 工坊')
+      ] },
+
+    { t: '屋里的旧照片', en: 'OLD PHOTOGRAPHS', sum: '四间屋子的角落里，各藏着一张你们走过的地方。',
+      tip: '四间屋子（小屋 / 咖啡馆 / 温室 / 工坊）的角落各藏一段回忆，先找到三段',
+      checks: [
+        ck('找到室内回忆', function () { return roomFoundCount() >= 3; },
+          function () { return Math.min(3, roomFoundCount()) + '/3'; }, '四间屋子的角落（走近自动拾起）')
+      ] },
+
+    { t: '第一颗种子', en: 'THE FIRST SEED', sum: '泥土是冷的，可种下去的那一下，你们都听见了声音。',
+      tip: '进星星温室：先在补给台领今天的种子，再挑两块地种下',
+      checks: [
+        ck('领今天的补给', function () { return dailyTaken(); },
+          function () { return dailyTaken() ? '✓' : '0/1'; }, '温室 · 补给台'),
+        ck('种下两颗种子', function () { return plantedNow() >= 2; },
+          function () { return Math.min(2, plantedNow()) + '/2'; }, '温室 · 六块地')
+      ] },
+
+    { t: '开一片牧场', en: 'A LITTLE PASTURE', sum: '牛、羊、鸡各自占了半个角落。镇子一下子热闹起来。',
+      tip: '去左边牧场抱一捆干草，喂一次牛、羊或鸡',
+      checks: [
+        ck('抱一捆干草', function () { var w = curWorld() || {}; return !!(w.ranch && w.ranch.gotHay); },
+          function () { var w = curWorld() || {}; return (w.ranch && w.ranch.gotHay) ? '✓' : '0/1'; }, '牧场 · 干草垛'),
+        ck('喂一次动物', function () { return ranchFedAny(); },
+          function () { return ranchFedAny() ? '✓' : '0/1'; }, '牧场 · 牛 / 羊 / 鸡')
+      ] },
+
+    { t: '第一次收成', en: 'FIRST HARVEST', sum: '花开了。你们把第一束插在窗台上，谁也没说话。',
+      tip: '温室里的花熟了就去收——一次收成给鲜花和种子；种树要等更久，但木材更值钱',
+      checks: [
+        ck('收成一次作物', function () { return harvestsEver() >= 1; },
+          function () { return Math.min(1, harvestsEver()) + '/1'; }, '温室 · 成熟的地块')
+      ] },
+
+    /* v5.4：产物 = 牧场产物（牛奶/羊毛/鸡蛋）**或** 再收一茬温室作物。
+       以前只认牧场，玩家收了一地花却看着任务不动，还以为是 bug。 */
+    { t: '收下第一份产物', en: 'MILK AND WOOL', sum: '清晨的牛奶还是温的，羊毛上沾着草屑。日子有了味道。',
+      tip: '牧场：喂过的动物第二天来收奶 / 毛 / 蛋（也可以再收一茬温室作物）',
+      checks: [
+        ck('收下 1 份产物', function () { return ranchGoodsCount() >= 1 || harvestsEver() >= 2; },
+          function () {
+            if (ranchGoodsCount() >= 1) return '牧场产物 ✓';
+            return '作物 ' + Math.min(2, harvestsEver()) + '/2';
+          }, '牧场（牛奶/羊毛/鸡蛋）或温室（成熟作物）'),
+        ck('收满 4 段回忆', function () { return foundCount() >= 4; },
+          function () { return Math.min(4, foundCount()) + '/4'; }, '小镇角落 / 旅行地图')
+      ] },
+
+    { t: '邮局开张', en: 'THE POST OFFICE', sum: '第一个包裹寄出去了。地址是你们自己一笔一笔写的。',
+      tip: '工坊：木材→信纸，信纸+木材+鲜花→寄件礼盒；做好后到右边的「寄件台」选地址寄出（做好礼盒不算寄出）',
+      checks: [
+        ck('寄出 1 个包裹', function () { return sentCount() >= 1; },
+          function () { return '已寄出 ' + Math.min(1, sentCount()) + '/1 · 已知地址 ' + addrCount(); },
+          '工坊 · 寄件台（先做礼盒，再选地址）')
+      ] },
+
+    { t: '把树种起来', en: 'THE TREE GROWS', sum: '树又长高了一截，影子也跟着长了。',
+      tip: '木材和鲜花够了就去广场的圣诞树前「挂装饰」；再到工坊做一件手工礼物（木头小鸟 / 八音盒 / 星星挂饰）',
+      checks: [
+        ck('给圣诞树挂一次装饰', function () { return treeStage() >= 1; },
+          function () { return '树 ' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）'; },
+          '广场 · 圣诞树（走近互动）'),
+        ck('做 1 件手工礼物', function () { return (worldRes().materials || 0) >= 1; },
+          function () { return Math.min(1, worldRes().materials || 0) + '/1'; },
+          '工坊 · 工作台（木头小鸟 / 八音盒 / 星星挂饰）')
+      ] },
+
+    { t: '凑齐三张车票', en: 'THREE TICKETS', sum: '三张票，三个方向。世界比这座镇子大得多。',
+      tip: '车票不会一次给全：收回忆、喝热可可、做手工、把树养大，都会引来下一张票',
+      checks: [
+        ck('拥有 3 张车票', function () { return ticketOwnedCount() >= 3; },
+          function () { return Math.min(3, ticketOwnedCount()) + '/3'; }, '车站 · 票册')
+      ] },
+
+    { t: '远方的回信', en: 'LETTERS HOME', sum: '包裹带着远方的味道回来了 —— 松木、海风、还有一点点陌生。',
+      tip: '寄出去的包裹会带着当地特产回来：去工坊寄件，等它到，再去邮局找阿信收信',
+      checks: [
+        ck('收到回信', function () { return mailCount() >= 3; },
+          function () { return Math.min(3, mailCount()) + '/3'; }, '邮局 · 阿信（或工坊信袋）'),
+        ck('收齐 3 种特产', function () { return specCount() >= 3; },
+          function () { return Math.min(3, specCount()) + '/3'; }, '邮局 · 拆包裹')
+      ] },
+
+    { t: '点亮整棵树', en: 'ALL LIGHTS ON', sum: '整棵树都亮了。可镇子北边，好像有什么正在暗下去。',
+      tip: '树养到第 6 阶（完全点亮）、三种牧场产物都收过、六种远方特产摆上架',
+      checks: [
+        ck('圣诞树完全点亮', function () { return treeStage() >= TREE_STAGE_MAX; },
+          function () { return '树 ' + treeStageName(treeStage()) + '（' + treeStage() + '/' + TREE_STAGE_MAX + '）'; },
+          '广场 · 圣诞树'),
+        ck('收满 11 段回忆', function () { return foundCount() >= 11; },
+          function () { return Math.min(11, foundCount()) + '/11'; }, '小镇 / 旅行地图'),
+        ck('三种牧场产物都收过', function () { return ranchGoodsCount() >= 3; },
+          function () { return Math.min(3, ranchGoodsCount()) + '/3'; }, '牧场 · 牛 / 羊 / 鸡'),
+        ck('收齐 6 种特产', function () { return specCount() >= 6; },
+          function () { return Math.min(6, specCount()) + '/6'; }, '工坊寄件 → 邮局收信')
+      ] }
   ];
+  /* 统一判定：所有子目标成立才算这一章走完。 */
+  CHAPTERS.forEach(function (c) {
+    c.ok = function () {
+      for (var i = 0; i < c.checks.length; i++) if (!c.checks[i].ok()) return false;
+      return true;
+    };
+    c.prog = function () {
+      return c.checks.map(function (k) { return k.prog(); }).join(' · ');
+    };
+    /* 左上角那一条只放「做完几项 / 共几项」——完整进度在任务面板里看。
+       以前把全部子目标塞进 chip，竖屏会占三行、压住旁边的状态条。 */
+    c.progShort = function () {
+      var n = 0;
+      for (var i = 0; i < c.checks.length; i++) if (c.checks[i].ok()) n++;
+      return n + '/' + c.checks.length;
+    };
+  });
 
   function chapterText() {
     var ch = chapterNo();
     if (ch >= CHAPTERS.length) return '🎄 一切就绪，就等 2026 年 12 月 25 日的晚上了';
     var c = CHAPTERS[ch];
-    return '📖 第 ' + (ch + 1) + ' 章 · ' + c.t + '　' + c.prog();
+    return '📖 第 ' + cnNum(ch + 1) + ' 章 · ' + c.t + '　' + c.progShort();
   }
   function questText() { return chapterText(); }
 
@@ -1136,10 +1229,11 @@ window.Game = (function () {
       if (!ok) return;
       try { noteChapterProgress(); } catch (e) { }
       refreshHUD();
+      /* v5.4：章节开始时不再弹底部 toast —— 完成卡片已经是「翻页」的正式反馈，
+         两条一起出现会像系统通知。奖励写到卡片底部（见 showNextChapterCard）。
+         全部章节走完时卡片不出现，这一句仍然需要，所以只在最后保留。 */
       var nxt = CHAPTERS[to];
-      if (nxt) toast('📖 第 ' + (to + 1) + ' 章：' + nxt.t + ' —— ' + nxt.tip +
-        '（奖励 🪵' + CHAPTER_GIFT.wood + ' 🌸' + CHAPTER_GIFT.flowers + '）', 5600);
-      else toast('🎄 全部章节都过完了。剩下的日子，就在小镇里慢慢等圣诞夜吧。', 5200);
+      if (!nxt) toast('🎄 全部章节都过完了。剩下的日子，就在小镇里慢慢等圣诞夜吧。', 5200);
       Snd.sfx('ding');
       if (to >= CHAPTERS.length) {
         S.quest.step = 6;
@@ -1239,6 +1333,7 @@ window.Game = (function () {
     set('#cd-en', c.en || '');
     set('#cd-cn', '第' + cnNum(idx + 1) + '章 · ' + c.t);
     set('#cd-sum', c.sum || c.tip || '');
+    set('#cd-gift', '本章奖励 · 🪵 +' + CHAPTER_GIFT.wood + '　🌸 +' + CHAPTER_GIFT.flowers);
     chapterCardOpen = true;
     el.classList.remove('hidden');
     requestAnimationFrame(function () { el.classList.add('on'); });
@@ -2313,7 +2408,7 @@ window.Game = (function () {
     autoPickEggs();
     updateQuest();
     noteChapterProgress();
-    maybeOpenNorth();
+    maybeNorthStory();
     maybeSunriseAuto();
     /* v5.2：读过「天亮」的存档，一进游戏就该是白天（不受昼夜计时影响）。
        只在本局第一次生效 —— 之后测试脚本调 setClock 仍然能摆出夜晚。 */
@@ -2429,6 +2524,10 @@ window.Game = (function () {
       w.res = w.res || { wood: 0, seeds: 0, flowers: 0, materials: 0 };
       if (p.kind === 'tree') w.res.wood = (w.res.wood || 0) + conf.yield;
       else w.res.flowers = (w.res.flowers || 0) + conf.yield;
+      /* v5.4：收成时回收 1 颗种子。
+         以前只给花/木材，种子只能靠每天补给 —— 一旦用完就彻底卡住，
+         玩家会以为「温室坏了」。收一茬还一颗，种植循环才闭合。 */
+      w.res.seeds = (w.res.seeds || 0) + 1;
       /* v4.6.0：累计收获次数（章节「第一次收成」用它；老存档没有这个键就是 0） */
       w.harvests = (w.harvests || 0) + 1;
       return w;
@@ -2440,7 +2539,9 @@ window.Game = (function () {
         var st = plotStates()[i];
         toast(st.ready ? '手慢了一步，好像刚刚被收走了 😮' : '还没长好呢（还需 ' + fmtRemain(st.remain) + '）');
       } else {
-        var picked = (gotKind === 'tree') ? ('🪵 木材 +' + GROW.tree.yield) : ('🌸 鲜花 +' + GROW.flower.yield);
+        var picked = (gotKind === 'tree')
+          ? ('🪵 木材 +' + GROW.tree.yield + ' · 🌱 种子 +1')
+          : ('🌸 鲜花 +' + GROW.flower.yield + ' · 🌱 种子 +1');
         Snd.sfx('harvest');
         burst(175 + 200 * (i % 3) + (i > 2 ? 200 : 0), (i > 2 ? 400 : 255) - 30, 'spark', 6);
         toast('收获啦！' + picked + ' 入账', 3000);
@@ -4782,7 +4883,7 @@ window.Game = (function () {
       }
       return best;
     }
-    World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, '💬 和' + n.name + '交谈', n); });
+    World.npcs.forEach(function (n) { consider('npc', n.x, n.y, 85, npcLabel(n), n); });
     /* 牧场：三只动物 + 干草垛 */
     if (World.animals) {
       World.animals.forEach(function (a) { consider('ranch', a.x, a.y - 18, 64, ranchLabel(a), a); });
@@ -4799,7 +4900,10 @@ window.Game = (function () {
       var enterable = b && b.kind !== 'shop' && b.kind !== 'stall';
       consider('door', dr.x, dr.y, 78, enterable ? ('🚪 进入 ' + dr.name) : ('👀 ' + dr.name), dr);
     });
-    consider('tree', World.tree.x, World.tree.y + 10, 120, '🎄 查看圣诞树', World.tree);
+    var tst = treeStage();
+    var tlabel = tst >= TREE_STAGE_MAX ? '🎄 看看点亮的圣诞树'
+      : ('🎄 给圣诞树挂装饰（' + treeCostText(TREE_COST[tst] || {}) + '）');
+    consider('tree', World.tree.x, World.tree.y + 10, 120, tlabel, World.tree);
     /* v5.1：北境纪念雕塑 —— 走近才能读铭牌，不占任务、不给道具 */
     if (memoVisible()) {
       consider('memo', MEMO.x, MEMO.y + 6, MEMO_R, '📖 读一读纪念碑', MEMO);
@@ -4838,8 +4942,14 @@ window.Game = (function () {
   }
   function doInteractInner(it) {
     if (it.type === 'npc') {
-      /* 邮差不是只说话：他手上有一整个信袋（回信 / 地址 / 委托） */
+      /* v5.4：先记「和镇上的人聊过」（隐藏剧情第 2 段）；
+         这一段只写一次，重复聊天不会重复计数。 */
+      if (it.ref.id !== 'postman' && northHintStage() === 2) recordNorthTalk(it.ref.id);
+
+      /* 邮差不是只说话：他手上有一整个信袋（回信 / 地址 / 委托）。
+         v5.4：如果北边那封信已经到了，第一次交谈先读信 —— 读完才回到信袋。 */
       if (it.ref.id === 'postman') {
+        if (northHintStage() === 1) { openNorthLetter(); return; }
         if (!S.quest.talked[it.ref.id]) {
           S.quest.talked[it.ref.id] = 1;
           updateQuest(); syncQuest();
@@ -4868,11 +4978,14 @@ window.Game = (function () {
         if (cw0.carpenterDay !== dayStr()) {
           var firstC = !S.quest.talked[it.ref.id];
           grantCarpenterScraps(function (got) {
-            openDialog(it.ref.name, got
+            var gl = [];
+            try { gl = questGuide('carpenter'); } catch (e) { }
+            var base = got
               ? ['「木头是有脾气的，得顺着它的纹路来。」',
                  '老鲁从刨花堆里挑出几根边角料塞给你：「拿着，反正也进不了炉子。」',
                  '🪵 木材 +3（每天一次，说句话就有）']
-              : ['「木头是有脾气的，得顺着它的纹路来。」']);
+              : ['「木头是有脾气的，得顺着它的纹路来。」'];
+            openDialog(it.ref.name, base.concat(gl));
             if (firstC && !S.quest.talked[it.ref.id]) { S.quest.talked[it.ref.id] = 1; updateQuest(); syncQuest(); }
           });
           return;
@@ -5494,6 +5607,7 @@ window.Game = (function () {
     renderAdminNorth();
     renderAdminTestline();
     renderAdminChapter();
+    renderAdminCheat();
   }
 
   /* 礼品图鉴的真实口径：车票 / 回忆 / 地址 / 特产，四本册子都是 world 里现成的字段 */
@@ -5566,10 +5680,14 @@ window.Game = (function () {
       (northAlwaysOn() ? '（测试期常显已开）' : '') + '</span></div>');
     rows.push('<div class="admin-sec ' + (st && st.open ? 'ok' : 'off') + '"><b>正式解锁</b><span>' +
       (st && st.open ? '✓ 已经永久解锁' : '✗ 还没有解锁过') + '</span></div>');
-    rows.push('<div class="admin-sec"><b>解锁条件</b><span>章节 ≥ ' + (NORTH_GATE + 1) +
-      ' 且处于夜晚 → 出现一次，之后永久保留（不要求现实等待）</span></div>');
-    rows.push('<div class="admin-sec"><b>章节进度</b><span>第 ' + (chapterRaw() + 1) + ' 章　' +
-      (chapterRaw() >= NORTH_GATE ? '✓ 已满足' : '还差 ' + (NORTH_GATE - chapterRaw()) + ' 章') +
+    var hst = northHintStage();
+    var hnames = ['未开始（资格还没到）', '信到了 · 等玩家找阿信', '读过信 · 等玩家和人聊',
+      '聊够了 · 等极夜落下', '极夜已降临 · 等门出现', '门已开'];
+    rows.push('<div class="admin-sec"><b>解锁条件</b><span>隐藏剧情：树 6 阶 + 14 回忆 + 4 个旅行地 → 阿信的来信 → 读信 → 和 4 个人聊 → 极夜 → 门</span></div>');
+    rows.push('<div class="admin-sec"><b>隐藏剧情</b><span>阶段 ' + hst + ' · ' + esc(hnames[hst] || '') +
+      (hst === 2 ? ('　交谈 ' + northTalkedCount() + '/' + NORTH_TALK_NEED) : '') +
+      (chapterTestActive() ? '　（章节测试中：隐藏剧情暂停推进）' : '') + '</span></div>');
+    rows.push('<div class="admin-sec"><b>章节进度</b><span>第 ' + (chapterRaw() + 1) + ' 章' +
       (chapterTestActive() ? '　（测试中）' : '') + '</span></div>');
     rows.push('<div class="admin-sec"><b>测试模式</b><span>' +
       (northAlwaysOn() ? '⚠️ 常显中（不写存档）' : '关（按规则走）') + '</span></div>');
@@ -5622,7 +5740,7 @@ window.Game = (function () {
    *   和游戏里其他进度完全一样的路径，不碰 Rules、不碰别的字段。
    *
    * 注意：这是**测试**功能，只改 world.north / world.northTest。
-   *   正式触发条件（章节 ≥ NORTH_GATE 且夜里出现一次）一个字没动 ——
+   *   正式触发条件（隐藏剧情线走完才出现）一个字没动 ——
    *   跳过只是"替玩家把已经发生过的事情记上"，不会让门对普通玩家提前出现。
    * ============================================================ */
   var NORTH_TEST_STAGES = [
@@ -5743,6 +5861,184 @@ window.Game = (function () {
     box.innerHTML = rows.join('');
   }
 
+  /* ============================================================
+   * v5.4 管理员修改器（Charles 私人用）
+   * ------------------------------------------------------------
+   * 定位：减少等待、检查状态。它**不能**替玩家完成章节：
+   *   · 作物「立即成熟」只拨生长原点，成熟后仍要去温室收（收获才计数）；
+   *   · 动物「立即产出」只把今天这份标成可收，已收过的不再重复；
+   *   · 章节推进仍走原来的 world.chapterTest 快照，不发正式奖励。
+   * 全部写共享存档（mutate），所以两台设备同步；普通玩家看不到入口。
+   * ============================================================ */
+  function renderAdminCheat() {
+    var sp = $('#admin-speed-status');
+    if (sp) {
+      var k = (window.TownLife && TownLife.timeScale) ? TownLife.timeScale() : 1;
+      var lock = (window.TownLife && TownLife.isPolarLocked) ? TownLife.isPolarLocked() : false;
+      sp.innerHTML = '<div class="admin-sec"><b>当前流速</b><span>' + k + '×' +
+        (k > 1 ? '（仅本机，刷新恢复）' : '（正常）') + '</span></div>' +
+        '<div class="admin-sec"><b>天色</b><span>' +
+        (lock ? '极夜锁：小镇固定在夜里（剧情推进，不是测试开关）' : '跟随昼夜循环') + '</span></div>';
+    }
+
+    var fm = $('#admin-farm');
+    if (fm) {
+      var plots = (typeof plotStates === 'function') ? plotStates() : [];
+      var g = (curWorld() || {}).garden || {};
+      var rows = [];
+      var readyN = 0, cropN = 0;
+      /* 只列「真的种了东西」的地：plotStates 的空地也会带默认 kind，
+         直接遍历它会显示成「6 块有作物」，是假状态。 */
+      Object.keys(g).forEach(function (id) {
+        if (!/^p[1-6]$/.test(id) || !g[id] || !g[id].kind) return;
+        var i = parseInt(id.slice(1), 10) - 1;
+        var p = plots[i];
+        if (!p) return;
+        cropN++;
+        if (p.ready) readyN++;
+        var nm = g[id].kind === 'tree' ? '🌳 果树' : '🌸 花朵';
+        rows.push('<div class="admin-sec ' + (p.ready ? 'ok' : 'off') + '"><b>地 ' + (i + 1) + ' · ' + nm + '</b><span>' +
+          (p.ready ? '✓ 已成熟，去温室收' : '生长中 · 还需 ' + fmtCountdown(p.remain)) + '</span></div>');
+      });
+      if (!rows.length) rows.push('<div class="admin-sec"><b>温室</b><span>现在没有作物（六块地都空着）</span></div>');
+      else rows.unshift('<div class="admin-sec"><b>温室</b><span>' + cropN + ' 块有作物 · ' + readyN + ' 块可收</span></div>');
+
+      var r = (curWorld() || {}).ranch || {};
+      (World.animals || []).forEach(function (a) {
+        var e = r[a.id] || {};
+        var ever = r.ever && r.ever[a.goods];
+        var state;
+        if (e.ready && e.ready <= dayStr()) state = '✓ 产物已生成，可收 ' + a.goodsName;
+        else if (e.ready) state = '🌙 已喂 · ' + e.ready + ' 可收';
+        else if (e.fed) state = '🌙 今天已喂，明天可收';
+        else state = '🌾 今天还没喂';
+        rows.push('<div class="admin-sec ' + ((e.ready && e.ready <= dayStr()) ? 'ok' : '') + '"><b>' + esc(a.name) + '</b><span>' +
+          state + (ever ? '　（' + a.goodsName + ' 已收过）' : '　（还没收过）') + '</span></div>');
+      });
+      fm.innerHTML = rows.join('');
+    }
+
+    var tk = $('#admin-task');
+    if (tk) tk.innerHTML = adminTaskHTML();
+  }
+
+  function adminTaskHTML() {
+    var ch = chapterNo();
+    var rows = [];
+    if (ch >= CHAPTERS.length) {
+      rows.push('<div class="admin-sec ok"><b>主线</b><span>12 章全部完成（章节号 ' + ch + '）</span></div>');
+    } else {
+      var c = CHAPTERS[ch];
+      rows.push('<div class="admin-sec"><b>当前章节</b><span>第 ' + cnNum(ch + 1) + ' 章 · ' + esc(c.t) +
+        '　（' + ch + ' / ' + CHAPTERS.length + '）</span></div>');
+      c.checks.forEach(function (k) {
+        rows.push('<div class="admin-sec ' + (k.ok() ? 'ok' : 'off') + '"><b>' + (k.ok() ? '✓' : '✗') + ' ' + esc(k.label) +
+          '</b><span>' + esc(k.prog()) + (k.where ? '　· ' + esc(k.where) : '') + '</span></div>');
+      });
+      var next = null;
+      for (var i = 0; i < c.checks.length; i++) if (!c.checks[i].ok()) { next = c.checks[i]; break; }
+      rows.push('<div class="admin-sec"><b>下一步</b><span>' +
+        (next ? (esc(next.where || '') + ' → ' + esc(next.label) + '（现在 ' + esc(next.prog()) + '）')
+          : '这一章的条件都满足了，下一次主循环就会翻页') + '</span></div>');
+    }
+
+    /* 隐藏剧情线（北境） */
+    var w = curWorld() || {};
+    var hs = northHintStage();
+    var names = ['未开启（资格还没到）', '信到了 · 去邮局找阿信', '读过信 · 和镇上的人聊聊', '聊够了 · 极夜将落',
+      '极夜已降临 · 门未开', '门已开 · 可以进北境'];
+    var c0 = window.Story ? Story.ctxOf(w) : null;
+    rows.push('<div class="admin-sec"><b>隐藏剧情</b><span>阶段 ' + hs + ' · ' + esc(names[hs] || '') + '</span></div>');
+    if (c0) {
+      rows.push('<div class="admin-sec ' + (window.Story.baseReady(w) ? 'ok' : 'off') + '"><b>资格</b><span>' +
+        '旅行地 ' + c0.visits + '/4 · 树 ' + c0.tree + '/5 · 回忆 ' + c0.mem + '/14</span></div>');
+    }
+    if (hs === 2) {
+      rows.push('<div class="admin-sec"><b>交谈进度</b><span>' + northTalkedCount() + ' / ' + NORTH_TALK_NEED + '</span></div>');
+    }
+    return rows.join('');
+  }
+
+  function adminSpeedAct(k) {
+    if (!devOrAdmin()) return;
+    k = Math.max(1, Math.min(10, Math.round(Number(k) || 1)));
+    if (!window.TownLife || !TownLife.setTimeScale) { toast('天色模块还没准备好', 2400); return; }
+    TownLife.setTimeScale(k);
+    logAdmin('测试流速', 'speed', null, k + 'x', true);
+    toast(k > 1 ? ('⏩ 天色流速 ' + k + '×（只影响这台设备，刷新恢复 1×）') : '▶️ 天色流速恢复正常', 3600);
+    renderAdminCheat();
+  }
+
+  /* 把「每日额度」整体当成第二天 —— 干草垛、温室补给、阿信的地址、热可可、
+     老木匠的边角料都重新可用。这是给 Charles 测试用的：等价于「睡一觉再来」。
+     只动这些按天重置的字段，不碰章节 / 任务 / 旅行 / 北境 / 资源本身。 */
+  function adminNextDay() {
+    if (!devOrAdmin()) return;
+    if (S.farmBusy) return;
+    S.farmBusy = true;
+    var y = dayShift(-1);
+    mutate(function (w) {
+      if (w.daily) w.daily.day = y;
+      if (w.cocoa) w.cocoa.lastDay = y;
+      if (w.ranch) w.ranch.hayDay = y;
+      w.addrDay = y;
+      w.addrTradeDay = y;
+      w.expressDay = y;
+      w.carpenterDay = y;
+      return w;
+    }).then(function (ok) {
+      S.farmBusy = false;
+      logAdmin('每日额度刷新（当作第二天）', 'nextday', null, null, !!ok);
+      toast(ok ? '🌙 当成过了一夜：干草垛、温室补给、阿信的地址、热可可都刷新了' : '⚠️ 没写进存档，再试一次', 4200);
+      renderAdminCheat();
+    }, function () { S.farmBusy = false; toast('⚠️ 没写进存档，再试一次', 3000); });
+  }
+
+  function adminFarmAct(kind) {
+    if (!devOrAdmin()) return;
+    if (S.farmBusy) return;
+    if (kind === 'refresh') { renderAdminCheat(); return; }
+    S.farmBusy = true;
+    var today = dayStr();
+    var did = { crop: 0, animal: 0, skip: 0 };
+    mutate(function (w) {
+      if (kind === 'ripe') {
+        var g = w.garden || {};
+        for (var id in g) {
+          if (!g.hasOwnProperty(id) || !g[id] || !g[id].kind) continue;
+          var conf = GROW[g[id].kind] || GROW.flower;
+          var ms = conf.ms + 1500;
+          if (typeof g[id].plantedAt === 'number' && Date.now() - g[id].plantedAt >= conf.ms) { did.skip++; continue; }
+          g[id].plantedAt = Date.now() - ms;
+          did.crop++;
+        }
+      } else if (kind === 'produce') {
+        w.ranch = w.ranch || {};
+        (World.animals || []).forEach(function (a) {
+          var e = w.ranch[a.id];
+          if (!e || !e.fed) { did.skip++; return; }
+          if (e.ready && e.ready <= today) { did.skip++; return; }   // 已经能收了，不重复
+          e.ready = today;                                            // 今天这份可以收
+          did.animal++;
+        });
+      }
+      return (did.crop || did.animal) ? w : undefined;
+    }).then(function (ok) {
+      S.farmBusy = false;
+      if (!ok) {
+        toast('没有可以改的状态（作物已经成熟 / 动物今天没喂）', 3600);
+        renderAdminCheat();
+        return;
+      }
+      logAdmin(kind === 'ripe' ? '作物立即成熟' : '动物立即产出', kind, null,
+        kind === 'ripe' ? did.crop : did.animal, true);
+      toast(kind === 'ripe'
+        ? ('🧪 ' + did.crop + ' 块地已成熟——去温室自己收，收获才算任务进度')
+        : ('🧪 ' + did.animal + ' 只动物今天可收——去牧场自己收'), 4200);
+      renderAdminCheat();
+    }, function () { S.farmBusy = false; toast('⚠️ 没写进存档，再试一次', 3000); });
+  }
+
   function adminChapterAct(kind) {
     if (!devOrAdmin()) return;
     if (S.chapterTestBusy) return;
@@ -5766,7 +6062,7 @@ window.Game = (function () {
         logAdmin('主线测试·恢复', 'chapter', before + 1, after + 1, !!ok);
         if (!ok) toast('⚠️ 恢复没写进存档，再试一次', 3200);
         else toast('↩️ 章节已恢复到测试前：第 ' + (after + 1) + ' 章', 3800);
-        refreshHUD(); renderAdminChapter(); renderAdminTestline();
+        refreshHUD(); renderAdminChapter(); renderAdminTestline(); renderAdminCheat();
       }, function () { S.chapterTestBusy = false; toast('⚠️ 恢复失败，再试一次', 3000); });
       return;
     }
@@ -5793,6 +6089,7 @@ window.Game = (function () {
       renderAdminChapter();
       renderAdminTestline();
       renderAdminNorth();
+      renderAdminCheat();
     }, function () { S.chapterTestBusy = false; toast('⚠️ 操作失败，再试一次', 3000); });
   }
 
@@ -6334,6 +6631,32 @@ window.Game = (function () {
         timeAdvance(ms);
       });
     }
+    /* v5.4 修改器：天色流速 / 作物动物 / 任务检查 */
+    var sb = document.querySelectorAll('[data-speed]');
+    for (var si = 0; si < sb.length; si++) {
+      if (sb[si].dataset.bound) continue;
+      sb[si].dataset.bound = '1';
+      sb[si].addEventListener('click', function () { adminSpeedAct(this.getAttribute('data-speed')); });
+    }
+    var fb = document.querySelectorAll('[data-farm]');
+    for (var fi = 0; fi < fb.length; fi++) {
+      if (fb[fi].dataset.bound) continue;
+      fb[fi].dataset.bound = '1';
+      fb[fi].addEventListener('click', function () { adminFarmAct(this.getAttribute('data-farm')); });
+    }
+    var nb2 = document.querySelectorAll('[data-dayact]');
+    for (var ni = 0; ni < nb2.length; ni++) {
+      if (nb2[ni].dataset.bound) continue;
+      nb2[ni].dataset.bound = '1';
+      nb2[ni].addEventListener('click', function () { adminNextDay(); });
+    }
+    var tkb = document.querySelectorAll('[data-task]');
+    for (var ti = 0; ti < tkb.length; ti++) {
+      if (tkb[ti].dataset.bound) continue;
+      tkb[ti].dataset.bound = '1';
+      tkb[ti].addEventListener('click', function () { renderAdminCheat(); });
+    }
+
     /* 明确的「退出管理员模式」：清会话 → 回普通设置 */
     var ex = $('#admin-exit');
     if (ex && !ex.dataset.bound) {
@@ -6558,13 +6881,11 @@ window.Game = (function () {
    *   · 但摄像机、边界、碰撞、双人位置同步、断线恢复全部复用现成那套，
    *     所以这里不需要再造一套场景状态机。
    *
-   * 三道门槛（缺一不可，且不占用现实时间）：
-   *   1) 章节推进到 NORTH_GATE 章（第 10 章「远方的回信」之后）；
-   *   2) 此刻是夜晚（小镇的昼夜循环 30 分钟一轮，等到夜里就行）；
-   *   3) 只要满足过一次，门就**永久**留在那儿 —— 不是一次性事件，
-   *      当晚没发现也不会错过（写进共享存档 world.north.open）。
+   * v5.4：门不再由章节/昼夜自动开，而是接在隐藏剧情线后面：
+   *   资格（树 6 阶 + 14 回忆 + 4 个旅行地）→ 阿信的来信 → 读信 →
+   *   和 4 位镇上的人聊 → 极夜降临 → 门出现（写进 world.north.open）。
+   *   只要出现过一次就**永久**留在那儿，当晚没发现也不会错过。
    * ============================================================ */
-  var NORTH_GATE = 9;                     // 章节门槛（0 基）
   /* v4.10：门从"两栋房子中间的窄缝"挪到小镇左侧中间那片冻湖上。
      湖面本身是碰撞体（走不上去），所以人只能站在南岸触发 —— 交互点因此
      放在湖南岸那一侧（y + 34），而不是柱子正下方，否则隔着冰永远够不着。
@@ -6573,10 +6894,10 @@ window.Game = (function () {
   var NORTH_ID = 'north';
 
   /* ★★ 测试期临时开关 ★★
-     true  = 传送门常显：不看章节、不看昼夜，也不写存档（进度干净，随时可退回规则）。
-     false = 恢复正常规则（章节 ≥ NORTH_GATE 且夜里出现一次，之后永久保留）。
+     true  = 传送门常显（开发预览用）：不看剧情、不看昼夜，也不写存档。
+     false = 正常规则：走完隐藏剧情线才出现，之后永久保留。
      想临时按规则跑一次不用改代码：网址加 ?north=0（例如 index.html?room=xxx&north=0）。
-     最终交付前把下面这行的 true 改成 false 即可。 */
+     最终交付前把下面这行的 true 改成 false 即可（打包脚本会自动生成正式版）。 */
   var NORTH_TEST_ALWAYS = true;
   /* Node 冒烟测试里没有 location（和上面 addEventListener 一样要判存在） */
   var _northFlag = (typeof location !== 'undefined' && location.search)
@@ -6598,32 +6919,205 @@ window.Game = (function () {
     var n = northState();
     return !!(n && n.open);
   }
-  /* 夜里 + 章节够 + 基础条件齐 → 开一次门（写进共享存档，两台设备同时看到）
-     v5.1：加上了「冰岛基础条件」这道前置。剧情顺序是
-       基础条件齐 → 极夜开始 → NPC 发现异常 → 北境入口出现，
-     所以不能让一个还没走完前八章的存档提前看见门。 */
-  function maybeOpenNorth() {
-    if (northAlwaysOn()) return;            // 测试期不写存档，保证进度干净
+  /* ============================================================
+   * v5.4 北境隐藏剧情线
+   * ------------------------------------------------------------
+   * 顺序（不再看章节号）：
+   *   树第 6 阶 + 14 段回忆 + 4 个旅行地
+   *   → north.hint.at      阿信头顶出现蓝色感叹号
+   *   → north.hint.read    玩家主动找他读完信
+   *   → north.hint.talked  和镇上 4 个人聊过（分几次也行）
+   *   → north.hint.polarAt 极夜降临（一次演出）
+   *   → north.open/at      传送门出现（复用原有字段，北境玩法一行没动）
+   * 所有写入都走 mutate，两台设备同步；阶段只读存档推导，刷新不会重来。
+   * ============================================================ */
+  var NORTH_TALK_NEED = 4;
+
+  function northHint() {
+    var n = northState() || {};
+    return n.hint || {};
+  }
+  function northHintStage() {
+    if (!window.Story) return 0;
+    try { return Story.hintStageOf(curWorld() || {}); } catch (e) { return 0; }
+  }
+  function northTalkedCount() {
+    var h = northHint();
+    return (h.talked && typeof h.talked === 'object') ? Object.keys(h.talked).length : 0;
+  }
+  /* 谁算「镇上的人」：除阿信之外的 7 位，任选 4 位即可 */
+  function northTalkCandidates() {
+    return ['santa', 'carpenter', 'baker', 'shepherd', 'barista', 'snowman', 'elf'];
+  }
+
+  /* 每帧检查一次：资格 → 来信 → 极夜。只在镇上、非面板/演出时推进。 */
+  function maybeNorthStory() {
+    if (!window.Story) return;
+    if (S.mapId || S.interId || S.ending) return;
+    if (northAlwaysOn()) return;            // 开发期常显：不写剧情状态
+    if (chapterTestActive()) return;        // 管理员跳章不代表剧情走到了
+    var w = curWorld() || {};
+    if (!w) return;
+    var n = w.north || {};
+
+    /* 老存档迁移：门已经开过（v4.9~v5.3）但没有 hint —— 补齐，让台词/极夜对上。
+       只在内存里补会丢，所以走一次 mutate；写完就再也不会进来。 */
+    if (n.open && (!n.hint || !n.hint.portalAt)) {
+      mutate(function (ww) {
+        ww.north = ww.north || {};
+        var at = ww.north.at || Date.now();
+        if (!ww.north.hint) {
+          ww.north.hint = { at: at, read: at, talked: {}, polarAt: at, portalAt: at };
+        } else if (!ww.north.hint.portalAt) {
+          ww.north.hint.portalAt = ww.north.hint.polarAt || at;
+          ww.north.hint.polarAt = ww.north.hint.polarAt || at;
+          ww.north.hint.at = ww.north.hint.at || at;
+          ww.north.hint.read = ww.north.hint.read || at;
+        }
+        return ww;
+      }).then(function () { }, function () { });
+      return;
+    }
+    if (n.revived) return;
+    if (!window.Story.baseReady(w)) return;
+
+    if (!n.hint || !n.hint.at) { startNorthHint(); return; }
+    if (n.hint.read && !n.hint.polarAt && northTalkedCount() >= NORTH_TALK_NEED) startPolarNight();
+  }
+
+  /* 资格达成：信到了。不自动开门、不自动播片，只让阿信头上亮一个蓝色感叹号。 */
+  function startNorthHint() {
+    if (S.northHintBusy) return;
+    S.northHintBusy = true;
+    mutate(function (w) {
+      w.north = w.north || {};
+      w.north.hint = w.north.hint || {};
+      if (w.north.hint.at) return undefined;      // 对方刚触发
+      w.north.hint.at = Date.now();
+      w.north.hint.talked = w.north.hint.talked || {};
+      return w;
+    }).then(function (ok) {
+      S.northHintBusy = false;
+      if (!ok) return;
+      try { Snd.sfx('ding'); } catch (e) { }
+      toast('📮 邮局门口，阿信好像有件送不出去的东西要给你们', 6200);
+    }, function () { S.northHintBusy = false; });
+  }
+
+  /* 读信：只由「和阿信交谈」触发，读完把任务交给玩家 */
+  var dlgDone = null;
+  function openNorthLetter() {
+    if (!window.Story) return;
+    var L = Story.letter;
+    openDialog(L.who, L.lines, function () {
+      mutate(function (w) {
+        w.north = w.north || {};
+        w.north.hint = w.north.hint || {};
+        if (w.north.hint.read) return undefined;
+        w.north.hint.read = Date.now();
+        w.north.hint.at = w.north.hint.at || Date.now();
+        return w;
+      }).then(function (ok) {
+        if (!ok) return;
+        try { Snd.sfx('spark'); } catch (e) { }
+        toast('✉️ 远方来信已读 · 去和镇上的人聊聊（0/' + NORTH_TALK_NEED + '）', 5600);
+        setTimeout(function () { openDialog('信纸背面', L.after); }, 900);
+        refreshHUD();
+      }, function () { });
+    });
+  }
+
+  /* 和镇上的人聊过一次：记进共享存档（一次性，不重复计数） */
+  function recordNorthTalk(id) {
+    if (northHintStage() !== 2) return;
+    var h = northHint();
+    if (h.talked && h.talked[id]) return;
+    mutate(function (w) {
+      w.north = w.north || {};
+      w.north.hint = w.north.hint || {};
+      if (!w.north.hint.read) return undefined;
+      w.north.hint.talked = w.north.hint.talked || {};
+      if (w.north.hint.talked[id]) return undefined;
+      w.north.hint.talked[id] = Date.now();
+      return w;
+    }).then(function (ok) {
+      if (!ok) return;
+      var n = northTalkedCount();
+      try { Snd.sfx('ding'); } catch (e) { }
+      if (n < NORTH_TALK_NEED) {
+        toast('💬 又一个人知道了 · ' + n + '/' + NORTH_TALK_NEED + '（还差 ' + (NORTH_TALK_NEED - n) + ' 位）', 4200);
+      } else {
+        toast('💬 镇上的人都听说了 · ' + NORTH_TALK_NEED + '/' + NORTH_TALK_NEED, 3600);
+        setTimeout(startPolarNight, 900);
+      }
+      refreshHUD();
+    }, function () { });
+  }
+
+  /* 极夜降临：一次演出 + 一次写入。演出期间暂停，结束自动恢复。 */
+  function startPolarNight() {
+    if (S.polarBusy || S.cineBusy) return;
+    if (northHint().polarAt) return;
+    if (northTalkedCount() < NORTH_TALK_NEED) return;
+    S.polarBusy = true;
+    pause();
+    var el = $('#polar-night');
+    if (!el) { finishPolarNight(); return; }
+    el.classList.remove('hidden');
+    /* 先黑下来，再出字；两段文字错开，不做成一闪而过 */
+    requestAnimationFrame(function () { el.classList.add('on'); });
+    setTimeout(function () { el.classList.add('step2'); }, 2300);
+    setTimeout(function () { el.classList.add('step3'); }, 4600);
+    setTimeout(function () {
+      el.classList.remove('on', 'step2', 'step3');
+      setTimeout(function () { el.classList.add('hidden'); }, 700);
+      finishPolarNight();
+    }, 7200);
+  }
+
+  function finishPolarNight() {
+    mutate(function (w) {
+      w.north = w.north || {};
+      w.north.hint = w.north.hint || {};
+      if (w.north.hint.polarAt) return undefined;
+      w.north.hint.polarAt = Date.now();
+      return w;
+    }).then(function (ok) {
+      S.polarBusy = false;
+      try { unpause(); } catch (e) { }
+      if (!ok) return;
+      try { Snd.sfx('spark'); } catch (e) { }
+      toast('🌑 天没有再亮。小镇留在了夜里', 5600);
+      refreshHUD();
+      setTimeout(showNorthPortal, 2400);
+    }, function () { S.polarBusy = false; try { unpause(); } catch (e) { } });
+  }
+
+  /* 门出现：复用原有的 north.open / north.at，北境的挖掘/星门/宝箱一行没动 */
+  function showNorthPortal() {
     if (northOpen()) return;
-    if (S.mapId || S.interId || S.ending) return;      // 只在镇上判断
-    if (((curWorld() || {}).chapter || 0) < NORTH_GATE) return;
-    if (!iceStoryReady()) return;            // 基础条件没齐，极夜都还没开始
-    var st = window.TownLife && TownLife.snapshot ? TownLife.snapshot() : null;
-    if (!st || st.phase !== 'night') return;
     if (S.northTrying) return;
     S.northTrying = true;
     mutate(function (w) {
       w.north = w.north || {};
-      if (w.north.open) return undefined;               // 对方刚开过
+      if (w.north.open) return undefined;
       w.north.open = true;
       w.north.at = Date.now();
+      w.north.hint = w.north.hint || {};
+      w.north.hint.portalAt = w.north.hint.portalAt || Date.now();
       return w;
     }).then(function (ok) {
       S.northTrying = false;
       if (!ok) return;
-      toast('❄️ 镇子最北边的林子里，雪地上多了一圈发蓝的符文……', 6200);
       try { Snd.sfx('spark'); } catch (e) { }
-      burst(NORTH_PORTAL.x, NORTH_PORTAL.y + 20, 'spark', 3);
+      burst(NORTH_PORTAL.x, NORTH_PORTAL.y + 20, 'spark', 5);
+      openDialog('❄️ 镇子最北边', [
+        '雪停了。林子深处亮起一圈发蓝的符文，一圈一圈往中间收。',
+        '老鲁把手里的刨子放下，看了很久，才说：「……那是门。」',
+        '圣诞老人站在树底下，没有回头：「去吧。这次是你们两个人。」',
+        '（北边的冰湖旁，多了一道可以走进去的光。）'
+      ]);
+      refreshHUD();
     }, function () { S.northTrying = false; });
   }
 
@@ -7875,9 +8369,28 @@ window.Game = (function () {
   }
   function closeAllPanels() {
     adminLeave();                       // 必须在隐藏之前判断，否则永远看到 hidden
+    /* v5.4：合影弹窗也是一个「暂停态」，但它不在 PANEL_IDS 的通用隐藏路径里。
+       以前如果它被别的路径关掉（ESC / 转场 / 调试口），S.photo 会一直挂着 true，
+       而 autoPickEggs / findInteract 都以 S.photo 为闸门 —— 结果就是
+       「回忆捡不起来了、互动也没了」，看起来像存档坏了。
+       这里统一收口：只要在关面板，就把合影状态一起复位。 */
+    var pm = $('#photo-modal');
+    if (S.photo || (pm && !pm.classList.contains('hidden'))) {
+      if (pm) pm.classList.add('hidden');
+      S.photo = false;
+      S.photoOpt = null;
+    }
+    var wasDlg = $('#dlg') && !$('#dlg').classList.contains('hidden');
     PANEL_IDS.forEach(function (s) { var el = $(s); if (el) el.classList.add('hidden'); });
     unpause();
     syncPanelChrome();
+    /* 对话读完的回调（只在这里触发：点「继续」到最后、或点关闭）。
+       先清空再调用，回调里再开新对话也不会被吃掉。 */
+    if (wasDlg && dlgDone) {
+      var fn = dlgDone;
+      dlgDone = null;
+      try { fn(); } catch (e) { if (window.console) console.warn('[dlgDone]', e); }
+    }
   }
   function closeAllPanelsSilent() {
     adminLeave();
@@ -7915,9 +8428,12 @@ window.Game = (function () {
     syncPanelChrome();
   }
   var dlgLines = null, dlgIdx = 0, dlgName = '';
-  function openDialog(name, lines) {
+  /* v5.4：允许挂一个「读完以后」的回调（远方来信读完后要写存档）。
+     只在正常读完 / 关闭时触发一次，绝不重复。 */
+  function openDialog(name, lines, onDone) {
     dlgLines = Array.isArray(lines) ? lines : [lines];
     dlgIdx = 0; dlgName = name;
+    dlgDone = (typeof onDone === 'function') ? onDone : null;
     $('#dlg-name').textContent = name;
     $('#dlg-text').textContent = dlgLines[0];
     $('#dlg-next').textContent = dlgLines.length > 1 ? '继续 ▸' : '关闭';
@@ -8346,16 +8862,37 @@ window.Game = (function () {
       var done = ch > i, cur = (ch === i);
       rows += '<div class="quest-line' + (done ? ' done' : '') + '">' +
         '<span class="quest-mark">' + (done ? '✔' : (cur ? '▶' : '·')) + '</span>' +
-        '<span>第 ' + (i + 1) + ' 章 · ' + esc(c.t) +
+        '<span>第 ' + cnNum(i + 1) + ' 章 · ' + esc(c.t) +
         (cur ? '　<b style="color:#ffe08a">' + esc(c.prog()) + '</b>' : '') + '</span></div>';
-      if (cur) rows += '<div class="quest-line tip"><span class="quest-mark">　</span><span>' + esc(c.tip) + '</span></div>';
+      /* v5.4：当前这一章把子目标逐条列出来 —— 显示的就是判定用的那组 checks，
+         不会再出现「面板说做完了、章节却不动」。 */
+      if (cur) {
+        c.checks.forEach(function (k) {
+          rows += '<div class="quest-line ' + (k.ok() ? 'done' : 'tip') + '">' +
+            '<span class="quest-mark">' + (k.ok() ? '✔' : '·') + '</span><span>' +
+            esc(k.label) + '　<b>' + esc(k.prog()) + '</b>' +
+            (k.where ? '　<i style="opacity:.62;font-style:normal">' + esc(k.where) + '</i>' : '') +
+            '</span></div>';
+        });
+        rows += '<div class="quest-line tip"><span class="quest-mark">💡</span><span>' + esc(c.tip) + '</span></div>';
+      }
     });
     /* v4.3：没有「今天只能推一章」这回事了，条件到了就走 */
     rows += '<div class="quest-line"><span class="quest-mark">📅</span><span>' +
-      (ch >= CHAPTERS.length ? '十章都过完了，剩下的日子就在小镇里慢慢等圣诞夜'
+      (ch >= CHAPTERS.length ? '十二章都过完了，剩下的日子就在小镇里慢慢等圣诞夜'
         : '做事就行——条件一满足，这一章自己就翻过去') + '</span></div>';
 
-    /* 今天镇上的两件委托 */
+    /* v5.4：隐藏线只在「已经读过信」之后露出进度，不提前剧透 */
+    var hs = northHintStage();
+    if (hs >= 2) {
+      rows += '<div class="quest-line"><span class="quest-mark">📮</span><span>' +
+        (hs === 2 ? ('远方来信 · 和镇上的人聊聊　<b>' + northTalkedCount() + '/' + NORTH_TALK_NEED + '</b>（谁都行）')
+          : (hs === 3 ? '远方来信 · 镇上的人都知道了，天要变了'
+            : (hs === 4 ? '极夜 · 北边的符文在雪地上亮着' : '北境 · 林子里那道门已经开了'))) +
+        '</span></div>';
+    }
+
+  /* 今天镇上的两件委托 */
     var NPCN = { santa: '圣诞老人', snowman: '雪人先生', elf: '小精灵', barista: '老板娘',
       postman: '邮差阿信', baker: '面包师麦香', shepherd: '牧羊女小禾', carpenter: '老木匠老鲁' };
     commsToday().forEach(function (c) {
@@ -8720,7 +9257,11 @@ window.Game = (function () {
     /* v4.6.0：批量寄件 / 邮差加急。面板每次重开都重建 DOM，所以在这里直接绑，
        不会像「永久挂在 document 上」那样越绑越多。 */
     var batchN = packBatchCandidates().length;
-    var head = '<div class="pack-actions-row">' +
+    var guide = '';
+    if (chapterNo() === 7 && sentCount() === 0) {
+      guide = '<p class="small-note" style="margin:0 0 8px;color:#ffe08a">📖 第' + cnNum(8) + '章 · 寄出第一个包裹：先做一个「寄件礼盒」，再点下面任意一个地址寄出。<b>做好礼盒不算寄出。</b></p>';
+    }
+    var head = guide + '<div class="pack-actions-row">' +
       (batchN ? ('<button class="btn primary small" type="button" id="pack-batch">📮 一次寄出 ' + batchN + ' 件</button>') : '') +
       '<button class="btn ghost small" type="button" id="pack-express">⚡ 邮差加急（每天一次）</button>' +
       '</div>';
@@ -9076,7 +9617,9 @@ window.Game = (function () {
           else if (n.style) Sprites.drawVillager(ctx, n.x, n.y, ts, n.style, Math.floor(ts / 320) % 4);
           else if (n.id === 'elf') Sprites.drawElf(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
           else Sprites.drawBarista(ctx, n.x, n.y, ts, Math.floor(ts / 300) % 4);
-          nameTag(ctx, vx, vy - (n.id === 'santa' ? 84 : (v && v.sit ? 52 : 66)), n.name, false, '#ffe08a');
+          var tagY = vy - (n.id === 'santa' ? 84 : (v && v.sit ? 52 : 66));
+          nameTag(ctx, vx, tagY, n.name, false, '#ffe08a');
+          if (n.id === 'postman' && northHintStage() === 1) hintMark(ctx, vx, tagY - 30, ts);
         } });
       });
 
@@ -9238,6 +9781,7 @@ window.Game = (function () {
   }
 
   function drawDevMeter(ctx, ts) {
+    if (S.noMeter) return;          // 截图 / 演示用：只藏这一行，不改任何玩法
     var tr = S.track;
     if (!tr) { tr = S.track = { x: S.self.x, y: S.self.y, t: ts, v: 0, fps: 60, fa: 0, f: 0 }; }
     tr.fa += (S.dt || 0.016); tr.f++;
@@ -9322,6 +9866,75 @@ window.Game = (function () {
       }
       ctx.globalAlpha = 1;
     });
+  }
+
+  /* v5.4：隐藏剧情提示 —— 头顶一个会浮动的蓝色感叹号。
+     只画在阿信头上，条件满足才出现，读完信就消失（不叠任务列表）。 */
+  function hintMark(ctx, x, y, ts) {
+    var bob = Math.sin(ts / 420) * 3;
+    var yy = y + bob;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    var g = ctx.createRadialGradient(x, yy + 2, 1, x, yy + 2, 20);
+    g.addColorStop(0, 'rgba(120,215,255,.55)');
+    g.addColorStop(1, 'rgba(80,170,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, yy + 2, 20, 0, 7); ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.font = 'bold 19px "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = 'rgba(8,20,38,.85)';
+    ctx.strokeText('!', x, yy);
+    ctx.fillStyle = '#8fe3ff';
+    ctx.fillText('!', x, yy);
+    ctx.restore();
+  }
+
+  /* v5.4：当前章节缺什么，就由相关的人说出来。
+     只追加在对话末尾（不改第二句委托交付，mailfix 的 1/1 提示不受影响）。 */
+  function questGuide(id) {
+    var ch = chapterNo();
+    var out = [];
+    var r = worldRes();
+    if (ch === 8) {
+      if (id === 'carpenter') {
+        out.push('「树要往上长，得先给它挂一次装饰：木材 2、鲜花 2。广场那棵，走过去就能挂。」');
+        if ((r.materials || 0) < 1) out.push('「挂完再来找我。工作台做件手工就成——木头小鸟最省，木材 4 根。」');
+      }
+      if (id === 'santa') out.push('「去树底下站一会儿吧。它等你们给它挂点东西，等了很久了。」');
+      if (id === 'elf') out.push('「树还没挂装饰呢！木材和鲜花够了就去树下按一下，我可以帮你扶梯子！」');
+    } else if (ch === 7) {
+      if (id === 'postman') out.push('「礼盒做好了？那得去工坊的寄件台，挑一个地址寄出去——光做好不算寄出。」');
+      if (id === 'carpenter') out.push('「礼盒钉好了就去寄件台。地址本子上有，挑一个就行。」');
+      if (id === 'baker') out.push('「寄出去才有回信。回信里常夹着当地的小东西，攒着有用。」');
+    } else if (ch === 6) {
+      if (id === 'shepherd') out.push('「喂过的动物，第二天来收。温室里熟了的作物，收下来也算一份产物。」');
+      if (id === 'baker') out.push('「牛奶、羊毛、鸡蛋，或者刚摘下来的花——都算收成，别嫌少。」');
+    } else if (ch === 9) {
+      if (id === 'postman') out.push('「票不够三张？多收几段回忆、多做点手工，票自己会来。」');
+      if (id === 'santa') out.push('「车票不是攒出来的，是走出来的。去那几个地方看看。」');
+    } else if (ch === 10) {
+      if (id === 'postman') out.push('「寄出去的包裹到了，就来我这儿取信。信里夹的特产，攒三种就够了。」');
+      if (id === 'baker') out.push('「特产是远方的味道。寄得多，收得也多。」');
+    } else if (ch === 11) {
+      if (id === 'carpenter') out.push('「树要全亮，还差几件手工。木头和花我这儿有边角料，拿去做。」');
+      if (id === 'shepherd') out.push('「三种牧场产物都收过一遍，树才肯亮到底。别急，一天一样。」');
+    } else if (ch === 3) {
+      if (id === 'elf') out.push('「温室里每天能领种子。领完记得种下去——种下去才算。」');
+      if (id === 'shepherd') out.push('「种子在温室。种两块地，看着它们长，比什么都实在。」');
+    }
+    return out;
+  }
+
+  function npcLabel(n) {
+    if (n && n.id === 'postman') {
+      var st = northHintStage();
+      if (st === 1) return '✉️ 阿信有封特别的信';
+      if (st === 2 || st === 3) return '✉️ 和阿信说说那封信';
+    }
+    return '💬 和' + n.name + '交谈';
   }
 
   function nameTag(ctx, x, y, text, isSelf, color) {
@@ -9463,7 +10076,10 @@ window.Game = (function () {
         tier: (window.Story ? Story.tierOf(curWorld() || {}) : -1),
         base: iceBaseReady(), story: iceStoryReady(), mapGot: northMapGot(),
         chapterTest: chapterTestActive(), chapterRaw: chapterRaw(),
-        dayLock: !!(window.TownLife && TownLife.isDayLocked && TownLife.isDayLocked())
+        dayLock: !!(window.TownLife && TownLife.isDayLocked && TownLife.isDayLocked()),
+        hintStage: northHintStage(), hintTalked: northTalkedCount(), hintNeed: NORTH_TALK_NEED,
+        polarLock: !!(window.TownLife && TownLife.isPolarLocked && TownLife.isPolarLocked()),
+        timeScale: (window.TownLife && TownLife.timeScale) ? TownLife.timeScale() : 1
       },
       party: partySnapshot()
     };
@@ -9531,6 +10147,44 @@ window.Game = (function () {
         en: c.en || '',
         cn: '第' + cnNum(i + 1) + '章 · ' + c.t,
         sum: c.sum || ''
+      };
+    },
+    /* v5.4：北境隐藏剧情线的只读快照 + 验收用的推进口（都只在 dev 下有效） */
+    devNorthHint: function () {
+      if (!devHook()) return null;
+      var w = curWorld() || {};
+      var c = window.Story ? Story.ctxOf(w) : {};
+      return {
+        stage: northHintStage(), talked: northTalkedCount(), need: NORTH_TALK_NEED,
+        at: !!(northHint().at), read: !!(northHint().read),
+        polarAt: !!(northHint().polarAt), portalAt: !!(northHint().portalAt),
+        open: !!((w.north || {}).open),
+        base: { visits: c.visits || 0, tree: c.tree || 0, mem: c.mem || 0 }
+      };
+    },
+    /* 验收脚本用：直接走「读信 / 和人聊 / 极夜」这三步的真实实现（不是改字段） */
+    devNorthRead: function () { if (!devHook()) return false; openNorthLetter(); return true; },
+    devNorthTalk: function (id) { if (!devHook()) return false; recordNorthTalk(id); return true; },
+    devNorthPolar: function () { if (!devHook()) return false; startPolarNight(); return true; },
+    /* 管理员修改器：验收脚本用同一套真实操作 */
+    devFarm: function (kind) { if (!devHook()) return false; adminFarmAct(kind); return true; },
+    devNextDay: function () { if (!devHook()) return false; adminNextDay(); return true; },
+    devMeter: function (on) { if (!devHook()) return false; S.noMeter = !on; return true; },
+    devSpeed: function (k) { if (!devHook()) return false; adminSpeedAct(k); return true; },
+    devTaskAudit: function () {
+      if (!devHook()) return null;
+      var ch = chapterNo();
+      if (ch >= CHAPTERS.length) return { chapter: ch, allDone: true, checks: [] };
+      var c = CHAPTERS[ch];
+      return {
+        chapter: ch, title: c.t, allDone: false,
+        checks: c.checks.map(function (k) {
+          return { label: k.label, ok: !!k.ok(), prog: k.prog(), where: k.where || '' };
+        }),
+        next: (function () {
+          for (var i = 0; i < c.checks.length; i++) if (!c.checks[i].ok()) return c.checks[i].label;
+          return '';
+        })()
       };
     },
     devNorthQuest: function () {
@@ -9695,6 +10349,7 @@ window.Game = (function () {
       });
     },
     devLeaveMap: function () { if (!devHook()) return false; leaveMap(); return true; },
+    devCloseAll: function () { if (!devHook()) return false; closeAllPanels(); return true; },
     devOpenCraft: function () { openCraftPanel(); },
     devQuestPanel: function () { openQuestPanel(); },
     devPack: function () { openPackPanel(); },

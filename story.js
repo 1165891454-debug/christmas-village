@@ -17,33 +17,45 @@ window.Story = (function () {
   /* ============================================================
    * 0. 剧情链（唯一可信来源）
    * ------------------------------------------------------------
-   * 正式顺序（v5.1 校准后）：
+   * 正式顺序（v5.4 校准后，北境是**独立隐藏剧情线**，不再看章节号）：
    *
-   *   第 1~8 章   小镇生活 / 旅行 / 记忆 / 升级圣诞树
-   *   基础条件齐  去过 4 个地方 + 树到第 6 阶 + 14 段回忆
+   *   第 1~12 章  小镇生活 / 旅行 / 记忆 / 升级圣诞树（与北境线互不影响）
+   *   资格        去过 4 个地方 + 树到第 6 阶 + 14 段回忆
    *               —— 这只代表「有资格」，不发车票、不开始极夜
-   *   第 9 章起   小镇光线异常，极夜开始（polar 1）
-   *               → 北境入口出现（polar 2）
-   *               → 双人星门 + 宝箱（polar 3，拿到地图 / 御寒衣 / 极光盒）
-   *               → **宝箱开了，冰岛车票才正式解锁**
-   *               → 去冰岛，用极光盒（polar 4）
-   *               → 回镇天亮（polar 0）
-   *               → 最终圣诞筹备
+   *   阿信的来信  north.hint.at（头顶蓝色感叹号）
+   *   → 读信       hint.read → 极夜 1 级（光线开始不对）
+   *   → 和 4 人聊 hint.talked
+   *   → 极夜降临  hint.polarAt → 极夜 2 级
+   *   → 北境入口  world.north.open
+   *   → 双人星门 + 宝箱（极夜 3，拿到地图 / 御寒衣 / 极光盒）
+   *   → **宝箱开了，冰岛车票才正式解锁**
+   *   → 去冰岛，用极光盒（极夜 4）
+   *   → 回镇天亮（极夜 0）
+   *   → 最终圣诞筹备
    *
    * 所有状态**全部从 world 里已有的字段推出来**（world.north / world.travel /
-   * world.treeStage / world.quest.found / world.chapter / world.finalPrep），
+   * world.treeStage / world.quest.found / world.finalPrep），
    * 不新增章节计数器，也不写 localStorage —— 两个人、两台设备、刷新页面
    * 看到的都是同一套天色。
    * ============================================================ */
   var BASE_TRAVEL = 4;        // 原有冰岛基础条件：去过 4 个地方
   var BASE_TREE = 5;          // 树到第 6 阶（treeStage 从 0 起算）
   var BASE_MEM = 14;          // 至少 14 段旅行记忆
-  /* 极夜开始的章节。world.chapter 是 0 基（0 = 第 1 章），
-     CHAPTERS 数组里 index 8 = 第 9 章「把树种起来」。
-     所以「第 9 章左右开始极夜」= chapter >= 8。
-     注意和 NORTH_GATE（=9，北境入口在第 10 章出现）分开：
-     极夜先来（第 9 章），北境入口后到（第 10 章），这是有先后的两件事。 */
-  var STORY_CHAPTER = 8;      // 极夜触发章节：第 9 章（0 基 chapter=8）
+
+  /* v5.4：北境不再是「第 10 章自动开门」，而是一条**隐藏剧情线**：
+   *
+   *   树第 6 阶 + 14 段回忆 + 4 个旅行地   ← 只是资格
+   *   → 阿信收到一封北边来的信（头顶蓝色感叹号）
+   *   → 玩家主动找他，读信
+   *   → 和镇上的人聊（4 位，分几次也行）
+   *   → 极夜降临（一次演出，之后小镇不再天亮）
+   *   → 北境传送门出现
+   *   → 玩家自己走进去
+   *
+   * 状态全部落在 world.north.hint 里（at / read / talked / polarAt / portalAt），
+   * 仍然不新开一套章节系统；章节 1~12 与这条线互不影响。
+   */
+  var NORTH_TALK_NEED = 4;    // 读信之后要聊过几个人
 
   /* 只读 world，把推导要用的几个数一次算出来。
      注意：不用 S.quest / 本地变量，保证两台设备算出的结果一致。 */
@@ -59,24 +71,44 @@ window.Story = (function () {
       mem: Object.keys(found).length,
       iceland: !!travels.iceland,
       north: n,
+      hint: n.hint || {},
       finalPrep: w.finalPrep || 0,
       revived: n.revived || w.revived || 0
     };
   }
 
-  /* 原有冰岛基础条件 —— 一个数都没改，只是把它和「发车票」拆开了 */
+  /* 原有冰岛基础条件 —— 一个数都没改，只是把它从「发车票」拆了出来 */
   function baseReady(w) {
     var c = ctxOf(w);
     return c.visits >= BASE_TRAVEL && c.tree >= BASE_TREE && c.mem >= BASE_MEM;
   }
-  /* 极夜能不能开始：基础条件 + 剧情章节。两个都满足才算「该出事了」 */
+  /* 隐藏剧情是否已经开始：资格到了，并且那封信已经出现 */
   function storyReady(w) {
     var c = ctxOf(w);
-    return baseReady(w) && c.chapter >= STORY_CHAPTER;
+    return baseReady(w) && !!c.hint.at;
   }
 
-  /* 主线阶段
-   *   0  还没开始（门没出现）
+  /* 隐藏剧情的五个小阶段（给 UI / 任务条用，不写存档，只读 world）：
+   *   0 未开始 / 1 信到了（等玩家找阿信）/ 2 读过信（去和人聊）
+   *   3 聊够了（极夜将落）/ 4 极夜已降临、门未开 / 5 门已开
+   */
+  function hintStageOf(w) {
+    var c = ctxOf(w);
+    var h = c.hint;
+    if (!h || !h.at) return 0;
+    if (h.portalAt || c.north.open) return 5;
+    if (h.polarAt) return 4;
+    var talked = (h.talked && typeof h.talked === 'object') ? Object.keys(h.talked).length : 0;
+    if (h.read) return talked >= NORTH_TALK_NEED ? 3 : 2;
+    return 1;
+  }
+  function hintTalked(w) {
+    var h = ctxOf(w).hint;
+    return (h.talked && typeof h.talked === 'object') ? Object.keys(h.talked).length : 0;
+  }
+
+  /* 主线阶段（北境那条线）
+   *   0  门没出现
    *   1  北境入口出现 / 正在探索
    *   2  双人星门已开（拿到星钥）
    *   3  宝箱已开（地图 / 御寒衣 / 极光盒）
@@ -96,17 +128,18 @@ window.Story = (function () {
   }
 
   /* 极夜等级 0~4：0 正常，4 彻底极夜。
-     v5.1 校准：**开箱之前就开始**（1~2 级），北境探索期间一直保持，
-     只有「冰岛极光演完 + 回到小镇」这一次事件才把它归零。
-     所以它不是开关，而是由进度推出来的浓度 —— 刷新、开菜单、切地图都不会重置。 */
+     1 级 = 「光开始不对」：信读过了、镇上都知道了，但极夜还没真正落下来。
+     2 级 = 极夜降临（门出现）。之后一路保持，只有
+     「冰岛极光演完 + 回到小镇」才归零。
+     这一级不是章节推的，是隐藏剧情推的 —— 管理员跳章不会让它出现。 */
   function polarOf(w) {
     var c = ctxOf(w);
     if (c.revived) return 0;              // 天亮了
-    if (!storyReady(w)) return 0;          // 资格不到，小镇一切正常
-    if (c.north.auroraDone) return 4;      // 极光演完、还没回镇
-    if (c.north.opened) return 3;          // 拿到盒子，天最黑
-    if (c.north.open) return 2;            // 门出现了，北境探索期间
-    return 1;                              // 光线开始不对
+    if (c.north.auroraDone) return 4;     // 极光演完、还没回镇
+    if (c.north.opened) return 3;         // 拿到盒子，天最黑
+    if (c.north.open || c.hint.polarAt) return 2;   // 门出现了 / 极夜刚落
+    if (c.hint.read) return 1;            // 信读完了：天开始不对
+    return 0;
   }
 
   /* NPC 台词档位：-1 = 还没有剧情台词（第 1~8 章保持原来的日常对话） */
@@ -161,7 +194,10 @@ window.Story = (function () {
       var dug = (n.digs && typeof n.digs === 'object') ? Object.keys(n.digs).length : 0;
       return (n.shovel || n.letter || n.sled || dug) ? TIER.P2 : TIER.P1;
     }
-    return polarOf(w) >= 1 ? TIER.P0 : TIER.NONE;
+    /* 信读过了、极夜还没落：整段台词换成「要变天了」那一套。
+       还没读信时保持原来的日常台词 —— 不让 NPC 未卜先知。 */
+    if (c.hint && c.hint.read) return TIER.P0;
+    return TIER.NONE;
   }
 
   var TALK = {
@@ -388,6 +424,36 @@ window.Story = (function () {
         '再撑几天。撑到圣诞夜。',
         '到时候你们别看我。']
     ]
+  };
+
+  /* ============================================================
+   * 1.5 远方来信 / 极夜降临（v5.4 隐藏剧情线）
+   * ------------------------------------------------------------
+   * 这封信是整条线的入口：不是任务列表弹出的，是阿信在邮局门口叫住你。
+   * 文本只在这里写一次，game.js 负责触发与写存档。
+   * ============================================================ */
+  var LETTER = {
+    who: '邮差 · 阿信',
+    lines: [
+      '等等 —— 你们来得正好。',
+      '今早理邮袋的时候，多了这一封。没有寄件人，邮戳是北边的。',
+      '我送了十年信，第一次见这种邮戳。上面只盖了一个字：禾。',
+      '里面就一页纸，字很轻：\n「光要走了。北边的门会开。别一个人来。」',
+      '……这个字我认得。十年前他走的那天，给我留过一张便条，也是这么写的。',
+      '这封信我送不出去 —— 收件地址只写了「北边」。\n你们拿着吧。顺便，去和镇上的人说一声。他们该知道了。'
+    ],
+    after: [
+      '（信纸很薄，边角有一点松木味。背面还有一行更小的字：）',
+      '「树长到最高的时候，抬头看。」'
+    ]
+  };
+
+  var POLAR_LINES = {
+    kicker: 'THE POLAR NIGHT',
+    title: '极夜降临',
+    sub: '从今天起，小镇不再天亮。',
+    body: '不是日食，也不是暴雪。\n是光，一点一点地退回了它来的地方。',
+    hint: '北边的雪地上，多了一圈发蓝的符文。'
   };
 
   /* 给 game.js 用：这一档该说哪些话 */
@@ -1538,12 +1604,17 @@ window.Story = (function () {
     storyReady: storyReady,
     stageOf: stageOf,
     polarOf: polarOf,
+    hintStageOf: hintStageOf,
+    hintTalked: hintTalked,
+    NORTH_TALK_NEED: NORTH_TALK_NEED,
     tierOf: tierOf,
     TIER: TIER,
     talkStageOf: talkStageOf,
     npcTalk: npcTalk,
     npcLines: npcLines,
     lines: TALK,
+    letter: LETTER,
+    polarLines: POLAR_LINES,
     /* 演出 */
     AURORA_SECONDS: AURORA_SECONDS,
     drawAurora: drawAurora,

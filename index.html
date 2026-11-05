@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=5.3.0" />
+  <link rel="stylesheet" href="style.css?v=5.4.0" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -139,7 +139,6 @@
           <header class="lobby-hero">
             <p class="lobby-kicker">我们的圣诞小镇</p>
             <h1 class="lobby-title"><b>OMO'S</b><span>CHRISTMAS VILLAGE</span></h1>
-            <p class="lobby-sub">两个人的小镇，一棵等你们点亮的圣诞树。</p>
           </header>
 
           <div class="role-stage" role="radiogroup" aria-label="选择角色">
@@ -467,6 +466,36 @@
               <p class="muted small-note">章节推进期间，主线不会因为条件满足而自己往前跳（否则刚退回一章又会被推回去）。点「恢复」把章节号放回测试前，测试记录一并删掉。这份记录在 <b>world.chapterTest</b> 里，两台设备同步。</p>
             </div>
 
+            <div class="admin-block admin-north admin-testline" id="admin-cheat">
+              <div class="admin-block-head">🛠 游戏修改器 <span class="admin-block-sub">CHEAT PANEL · 仅本机</span></div>
+              <p class="admin-warn">⚠ 测试工具：减少等待用，不替代正常玩法，也不会替玩家完成章节</p>
+
+              <div class="admin-north-sub">天色流速（只影响这台设备 · 刷新恢复 1×）</div>
+              <div class="admin-actions">
+                <button class="btn ghost small" type="button" data-speed="1">1× 正常</button>
+                <button class="btn ghost small" type="button" data-speed="2">2×</button>
+                <button class="btn ghost small" type="button" data-speed="5">5×</button>
+                <button class="btn ghost small" type="button" data-speed="10">10×</button>
+              </div>
+              <div id="admin-speed-status" class="admin-north-status"></div>
+
+              <div class="admin-north-sub">作物 / 动物（立即成熟；收获仍走正常操作）</div>
+              <div id="admin-farm" class="admin-north-status"></div>
+              <div class="admin-actions">
+                <button class="btn primary small" type="button" data-farm="ripe">作物立即成熟</button>
+                <button class="btn primary small" type="button" data-farm="produce">动物立即产出</button>
+                <button class="btn ghost small" type="button" data-farm="refresh">刷新状态</button>
+                <button class="btn ghost small" type="button" data-dayact="next">当作第二天（刷新每日额度）</button>
+              </div>
+
+              <div class="admin-north-sub">任务检查（真实判定 · 只读）</div>
+              <div id="admin-task" class="admin-north-status"></div>
+              <div class="admin-actions">
+                <button class="btn ghost small" type="button" data-task="refresh">刷新任务检查</button>
+              </div>
+              <p class="muted small-note">「作物立即成熟」只是把生长倒计时原点往前拨，成熟后仍要自己去温室收；「动物立即产出」只把今天该出的那一份标成可收，已经收过的不再重复。两者都写共享存档，两台设备同步。</p>
+            </div>
+
             <p class="muted small-note" id="admin-note">每次操作前都会先备份当前进度，出问题可以恢复。<br />素材 +5 每 60 秒最多存一次完整备份，避免连点把存档撑大；每次操作都会记进本机日志。</p>
           </div>
         </div>
@@ -559,7 +588,7 @@
       <!-- 任务面板 -->
       <div id="quest-panel" class="panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head">
-          <div class="panel-name">📜 小镇日历 · 十章</div>
+          <div class="panel-name">📜 小镇日历 · 十二章</div>
           <button class="panel-x" data-close="quest-panel" aria-label="关闭">✕</button>
         </div>
         <div class="panel-body"><div id="quest-body"></div></div>
@@ -662,7 +691,20 @@
       <h2 class="cd-cn" id="cd-cn">第一章 · 回到小镇</h2>
       <div class="cd-sep" aria-hidden="true"><i></i><b>✦</b><i></i></div>
       <p class="cd-sum" id="cd-sum"></p>
+      <p class="cd-gift" id="cd-gift"></p>
       <p class="cd-tap">轻触继续</p>
+    </div>
+  </div>
+
+  <!-- v5.4 极夜降临：一次性的叙事演出（三段字，先后浮现） -->
+  <div id="polar-night" class="hidden" role="dialog" aria-live="polite" aria-label="极夜降临">
+    <div class="pn-veil"></div>
+    <div class="pn-text">
+      <p class="pn-kicker">THE POLAR NIGHT</p>
+      <h2 class="pn-title">极夜降临</h2>
+      <p class="pn-sub">从今天起，小镇不再天亮。</p>
+      <p class="pn-body">不是日食，也不是暴雪。<br>是光，一点一点地退回了它来的地方。</p>
+      <p class="pn-hint">北边的雪地上，多了一圈发蓝的符文。</p>
     </div>
   </div>
 
@@ -720,18 +762,18 @@
     <div class="tc-line"></div>
   </div>
 
-  <script src="firebase-config.js?v=5.3.0"></script>
-  <script src="memories.js?v=5.3.0"></script>
-  <script src="chars.js?v=5.3.0"></script>
-  <script src="sprites.js?v=5.3.0"></script>
-  <script src="world.js?v=5.3.0"></script>
-  <script src="north.js?v=5.3.0"></script>
-  <script src="maps.js?v=5.3.0"></script>
-  <script src="specialties.js?v=5.3.0"></script>
-  <script src="life.js?v=5.3.0"></script>
-  <script src="story.js?v=5.3.0"></script>
-  <script src="game.js?v=5.3.0"></script>
-  <script src="app.js?v=5.3.0"></script>
+  <script src="firebase-config.js?v=5.4.0"></script>
+  <script src="memories.js?v=5.4.0"></script>
+  <script src="chars.js?v=5.4.0"></script>
+  <script src="sprites.js?v=5.4.0"></script>
+  <script src="world.js?v=5.4.0"></script>
+  <script src="north.js?v=5.4.0"></script>
+  <script src="maps.js?v=5.4.0"></script>
+  <script src="specialties.js?v=5.4.0"></script>
+  <script src="life.js?v=5.4.0"></script>
+  <script src="story.js?v=5.4.0"></script>
+  <script src="game.js?v=5.4.0"></script>
+  <script src="app.js?v=5.4.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

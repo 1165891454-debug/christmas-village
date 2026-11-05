@@ -1721,3 +1721,73 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
   .cd-sum { font-size: 12px; line-height: 1.7; }
   .cd-tap { margin-top: 9px; }
 }
+
+/* ============================================================
+   v5.4 极夜降临
+   ------------------------------------------------------------
+   分三段浮现：标题 → 说明 → 门的位置。
+   遮罩不是纯黑（留 12% 的蓝），玩家仍能看见小镇安静下来的轮廓。
+   ============================================================ */
+#polar-night {
+  position: fixed; inset: 0; z-index: 78;
+  display: grid; place-items: center; padding: 20px;
+  pointer-events: none;
+}
+#polar-night .pn-veil {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(80% 60% at 50% 30%, rgba(10,26,52,.55), rgba(2,5,12,.95) 72%),
+    linear-gradient(180deg, rgba(6,14,30,.86), rgba(2,5,12,.96));
+  opacity: 0; transition: opacity 1.6s ease;
+}
+#polar-night.on .pn-veil { opacity: 1; }
+#polar-night .pn-text {
+  position: relative; display: grid; justify-items: center; gap: 0;
+  text-align: center; max-width: 80ch;
+}
+#polar-night .pn-kicker {
+  margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .44em; text-indent: .44em;
+  color: #7fd3ff; opacity: 0; transform: translateY(8px);
+  transition: opacity 1s ease .6s, transform 1s ease .6s;
+  text-shadow: 0 0 16px rgba(90,190,255,.55);
+}
+#polar-night .pn-title {
+  margin: 10px 0 0; font-size: clamp(30px, 8vw, 54px); font-weight: 800;
+  letter-spacing: .16em; text-indent: .16em; color: #eaf6ff;
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 1.2s ease .8s, transform 1.2s ease .8s;
+  text-shadow: 0 0 34px rgba(120,200,255,.35), 0 6px 30px rgba(0,0,0,.7);
+}
+#polar-night.on .pn-kicker,
+#polar-night.on .pn-title { opacity: 1; transform: none; }
+#polar-night .pn-sub {
+  margin: 16px 0 0; font-size: 15px; letter-spacing: .12em; color: #cfe6ff;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity 1s ease .3s, transform 1s ease .3s;
+}
+#polar-night .pn-body {
+  margin: 14px 0 0; font-size: 13.5px; line-height: 2; color: rgba(226,240,255,.78);
+  opacity: 0; transform: translateY(8px);
+  transition: opacity 1s ease .7s, transform 1s ease .7s;
+}
+#polar-night .pn-hint {
+  margin: 22px 0 0; font-size: 12.5px; letter-spacing: .06em; color: #9ff0d8;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity 1s ease .5s, transform 1s ease .5s;
+  text-shadow: 0 0 18px rgba(90,240,200,.45);
+}
+#polar-night.step2 .pn-sub,
+#polar-night.step2 .pn-body { opacity: 1; transform: none; }
+#polar-night.step3 .pn-hint { opacity: 1; transform: none; }
+@media (max-height: 460px) {
+  #polar-night .pn-title { font-size: clamp(24px, 5vw, 34px); }
+  #polar-night .pn-sub { margin-top: 8px; font-size: 13px; }
+  #polar-night .pn-hint { margin-top: 10px; }
+}
+
+/* 章节卡片底部：这一章的奖励 */
+.cd-gift {
+  margin: 12px 0 0; font-size: 11.5px; letter-spacing: .06em; color: rgba(255,224,150,.82);
+  opacity: 0; transition: opacity .45s ease .62s;
+}
+#chapter-done.on .cd-gift { opacity: 1; }

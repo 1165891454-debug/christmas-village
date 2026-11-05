@@ -107,6 +107,14 @@ window.TownLife = (function () {
   var polarLevel = 0;
   /* 天亮之后锁死在白天 —— 北境故事结束，小镇不该再自己入夜 */
   var dayLock = false;
+  /* v5.4：极夜一旦降临（2 级起），小镇就不再跟着昼夜循环变亮。
+     这是一个「锁在夜里」的开关，和 dayLock 互斥。 */
+  var polarLock = false;
+  /* v5.4：管理员测试用的天色流速（只影响这台设备，刷新即恢复 1×）。
+     不是存档字段，也不是全局时钟 —— 另一台设备完全不受影响。 */
+  var timeScale = 1;
+  var vtBias = 0;
+  var lastRealT = 0;
 
   function applyPolar(level) {
     var k = Math.min(1, Math.max(0, level) / 4);
@@ -122,16 +130,27 @@ window.TownLife = (function () {
   function setPolar(level) {
     var v = Math.max(0, Math.min(4, Math.round(level || 0)));
     st.polar = v;
-    if (v !== polarLevel) {
+    var lock = v >= 2;
+    if (v !== polarLevel || lock !== polarLock) {
       polarLevel = v;
+      polarLock = lock;
       updateEnv(0.016, Date.now());     // 面板/存档刚变时立刻生效，不等下一帧
     }
+  }
+  /* 测试用天色流速：1/2/5/10。只在本机内存里，刷新回到 1×。 */
+  function setTimeScale(k) {
+    var v = Number(k) || 1;
+    if (v < 1) v = 1;
+    if (v > 10) v = 10;
+    timeScale = v;
+    lastRealT = 0;                       // 下一帧重新起算，不会把切之前的空档也算进去
+    return timeScale;
   }
   /* 天亮后锁死白天：北境故事结束，小镇不该再自己入夜 */
   function setDayLock(on) {
     dayLock = !!on;
     st.dayLock = dayLock;
-    if (dayLock) { st.vt = 0.42; st.vtInit = true; updateEnv(0.016, Date.now()); }
+    if (dayLock) { polarLock = false; st.vt = 0.42; st.vtInit = true; updateEnv(0.016, Date.now()); }
   }
 
   /* ============================================================
@@ -187,8 +206,17 @@ window.TownLife = (function () {
   var WX_SNOW = { clear: 0.16, snow: 0.58, heavy: 1.00, aurora: 0.26 };
 
   function updateEnv(dt, now) {
+    /* v5.4：管理员调速 —— 把「流速差」累积成一个天相位偏置。
+       只在没有冻结、没有锁白天/极夜时累积；刷新后偏置归零（不写存档）。 */
+    if (!lastRealT) lastRealT = now;
+    var dReal = Math.max(0, Math.min(3000, now - lastRealT));
+    lastRealT = now;
+    if (timeScale > 1 && !st.frozen && !st.dayLock && !polarLock) {
+      vtBias = (vtBias + dReal * (timeScale - 1) / DAY_MS) % 1;
+    }
+
     /* ---- 时间 ---- */
-    if (!st.vtInit) { st.vt = vtOf(now); st.vtInit = true; }
+    if (!st.vtInit) { st.vt = (vtOf(now) + vtBias) % 1; st.vtInit = true; }
     else if (st.dayLock) {
       /* v5.2：天亮之后锁在白天（0.42 = 上午）。不再跟着真实时间走，
          所以玩家回镇、刷新、隔天再进来，看到的都是晴天。 */
@@ -197,8 +225,17 @@ window.TownLife = (function () {
       st.vt += dl * (1 - Math.exp(-dt * 1.6));
       if (Math.abs(dl) < 0.002) st.vt = 0.42;
     }
+    else if (polarLock && !st.frozen) {
+      /* v5.4：极夜期间锁在深夜（0.885 = 夜里最黑那段）。
+         不再跟着真实时间走到白天，所以「天不会再亮」是真的。
+         frozen 时让测试脚本仍然能指定任意时刻。 */
+      var pn = 0.885 - st.vt;
+      if (pn > 0.5) pn -= 1; else if (pn < -0.5) pn += 1;
+      st.vt += pn * (1 - Math.exp(-dt * 1.4));
+      if (Math.abs(pn) < 0.002) st.vt = 0.885;
+    }
     else if (!st.frozen) {
-      var target = vtOf(now);
+      var target = (vtOf(now) + vtBias) % 1;
       var d = target - st.vt;
       /* 取最短路径（跨 0 点也不会倒着绕一圈） */
       if (d > 0.5) d -= 1; else if (d < -0.5) d += 1;
@@ -221,6 +258,9 @@ window.TownLife = (function () {
     st.lamp = lerp(a.lamp, b.lamp, f);
     st.win = lerp(a.win, b.win, f);
     st.phase = phaseOf(t);
+    /* v5.4：极夜锁生效时相位就是 night —— 不靠 vt 恰好落在哪一段，
+       否则刚开始锁的那几秒还会报 late。测试脚本 setClock 时不算。 */
+    if (polarLock && !st.frozen) st.phase = 'night';
 
     /* ---- v5.2 极夜：在昼夜色之上再压一层冷蓝紫 ----
        只改「环境色 + 环境光强度 + 灯的必要亮度」，不改昼夜相位，
@@ -1146,6 +1186,8 @@ window.TownLife = (function () {
       /* v5.2：极夜等级与天亮锁 —— 验收脚本要看得到 */
       polar: st.polar,
       dayLock: st.dayLock,
+      polarLock: polarLock,
+      timeScale: timeScale,
       sky: 'rgb(' + (st.top[0] | 0) + ',' + (st.top[1] | 0) + ',' + (st.top[2] | 0) + ')',
       skyBot: 'rgb(' + (st.bot[0] | 0) + ',' + (st.bot[1] | 0) + ',' + (st.bot[2] | 0) + ')',
       /* v4.7.1：把两个周期暴露出来，验收脚本可以直接断言
@@ -1188,6 +1230,7 @@ window.TownLife = (function () {
        否则验收脚本 seed 了 revived 之后就再也摆不出夜晚了。
        正式流程里没有任何地方调用它，玩家不会因此看到天黑回来。 */
     dayLock = false; st.dayLock = false;
+    polarLock = false; timeScale = 1; vtBias = 0; lastRealT = 0;
     st.vt = ((t % 1) + 1) % 1;
     st.vtInit = true;
     st.frozen = hold !== false;
@@ -1244,7 +1287,7 @@ window.TownLife = (function () {
   }
 
   return {
-    version: '5.3.0',
+    version: '5.4.0',
     tick: tick,
     drawFootprints: drawFootprints,
     drawBuildingLife: drawBuildingLife,
@@ -1260,6 +1303,9 @@ window.TownLife = (function () {
     snapshot: snapshot,
     setStoryDim: function (v) { storyDim = (typeof v === 'number' && v >= 0 && v <= 1) ? v : 1; },
     setPolar: setPolar,
+    setTimeScale: setTimeScale,
+    timeScale: function () { return timeScale; },
+    isPolarLocked: function () { return polarLock; },
     setDayLock: setDayLock,
     isDayLocked: function () { return dayLock; },
     setClock: setClock,
