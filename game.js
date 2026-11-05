@@ -6954,7 +6954,13 @@ window.Game = (function () {
   function maybeNorthStory() {
     if (!window.Story) return;
     if (S.mapId || S.interId || S.ending) return;
-    if (northAlwaysOn()) return;            // 开发期常显：不写剧情状态
+    /* v5.4.1 修复：原来这里有一行 `if (northAlwaysOn()) return;`。
+       它的本意是「测试期常显时不写存档」，但 northAlwaysOn() 在开发版
+       （NORTH_TEST_ALWAYS=true）恒为 true，于是整个隐藏剧情线（阿信的来信 →
+       读信 → 4 人聊 → 极夜 → 门）被这行短路，永远不触发 ——
+       玩家看到传送门常显，却看不到阿信的蓝色感叹号，剧情卡死。
+       常显只该影响「门是否可见」（northOpen() 里），不该阻断剧情推进。
+       所以这里去掉这行；管理员跳章那条照旧保留。 */
     if (chapterTestActive()) return;        // 管理员跳章不代表剧情走到了
     var w = curWorld() || {};
     if (!w) return;
@@ -7095,7 +7101,13 @@ window.Game = (function () {
 
   /* 门出现：复用原有的 north.open / north.at，北境的挖掘/星门/宝箱一行没动 */
   function showNorthPortal() {
-    if (northOpen()) return;
+    /* v5.4.1 修复：原来这里 `if (northOpen()) return;`，但 northOpen() 在
+       开发版常显（NORTH_TEST_ALWAYS=true）时恒为 true，导致门虽然显示出来，
+       却永远不写 world.north.open / world.north.hint.portalAt —— 极夜落了，
+       剧情卡在「门未开」这一档。这里改成直接看存档里的 north.open，
+       与显示层的常显解耦：剧情进度照常落盘，门的可见性仍由 northOpen() 决定。 */
+    var st = northState();
+    if (st && st.open) return;
     if (S.northTrying) return;
     S.northTrying = true;
     mutate(function (w) {
