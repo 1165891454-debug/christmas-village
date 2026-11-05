@@ -87,6 +87,7 @@ window.Game = (function () {
     northTestBusy: false, gateCharge: 0, gateHintAt: 0, gateLastT: 0, gateOpenFx: 0,
     northHintBusy: false, polarBusy: false, farmBusy: false,
     cineBusy: false, storySaid: {},
+    shovelIntroSaid: false,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -117,7 +118,12 @@ window.Game = (function () {
     devWarned: false,
     /* 上一次 mutate 失败的原因（用来看「是网络/权限失败」还是「业务规则放弃」） */
     lastMutFailAt: 0,
-    lastMutErr: ''
+    lastMutErr: '',
+    /* v5.4.3：双人共享事件 —— 记录本机已处理到的最大事件序号。
+       重大交互（宝箱 / 钥匙 / 铲子 / 极夜 / 传送门 / 极光等）在写存档的同时
+       向 world.fx 追加一条带序号的事件，两台设备都从 onData 里检测到新事件
+       再各自播放表现 —— 操作方与对方看到同一段动画，奖励仍在事务里幂等，不重复发。 */
+    lastFxSeq: 0
   };
 
   var SPEED = 166;
@@ -899,6 +905,94 @@ window.Game = (function () {
   /* 上一次 mutate 是不是「云端失败」（而不是业务规则放弃）。
    * 用来避免把网络问题说成「种子不够」「礼盒不够」这种错的原因。 */
   function mutNetFail() { return (Date.now() - (S.lastMutFailAt || 0)) < 2500; }
+
+  /* ============================================================
+   * v5.4.3 双人共享事件（重大交互的表现层同步）
+   * ------------------------------------------------------------
+   * 背景：以前宝箱开启 / 钥匙拾取 / 铲子 / 极夜 / 传送门这些「有仪式感」的
+   * 交互，动画只在发起操作的那台设备上播放。另一台设备只会看到共享存档的
+   * 状态突然变了（宝箱突然「开了」），看不到过程 —— 双人体验被打断。
+   *
+   * 方案：在 world 里加一个单调递增的事件字段 world.fx：
+   *   { seq: 递增序号, type: 'chest'|'key'|'shovel'|..., by: 'a'|'b', at: 时间戳 }
+   * 发起方在 mutate 事务里「状态 + 事件」一起写（原子提交，事件不会漏）；
+   * 两台设备都在 onData 里 consumeFx() 检测到新 seq，各自播放对应表现。
+   *
+   * 为什么这样是安全的：
+   *   · 奖励仍走 mutate 事务幂等写入（如 north.opened 只写一次），
+   *     事件只是「提示双方播动画」，本身不发任何奖励；
+   *   · 动画与奖励解耦 —— 动画漏播不会丢奖励，双方都播也不会重复领；
+   *   · 发起方自己也播（本地即时），consumeFx 用 lastFxSeq 去重，
+   *     所以「发起方播一次 + onData 再回来」不会重复；
+   *   · 刷新 / 重连 / 网络延迟：新事件序号持久在存档里，谁先拿到谁先播，
+   *     发起方离线也不影响对方看到事件（前提是存档已落盘）。
+   * ============================================================ */
+
+  /* 在 mutate 事务内部调用：给 world 追加一条 fx 事件。
+   * 用法：在写状态的同一个 fn 里调用 emitFxInTx(w, 'chest')。
+   * 只在「这次状态真的会写」（fn 返回 w）时才追加，返回 undefined 时不追加。 */
+  function emitFxInTx(w, type) {
+    w = w || {};
+    var seq = (w.fx && typeof w.fx.seq === 'number') ? w.fx.seq + 1 : 1;
+    w.fx = { seq: seq, type: type, by: S.mySlot || 'a', at: Date.now() };
+    return w;
+  }
+
+  /* onData 里调用：检测到新的 fx 事件就播放对应表现。
+   * 只处理「别人发起」的事件（by !== 自己），避免自己刚播完又被 onData 触发一次。
+   * 每个 type 的具体表现由下面的 playFx() 分发。 */
+  function consumeFx(w) {
+    if (!w || !w.fx || typeof w.fx.seq !== 'number') return;
+    var seq = w.fx.seq;
+    if (seq <= S.lastFxSeq) return;
+    /* 无论如何先记住已见到的最大序号，防止同一事件被反复消费 */
+    S.lastFxSeq = seq;
+    if (w.fx.by === S.mySlot) return;   // 自己发起的：本机已经即时播过
+    playFx(w.fx);
+  }
+
+  /* 按事件类型播放「对方发起」的这段表现。
+   * 这里只做纯表现（粒子 / 音效 / 对话 / 短暂演出），绝不写存档、不发奖励。 */
+  function playFx(fx) {
+    if (!fx || !fx.type) return;
+    var t = fx.type;
+    if (t === 'chestOpen') {
+      /* 对方开宝箱：本地也播一段「镜头压过去 + 光效」，不抢他正在看的物品卡片 */
+      try { Snd.sfx('spark'); } catch (e) { }
+      var c = window.NorthMap && NorthMap.chest;
+      if (c) {
+        S.camFocus = { x: c.x, y: c.y - 20, until: Date.now() + 1600 };
+        burst(c.x, c.y - 10, 'spark', 8);
+      }
+      toast(name2() + ' 打开了北境的宝箱', 3600);
+    } else if (t === 'chestReward') {
+      /* 对方开箱后的三样东西：本地弹一句轻提示即可（完整物品卡属于发起方） */
+      toast('🧰 宝箱里的东西被 ' + name2() + ' 收起来了', 4200);
+    } else if (t === 'key') {
+      try { Snd.sfx('craft'); } catch (e) { }
+      var g = window.NorthMap && NorthMap.gate;
+      if (g) burst(g.arch.x, g.arch.y - 20, 'spark', 6);
+      toast('🗝 ' + name2() + ' 拿到了北境星钥', 3600);
+    } else if (t === 'shovel') {
+      try { Snd.sfx('craft'); } catch (e) { }
+      toast('🪏 ' + name2() + ' 从老鲁那儿换到了旧雪铲', 3600);
+    } else if (t === 'dig') {
+      try { Snd.sfx('door'); } catch (e) { }
+      toast('⛏ ' + name2() + ' 在北境的雪地里挖到了什么', 3400);
+    } else if (t === 'polar') {
+      /* 极夜是一场全屏演出，对方也已本地演出（startPolarNight 是双方各自触发的
+         maybeNorthStory），这里只补一个轻提示，避免两台设备各播一场黑屏。 */
+      toast('🌑 天没有再亮', 3400);
+    } else if (t === 'portal') {
+      try { Snd.sfx('spark'); } catch (e) { }
+      if (window.NORTH_PORTAL) burst(NORTH_PORTAL.x, NORTH_PORTAL.y + 20, 'spark', 5);
+      toast('❄️ 镇子最北边多了一道发蓝的光', 4200);
+    } else if (t === 'aurora') {
+      toast('🌌 冰岛的极光……你们一起看到了', 4200);
+    }
+  }
+
+
 
   function refreshHUD() {
     var r = worldRes();
@@ -1736,6 +1830,12 @@ window.Game = (function () {
         mutate(function (w2) { migrateWorld(w2); return w2; });
       }
       syncPartyState(w);
+      /* v5.4.3：双人共享事件 —— 重大交互的表现层同步。
+         存档里新增 world.fx = { seq, type, by, at }，每次重大交互在事务里
+         连同状态一起写一条递增事件。两台设备都在这里检测到新事件序号，
+         由「非发起方」播放对应表现（发起方自己已经播过，靠 seq 去重）。
+         奖励写入与动画解耦：奖励仍在 mutate 事务里幂等，动画只读 fx 事件。 */
+      try { consumeFx(w); } catch (e) { if (window.console) console.warn('[fx]', e); }
     }
     syncTickets();      // 条件达成 / 老存档里去过的地方 → 自动补票并同步给另一台设备
     refreshHUD();
@@ -4707,35 +4807,61 @@ window.Game = (function () {
        回忆册里的 320×180 小图也按同一套比例排，不会变成大头贴。 */
     var k = W / 1920;
 
-    /* 地图是 1500×1200；按 16:9 取一条横向的带，让代表性景观留在画面里 */
-    var srcH = Math.round(d.w * H / W);
-    var sy = function (spotY) { return Math.max(0, Math.min(d.h - srcH, spotY - 600)); };
-    var focus = d.view ? { x: d.view.x, y: d.view.y } : d.spawn;
-    var srcY = sy(focus.y);
-    var sc = W / d.w;
-
-    if (bg) {
-      ctx.drawImage(bg, 0, srcY, d.w, srcH, 0, 0, W, H);
-    } else {
-      ctx.fillStyle = '#16223d'; ctx.fillRect(0, 0, W, H);
-    }
-
-    /* 世界坐标 → 照片坐标 */
-    var toPx = function (wx, wy) { return { x: wx * sc, y: (wy - srcY) * sc }; };
-    var cxw = Math.round(d.w * 0.5);
-    var cyp = toPx(cxw, d.spawn.y).y;
-    var footY = Math.min(H * 0.85, Math.max(H * 0.60, cyp));
-
-    /* v4.6.0：姿势来自「这张地图的这个打卡点」。
-       没写 pose 的旧数据 / 新加的地图都会退回按地图 id 取一个合适的默认姿势，
-       绝不会出现「所有地图同一张」。 */
+    /* v5.4.3：先按打卡点找到这个拍照点。 */
     var spotIdx = 0;
     if (spotLabel && d.spots) {
       for (var si = 0; si < d.spots.length; si++) {
         if (d.spots[si].label === spotLabel) { spotIdx = si; break; }
       }
     }
-    var pose = (d.spots && d.spots[spotIdx] && d.spots[spotIdx].pose) || TRAVEL_POSE[d.id] || 'stand';
+    var spot = (d.spots && d.spots[spotIdx]) || null;
+
+    /* v5.4.3 取景修复：
+       以前所有打卡点都对着整张地图共用的 d.view 取景，而且横向整宽都画进去，
+       于是同一张地图的多个打卡点（多哈的步道 / 棕榈树 / 栏杆）拍出来背景
+       完全一样 —— 三张重复没意义。
+       现在改成「以打卡点坐标为中心取一个局部窗口」，横向、纵向都跟随打卡点：
+       · 不同 x → 拍到地图不同横向区域（不同建筑 / 不同棕榈 / 不同湖岸）
+       · 不同 y → 拍到不同纵向层次（远景天际线 / 中景 / 近景地面）
+       人物就站在这个局部窗口的取景点上，姿势仍由打卡点决定。
+       没有打卡点（无 spots 或没传 label）时退回原来的全景取景，观感不变。 */
+    var focus = spot
+      ? { x: (typeof spot.x === 'number' ? spot.x : d.spawn.x), y: (typeof spot.y === 'number' ? spot.y : d.spawn.y) }
+      : (d.view ? { x: d.view.x, y: d.view.y } : d.spawn);
+
+    var winW, winH, srcX, srcY, sc;
+    if (spot) {
+      /* 局部窗口：横向取地图 82%，纵向按 16:9 同比，以打卡点为中心 */
+      winW = Math.round(d.w * 0.82);
+      winH = Math.round(winW * H / W);
+      srcX = Math.max(0, Math.min(d.w - winW, Math.round(focus.x - winW / 2)));
+      /* 人物脚落在窗口下沿往上一段（约 62% 处），背景是脚上方的景色 */
+      srcY = Math.max(0, Math.min(d.h - winH, Math.round(focus.y - winH * 0.62)));
+      sc = W / winW;
+    } else {
+      winW = d.w;
+      winH = Math.round(d.w * H / W);
+      srcX = 0;
+      srcY = Math.max(0, Math.min(d.h - winH, focus.y - 600));
+      sc = W / d.w;
+    }
+
+    if (bg) {
+      ctx.drawImage(bg, srcX, srcY, winW, winH, 0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#16223d'; ctx.fillRect(0, 0, W, H);
+    }
+
+    /* 世界坐标 → 照片坐标 */
+    var toPx = function (wx, wy) { return { x: (wx - srcX) * sc, y: (wy - srcY) * sc }; };
+    /* 人物站在打卡点坐标处（没有打卡点就退回到地图出生点） */
+    var cyp = toPx(focus.x, focus.y).y;
+    var footY = Math.min(H * 0.85, Math.max(H * 0.60, cyp));
+
+    /* v4.6.0：姿势来自「这张地图的这个打卡点」。
+       没写 pose 的旧数据 / 新加的地图都会退回按地图 id 取一个合适的默认姿势，
+       绝不会出现「所有地图同一张」。 */
+    var pose = (spot && spot.pose) || TRAVEL_POSE[d.id] || 'stand';
     photoCouple(ctx, W, footY, k, pose,
       Object.assign({}, CHAROPT.a, { outfit: getOutfit('a', 'winter') }),
       Object.assign({}, CHAROPT.b, { outfit: getOutfit('b', 'winter') }));
@@ -5276,6 +5402,30 @@ window.Game = (function () {
   function travelVisited(id) {
     var w = curWorld();
     return !!(w && w.travel && w.travel[id]);
+  }
+  /* v5.4.3：冰岛大衣门槛。
+     必须「实际装备」极光大衣（slots 里的 outfit === 'iceland'）才允许前往冰岛，
+     仅仅「拥有」大衣（north.coat）不算满足。
+     两名玩家都必须穿上 —— 一个人穿、一个人没穿，同样不能出发；
+     但如果对方此刻不在房间里（没有槽位 / 不在线），不算「共同前往」，
+     只检查自己这一侧，避免单人时被「不存在的对方」卡住。
+     返回 { ok, why }：ok=true 表示可以走，否则 why 是一句给玩家的提示。 */
+  function icelandCoatGate(id) {
+    if (id !== 'iceland') return { ok: true };
+    var mine = getOutfit(S.mySlot, 'winter');
+    if (mine !== 'iceland') {
+      return { ok: false, why: '🧥 去冰岛得先穿上极光大衣（衣柜里换上「极光大衣」）' };
+    }
+    var otherSlot = S.otherSlot;
+    var otherPresent = !!(S.data && S.data.slots && S.data.slots[otherSlot]);
+    var otherOnline = !!(S.data && S.data.presence && S.data.presence[otherSlot]);
+    if (otherPresent || otherOnline) {
+      var theirs = getOutfit(otherSlot, 'winter');
+      if (theirs !== 'iceland') {
+        return { ok: false, why: '🧥 要两个人一起 —— ' + NAME[otherSlot] + ' 还没穿上极光大衣' };
+      }
+    }
+    return { ok: true };
   }
   function ticketOwnedCount() {
     var n = 0;
@@ -6766,10 +6916,22 @@ window.Game = (function () {
 
       var body = document.createElement('div');
       body.className = 'station-card-body';
+      /* v5.4.3：每张票都明确标出「票价」（资源兑换价）。
+         第一站免费、冰岛最贵（剧情票，不走兑换，但标出它的价值锚点），
+         让玩家一眼看清「想去哪、要付出什么」。 */
+      var priceText = '';
+      if (d.id === 'iceland') {
+        priceText = owned ? '' : '❄️ 北境剧情解锁 · 无价之票';
+      } else if (d.ticket && d.ticket.cond && d.ticket.cond.length === 1 && d.ticket.cond[0].type === 'free') {
+        priceText = '🎟️ 首张免费';
+      } else {
+        priceText = '🎫 ' + redeemCostText(d.id);
+      }
       body.innerHTML =
         '<b>' + esc(owned ? d.name : '？？？') + '</b>' +
         '<span class="station-sub">' + esc(owned ? d.sub : '目的地未知') + '</span>' +
         '<p>' + esc(owned ? d.card : ticketHint(d.id)) + '</p>' +
+        (priceText && !owned ? '<em class="station-price">' + esc(priceText) + '</em>' : '') +
         '<em class="station-state">' +
         (!owned ? '🔒 还没有这张票' : (visited ? '✓ 去过了' : '🎫 有票 · 随时可以走')) +
         (got ? ' · 💭 找到了那里的东西' : '') +
@@ -6898,7 +7060,7 @@ window.Game = (function () {
      false = 正常规则：走完隐藏剧情线才出现，之后永久保留。
      想临时按规则跑一次不用改代码：网址加 ?north=0（例如 index.html?room=xxx&north=0）。
      最终交付前把下面这行的 true 改成 false 即可（打包脚本会自动生成正式版）。 */
-  var NORTH_TEST_ALWAYS = true;
+  var NORTH_TEST_ALWAYS = false;
   /* Node 冒烟测试里没有 location（和上面 addEventListener 一样要判存在） */
   var _northFlag = (typeof location !== 'undefined' && location.search)
     ? /[?&]north=(0|1)\b/.exec(location.search) : null;
@@ -7087,6 +7249,7 @@ window.Game = (function () {
       w.north.hint = w.north.hint || {};
       if (w.north.hint.polarAt) return undefined;
       w.north.hint.polarAt = Date.now();
+      emitFxInTx(w, 'polar');                // v5.4.3：双人共享事件（极夜降临）
       return w;
     }).then(function (ok) {
       S.polarBusy = false;
@@ -7117,6 +7280,7 @@ window.Game = (function () {
       w.north.at = Date.now();
       w.north.hint = w.north.hint || {};
       w.north.hint.portalAt = w.north.hint.portalAt || Date.now();
+      emitFxInTx(w, 'portal');               // v5.4.3：双人共享事件（传送门出现）
       return w;
     }).then(function (ok) {
       S.northTrying = false;
@@ -7279,6 +7443,12 @@ window.Game = (function () {
   function northData() { return northState() || {}; }
   function northHas(key) { var n = northData(); return !!(n && n[key]); }
   function northDug(id) { var n = northData(); return !!(n && n.digs && n.digs[id]); }
+  /* v5.4.3：极夜是否已经降临（north.hint.polarAt 存在）。
+     只看真实剧情存档，不看章节号、不看常显开关。 */
+  function northPolarDone() {
+    var n = northData();
+    return !!(n && n.hint && n.hint.polarAt);
+  }
 
   /* ---------- 获得物品的卡片（铲子 / 信） ---------- */
   var itemCardTimer = 0;
@@ -7331,6 +7501,7 @@ window.Game = (function () {
       w.north.digs = w.north.digs || {};
       if (!w.north.digs[spot.id]) w.north.digs[spot.id] = now;
       if (real && !w.north.chest) w.north.chest = now;
+      if (real) emitFxInTx(w, 'dig');        // v5.4.3：双人共享事件（挖到宝箱）
       return w;
     }).then(function () { refreshHUD(); }, function () { });
 
@@ -7564,6 +7735,7 @@ window.Game = (function () {
       if (!w.north.coat) w.north.coat = now;
       if (!w.north.auroraBox) w.north.auroraBox = now;
       got = true;
+      emitFxInTx(w, 'chestOpen');                // v5.4.3：双人共享事件
       return w;
     }).then(function (ok) {
       refreshHUD();
@@ -7609,6 +7781,7 @@ window.Game = (function () {
       w.north = w.north || {};
       if (w.north.key) return undefined;
       w.north.key = Date.now();
+      emitFxInTx(w, 'key');                      // v5.4.3：双人共享事件
       return w;
     }).then(function (ok) {
       if (!ok) return;
@@ -7636,8 +7809,22 @@ window.Game = (function () {
   /* 返回 true 表示"这次谈话已经用掉了"（无论换没换成） */
   function tryShovelDeal(npc) {
     if (northHas('shovel')) return false;
-    if (!northOpen()) return false;                     // 门还没出现时，木匠不提这事
+    /* v5.4.3：铲子的出售时机从「门出现」提前到「极夜降临」。
+       用真实剧情状态（north.hint.polarAt）判断，不看章节数字、不依赖
+       常显开关。极夜落下之后，老鲁才把这把压箱底的旧雪铲拿出来卖；
+       在此之前，商店里根本不出现可以买的铲子。 */
+    if (!northPolarDone()) return false;
     var lack = shovelShort();
+    /* 极夜之后第一次谈到铲子：先补一段自然的剧情对话，说明为什么现在才卖。 */
+    if (!S.shovelIntroSaid) {
+      S.shovelIntroSaid = true;
+      openDialog(npc.name, [
+        '北边的雪积得很厚。要往那儿走，光靠两只手可扒不开。',
+        '老鲁从墙根底下抽出一把旧雪铲，在炉火前顿了顿：「这把跟了我不少年。」',
+        '「雪一压深，铲口钝了也得使。你们若要去北边，兴许用得上。」'
+      ]);
+      return true;
+    }
     if (lack.length) {
       openDialog(npc.name, [
         '「北边冰湖上那道蓝光？……我年轻的时候见过一次。」',
@@ -7660,6 +7847,7 @@ window.Game = (function () {
       w.north = w.north || {};
       w.north.shovel = Date.now();
       okDone = true;
+      emitFxInTx(w, 'shovel');                 // v5.4.3：双人共享事件
       return w;
     }).then(function (ok) {
       refreshHUD();
@@ -7769,6 +7957,7 @@ window.Game = (function () {
           if (w.north.auroraDone) return undefined;
           w.north.auroraDone = now;
           w.north.completed = now;
+          emitFxInTx(w, 'aurora');           // v5.4.3：双人共享事件（极光演出完成）
           return w;
         }).then(function (ok) {
           S.cineBusy = false;
@@ -8232,6 +8421,9 @@ window.Game = (function () {
     if (!d) return false;
     if (S.traveling) return false;                       // 连点只走一次
     if (!d.noTicket && !hasTicket(id)) { toast('🎫 ' + ticketHint(id), 3400); return false; }
+    /* v5.4.3：冰岛大衣门槛 —— 未装备极光大衣不能出发（自己或对方没穿都不行） */
+    var cg = icelandCoatGate(id);
+    if (!cg.ok) { toast(cg.why, 4200); return false; }
     var fade = $('#travel-fade'), card = $('#travel-card');
     if (!fade || !card) { enterMap(id); return true; }    // 兜底：没有转场元素就直接进
     S.traveling = true;
@@ -8275,6 +8467,10 @@ window.Game = (function () {
     if (!d) return;
     /* 北境这类秘境标记了 noTicket：它不由车票解锁，走自己的入口 */
     if (!d.noTicket && !hasTicket(id)) { toast('🎫 ' + ticketHint(id), 3400); return; }
+    /* v5.4.3：冰岛大衣门槛（兜底校验 —— 正常路径在 travelTo 就挡了，
+       这里挡住 dev 钩子 / 恢复地图等一切绕过入口）。 */
+    var cg = icelandCoatGate(id);
+    if (!cg.ok) { toast(cg.why, 4200); return; }
     closeAllPanels();          // 顺手解除暂停，否则上车后走不动
     // 记住小镇上的位置，回来时站回原处
     S.mapReturn = { x: S.self.x, y: S.self.y, dir: S.self.dir };
@@ -9027,6 +9223,58 @@ window.Game = (function () {
       });
     }
 
+    /* ============================================================
+     * v5.4.3 · 圣诞树成长纪念（含冰岛 / 北境特殊阶段）
+     * ------------------------------------------------------------
+     * 回忆册不只记录旅行，也记录「一起把树从树苗养成圣诞树」的过程。
+     * 解锁时机：树长到第 N 阶，册子里才出现 0~N 阶的纪念 —— 没经历过
+     * 的阶段不会提前出现（阶段本身由 world.treeStage 推导，刷新/换设备一致）。
+     * 极夜降临后（north.hint.polarAt）追加一张「极夜里的圣诞树」，
+     * 北境宝箱开启后（north.opened）追加一张「拿到地图那一夜」。
+     * 旧存档兼容：不依赖 world.stageShots（旧档没有这个字段也能按当前
+     * 树阶段生成全部已达成阶段的纪念），也不重复发放 —— 纪念是「派生展示」，
+     * 不写入任何新的存档计数，不影响冰岛资格（4 地/树/14 回忆）。 */
+    var treeRows = [];
+    var curStage = treeStage();
+    for (var ti = 0; ti <= curStage; ti++) {
+      treeRows.push({ kind: 'tree', stage: ti, name: treeStageName(ti) });
+    }
+    if (northPolarDone()) {
+      treeRows.push({ kind: 'polar', name: '极夜里的圣诞树' });
+    }
+    if (northHas('opened')) {
+      treeRows.push({ kind: 'north', name: '拿到地图那一夜' });
+    }
+    if (treeRows.length) {
+      var treeHead = document.createElement('div');
+      treeHead.className = 'book-sec';
+      treeHead.textContent = '🎄 圣诞树成长';
+      list.appendChild(treeHead);
+      treeRows.forEach(function (tr) {
+        var div3 = document.createElement('div');
+        div3.className = 'book-item';
+        var cv3 = document.createElement('canvas');
+        cv3.width = 320; cv3.height = 180;
+        try {
+          if (tr.kind === 'tree') renderTownPhoto(cv3.getContext('2d'), 320, 180, tr.stage);
+          else renderTownPhoto(cv3.getContext('2d'), 320, 180, tr.kind === 'polar' ? curStage : Math.min(5, curStage));
+        } catch (e) { }
+        cv3.addEventListener('click', function () {
+          if (tr.kind === 'tree') openPhoto({ stageShot: tr.stage });
+          else openPhoto({ stageShot: curStage });
+        });
+        div3.appendChild(cv3);
+        var info3 = document.createElement('div');
+        info3.className = 'book-info';
+        info3.innerHTML = '<b>' + esc(tr.name) + '</b><span>小镇 · 圣诞树</span>' +
+          '<p>' + (tr.kind === 'tree'
+            ? '树长到这一阶的样子，我们把它一点一点养大。'
+            : (tr.kind === 'polar' ? '天没有再亮，树上的灯成了夜里最暖的那一点。' : '北边的秘密揭开之后，树还是那棵树，我们也已经不是原来的我们了。')) + '</p>';
+        div3.appendChild(info3);
+        list.appendChild(div3);
+      });
+    }
+
     /* v4.3 远方物产：41 个地方，收到一件亮一格。
        没收到但已经有地址的，先露地名；连地址都没有的，只有「还没去过」。 */
     var spGot = specList();
@@ -9067,8 +9315,9 @@ window.Game = (function () {
       /* v4.6.0：显示「已收 / 总数」，玩家一眼知道还差几段，
          而不是只能靠把地图每个角落走一遍去确认。 */
       var allN = all.length;
-      cnt.textContent = (foundList.length || sps.length || spGot.length)
+      cnt.textContent = (foundList.length || sps.length || spGot.length || treeRows.length)
         ? ('回忆 ' + foundList.length + ' / ' + allN + ' 段' + (sps.length ? ' · 合影 ' + sps.length + ' 张' : '') +
+           (treeRows.length ? ' · 树纪念 ' + treeRows.length : '') +
            (spGot.length ? ' · 特产 ' + spGot.length : ''))
         : '';
     }

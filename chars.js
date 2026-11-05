@@ -1228,14 +1228,23 @@ window.Chars = (function () {
       }
     }
 
+    /* v5.4.3：围巾整体上移 2.5，配合缩短后的脖子（见下方脖子 path），
+       让围巾仍正好盖住脖子底部，头与肩衔接更自然。 */
+    ctx.save();
+    ctx.translate(0, -2.5);
     girlScarf(ctx, P, f, back);
+    ctx.restore();
 
     // ---- 脖子 ----
+    /* v5.4.3：缩短脖子。原来的脖子底部下探到 47.4，下巴（37.8）到围巾之间
+       露出的脖子偏长，头像是「悬」在身体上方。这里把脖子底部上移约 2.5，
+       配合围巾整体上移（见 girlScarf 的 translate），让下巴 → 肩的衔接更紧凑、
+       比例更自然。头部 / 五官 / 发型 / 服装颜色一律不动。 */
     ctx.beginPath();
     ctx.moveTo(-3.4, 35.4);
     ctx.lineTo(3.4, 35.4);
-    ctx.lineTo(3.9, 45.6);
-    ctx.quadraticCurveTo(0, 47.4, -3.9, 45.6);
+    ctx.lineTo(3.9, 43.1);
+    ctx.quadraticCurveTo(0, 44.9, -3.9, 43.1);
     ctx.closePath();
     paint(ctx, P.skinShade, 0);
 

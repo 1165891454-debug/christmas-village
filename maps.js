@@ -1054,9 +1054,9 @@ window.TravelMaps = (function () {
       cond: [{ type: 'mem', n: 6 }, { type: 'cocoa', n: 2 }],
       hint: '去咖啡店喝一杯热可可，或者把回忆册再收厚一点。' },
     spots: [
-      { x: 962, y: 962, r: 86, label: '📷 在海滨步道合影', pose: 'gaze' },
-      { x: 1078, y: 992, r: 86, label: '📷 在棕榈树下合影', pose: 'front' },
-      { x: 840, y: 1002, r: 86, label: '📷 在海边栏杆旁合影', pose: 'wave' }
+      { x: 700, y: 1000, r: 86, label: '📷 在海滨步道合影', pose: 'gaze' },
+      { x: 906, y: 874, r: 86, label: '📷 在棕榈树下合影', pose: 'front' },
+      { x: 500, y: 900, r: 86, label: '📷 在海边栏杆旁合影', pose: 'wave' }
     ],
     obstacles: [
       { x: 1096, y: 906, w: 96, h: 40 },

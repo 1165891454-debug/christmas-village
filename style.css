@@ -992,6 +992,10 @@ body:not(.playing) .rotate-hint { display: none; }  /* 大厅已是完整竖屏�
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .station-card-body .station-state { font-style: normal; font-size: 10px; color: #9fbf8f; }
+.station-card-body .station-price {
+  display: block; font-style: normal; font-size: 10.5px; color: #f0c040;
+  margin: 0 0 2px; letter-spacing: .2px;
+}
 .station-card.locked { opacity: .55; }
 .station-card.locked .station-state { color: #d0a86a; }
 .station-panel .small-note { margin: 0 0 4px; }
