@@ -5683,7 +5683,7 @@ window.Game = (function () {
     var hst = northHintStage();
     var hnames = ['未开始（资格还没到）', '信到了 · 等玩家找阿信', '读过信 · 等玩家和人聊',
       '聊够了 · 等极夜落下', '极夜已降临 · 等门出现', '门已开'];
-    rows.push('<div class="admin-sec"><b>解锁条件</b><span>隐藏剧情：树 6 阶 + 14 回忆 + 4 个旅行地 → 阿信的来信 → 读信 → 和 4 个人聊 → 极夜 → 门</span></div>');
+    rows.push('<div class="admin-sec"><b>解锁条件</b><span>隐藏剧情：树点亮（第 5 阶）+ 14 回忆 + 4 个旅行地 → 阿信的来信 → 读信 → 和 4 个人聊 → 极夜 → 门</span></div>');
     rows.push('<div class="admin-sec"><b>隐藏剧情</b><span>阶段 ' + hst + ' · ' + esc(hnames[hst] || '') +
       (hst === 2 ? ('　交谈 ' + northTalkedCount() + '/' + NORTH_TALK_NEED) : '') +
       (chapterTestActive() ? '　（章节测试中：隐藏剧情暂停推进）' : '') + '</span></div>');
@@ -5951,7 +5951,7 @@ window.Game = (function () {
     rows.push('<div class="admin-sec"><b>隐藏剧情</b><span>阶段 ' + hs + ' · ' + esc(names[hs] || '') + '</span></div>');
     if (c0) {
       rows.push('<div class="admin-sec ' + (window.Story.baseReady(w) ? 'ok' : 'off') + '"><b>资格</b><span>' +
-        '旅行地 ' + c0.visits + '/4 · 树 ' + c0.tree + '/5 · 回忆 ' + c0.mem + '/14</span></div>');
+        '旅行地 ' + c0.visits + '/4 · 树 ' + c0.tree + '/4（点亮） · 回忆 ' + c0.mem + '/14</span></div>');
     }
     if (hs === 2) {
       rows.push('<div class="admin-sec"><b>交谈进度</b><span>' + northTalkedCount() + ' / ' + NORTH_TALK_NEED + '</span></div>');
@@ -6882,7 +6882,7 @@ window.Game = (function () {
    *     所以这里不需要再造一套场景状态机。
    *
    * v5.4：门不再由章节/昼夜自动开，而是接在隐藏剧情线后面：
-   *   资格（树 6 阶 + 14 回忆 + 4 个旅行地）→ 阿信的来信 → 读信 →
+   *   资格（树点亮 + 14 回忆 + 4 个旅行地）→ 阿信的来信 → 读信 →
    *   和 4 位镇上的人聊 → 极夜降临 → 门出现（写进 world.north.open）。
    *   只要出现过一次就**永久**留在那儿，当晚没发现也不会错过。
    * ============================================================ */
