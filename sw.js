@@ -18,23 +18,23 @@
  *   同一版本号内的功能补齐，缓存名不变（仍是 omo-v4.6.0）——这一版是首次上线，
  *   还没有手机缓存过它，所以不需要再换名。
  */
-var CACHE = 'omo-v5.4.3';
+var CACHE = 'omo-v5.4.4';
 var CORE = [
   './',
   './index.html',
-  './style.css?v=5.4.3',
-  './firebase-config.js?v=5.4.3',
-  './memories.js?v=5.4.3',
-  './chars.js?v=5.4.3',
-  './sprites.js?v=5.4.3',
-  './world.js?v=5.4.3',
-  './north.js?v=5.4.3',
-  './story.js?v=5.4.3',
-  './maps.js?v=5.4.3',
-  './specialties.js?v=5.4.3',
-  './life.js?v=5.4.3',
-  './game.js?v=5.4.3',
-  './app.js?v=5.4.3',
+  './style.css?v=5.4.4',
+  './firebase-config.js?v=5.4.4',
+  './memories.js?v=5.4.4',
+  './chars.js?v=5.4.4',
+  './sprites.js?v=5.4.4',
+  './world.js?v=5.4.4',
+  './north.js?v=5.4.4',
+  './story.js?v=5.4.4',
+  './maps.js?v=5.4.4',
+  './specialties.js?v=5.4.4',
+  './life.js?v=5.4.4',
+  './game.js?v=5.4.4',
+  './app.js?v=5.4.4',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

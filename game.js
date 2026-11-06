@@ -952,27 +952,31 @@ window.Game = (function () {
   }
 
   /* 按事件类型播放「对方发起」的这段表现。
-   * 这里只做纯表现（粒子 / 音效 / 对话 / 短暂演出），绝不写存档、不发奖励。 */
+   * 这里只做纯表现（粒子 / 音效 / 对话 / 短暂演出 / 物品卡片），绝不写存档、不发奖励。
+   * v5.4.4：钥匙和宝箱是「双人协作」，所以对方发起时，本地也要播同样的
+   * 物品卡片和反馈 —— 两个人看到的是同一段「我们一起拿到了」的体验。 */
   function playFx(fx) {
     if (!fx || !fx.type) return;
     var t = fx.type;
     if (t === 'chestOpen') {
-      /* 对方开宝箱：本地也播一段「镜头压过去 + 光效」，不抢他正在看的物品卡片 */
+      /* 对方开宝箱：本地也播一段「镜头压过去 + 光效 + 三件物品卡片」，
+         和发起方看到的是同一套东西（只是不写存档、不重复发奖励）。 */
       try { Snd.sfx('spark'); } catch (e) { }
       var c = window.NorthMap && NorthMap.chest;
       if (c) {
-        S.camFocus = { x: c.x, y: c.y - 20, until: Date.now() + 1600 };
+        S.camFocus = { x: c.x, y: c.y - 20, until: Date.now() + 2200 };
         burst(c.x, c.y - 10, 'spark', 8);
       }
-      toast(name2() + ' 打开了北境的宝箱', 3600);
-    } else if (t === 'chestReward') {
-      /* 对方开箱后的三样东西：本地弹一句轻提示即可（完整物品卡属于发起方） */
-      toast('🧰 宝箱里的东西被 ' + name2() + ' 收起来了', 4200);
+      showItemGet('map', '禾的地图', '边角标着比北境更北的地方');
+      setTimeout(function () { showItemGet('coat', '北境御寒衣', '穿上它，风就咬不动你了'); }, 1400);
+      setTimeout(function () { showItemGet('auroraBox', '极光盒子', '盒盖上刻着一道光'); }, 2800);
+      toast('🧰 你们一起打开了北境的宝箱', 4200);
     } else if (t === 'key') {
       try { Snd.sfx('craft'); } catch (e) { }
       var g = window.NorthMap && NorthMap.gate;
       if (g) burst(g.arch.x, g.arch.y - 20, 'spark', 6);
-      toast('🗝 ' + name2() + ' 拿到了北境星钥', 3600);
+      showItemGet('key', '北境星钥', '钥齿是一颗星 · 宝箱在等它');
+      toast('🗝 你们一起拿到了北境星钥', 3800);
     } else if (t === 'shovel') {
       try { Snd.sfx('craft'); } catch (e) { }
       toast('🪏 ' + name2() + ' 从老鲁那儿换到了旧雪铲', 3600);
@@ -1409,8 +1413,12 @@ window.Game = (function () {
   function showNextChapterCard() {
     if (!chapterQueue.length) { chapterCardOpen = false; return; }
     /* 特殊演出正在放（极光 / 天亮 / 合影 / 转场）或者玩家正开着面板 / 对话框时先让路。
-       卡片是"庆祝"，不该把人从正在做的事里拽出来。 */
-    if (S.cineBusy || S.ending || S.photo || S.traveling || S.paused) {
+       卡片是"庆祝"，不该把人从正在做的事里拽出来。
+       v5.4.4：除了 S.paused，再显式看「对话浮层是否还开着」—— 两者在个别
+       时序（Firebase 事务提交回来的那一拍）可能短暂不同步，S.paused 已经复位
+       但 #dlg 还没来得及隐藏，卡片就会叠在 NPC 对话上。 */
+    var dlgUp = $('#dlg') && !$('#dlg').classList.contains('hidden');
+    if (S.cineBusy || S.ending || S.photo || S.traveling || S.paused || dlgUp) {
       chapterCardOpen = false;
       setTimeout(showNextChapterCard, 1200);
       return;
@@ -2229,6 +2237,7 @@ window.Game = (function () {
 
     // 任务 / 资源角标：点开对应面板（同样按「按下即动作」处理）
     bindPress($('#quest-chip'), function () { openQuestPanel(); });
+    bindPress($('#side-chip'), function () { openSidePanel(); });
     bindPress($('#res-chip'), function () { openResPanel(); });
     function toggleMusic() {
       var nowOn = Snd.toggle();
@@ -5003,7 +5012,26 @@ window.Game = (function () {
           '🌌 把极光盒子放在冰上', AURORA_SPOT);
       }
       consider('mapExit', mp.exitPos.x, mp.exitPos.y, 86, mp.exitLabel || '🚉 回小镇', mp.exitPos);
-      if (S.remote.seen && S.remote.inter === hereKey()) {
+      /* v5.4.4：双人合作时，关键交互（宝箱 / 星钥 / 极光盒）不该被「和对方打招呼」
+         抢掉 —— 两个人一起开箱时，对方可能站得比箱子更近，按下去变成打招呼、
+         开不了箱。所以只要这些关键交互点在玩家附近（各自半径内），partner 就让位。 */
+      var keyActNear = false;
+      if (mp.id === NORTH_ID && window.NorthMap) {
+        var ndi2 = northData();
+        if (ndi2.chest && !ndi2.opened && NorthMap.chest) {
+          var dc = Math.sqrt(Math.pow(S.self.x - NorthMap.chest.x, 2) + Math.pow(S.self.y - NorthMap.chest.y, 2));
+          if (dc <= 76) keyActNear = true;
+        }
+        if (ndi2.gateOpen && !ndi2.key && NorthMap.gate) {
+          var dk = Math.sqrt(Math.pow(S.self.x - NorthMap.gate.arch.x, 2) + Math.pow(S.self.y - (NorthMap.gate.arch.y - 20), 2));
+          if (dk <= 96) keyActNear = true;
+        }
+      }
+      if (mp.id === 'iceland' && northHas('auroraBox') && !northHas('auroraDone')) {
+        var da = Math.sqrt(Math.pow(S.self.x - AURORA_SPOT.x, 2) + Math.pow(S.self.y - AURORA_SPOT.y, 2));
+        if (da <= AURORA_SPOT.r) keyActNear = true;
+      }
+      if (S.remote.seen && S.remote.inter === hereKey() && !keyActNear) {
         var op = S.data && S.data.slots && S.data.slots[S.otherSlot];
         if (op) consider('partner', S.remote.x, S.remote.y, 90, '👋 和 ' + NAME[S.otherSlot] + ' 打个招呼', op);
       }
@@ -5389,11 +5417,15 @@ window.Game = (function () {
     for (i = 0; i < tk.cond.length; i++) if (condMet(tk.cond[i])) return true;
     return false;
   }
-  /* 「有票」= 存档里已经记下，或此刻条件就满足（后者会被 syncTickets 落盘） */
+  /* v5.4.4：「有票」= 存档里真的记下了这张票。
+     不再「条件满足就等于有票」——条件只代表「可以去买」的进度门槛，
+     真正拿到票必须走 redeemTicket 花素材买（或冰岛剧情解锁）。
+     冰岛例外：拿到禾的地图（northMapGot）后由 syncTickets 自动补票，不花钱。 */
   function hasTicket(id) {
     var w = curWorld();
     if (w && w.tickets && w.tickets[id]) return true;
-    return ticketCondMet(id);
+    if (id === 'iceland') return northMapGot();
+    return false;
   }
   function ticketHint(id) {
     var tk = ticketOf(id);
@@ -5439,7 +5471,9 @@ window.Game = (function () {
     return (window.TravelMaps && TravelMaps.list().length) || 6;
   }
 
-  /* 条件满足就补票；已去过的城市也补票（老存档迁移，绝不让玩过的地方退回去锁住） */
+  /* v5.4.4：只补「已经去过的地方」（老存档迁移，绝不让玩过的地方退回去锁住），
+     以及「冰岛剧情解锁」（拿到禾的地图）。普通目的地的票不再因为条件满足自动送，
+     必须花素材买（见 redeemTicket）。 */
   function syncTickets() {
     if (!window.TravelMaps) return;
     var w = curWorld();
@@ -5449,7 +5483,7 @@ window.Game = (function () {
     var need = null;
     TravelMaps.list().forEach(function (d) {
       if (owned[d.id]) return;
-      if (travel[d.id] || ticketCondMet(d.id)) {
+      if (travel[d.id] || (d.id === 'iceland' && northMapGot())) {
         need = need || {};
         need[d.id] = Date.now();
       }
@@ -5929,6 +5963,106 @@ window.Game = (function () {
       if (NORTH_TEST_STAGES[i].level === lv) return '第 ' + lv + ' 章 · ' + NORTH_TEST_STAGES[i].name;
     }
     return '第 ' + lv + ' 章';
+  }
+
+  /* ============================================================
+   * v5.4.4 北境支线任务（蓝色支线）
+   * ------------------------------------------------------------
+   * 以前北境只有隐藏剧情（阿信来信 → 极夜 → 门），进了北境之后玩家
+   * 不知道下一步该干什么。这里把整条北境线整理成 9 个清清楚楚的步骤，
+   * 每一步都有状态（进行中 / 已完成）和「下一步去哪儿、找谁、做什么」。
+   *
+   * 状态全部从 world.north 的真实字段推导（和剧情进度同源），
+   * 不新增存档字段，所以刷新 / 换设备 / 双人都看到同一份进度。
+   * 蓝色 = 支线，与黄色主线（章节）明显区分，只显示、不抢主线。
+   * ============================================================ */
+  var NORTH_SIDE_QUEST = [
+    { name: '和镇上的人聊聊', guide: '去和镇上的几位 NPC 说话（圣诞老人、木匠、面包师、牧羊女都行）',
+      done: function (n, w) { return !!((n.hint && n.hint.talked) && Object.keys(n.hint.talked).length >= NORTH_TALK_NEED); } },
+    { name: '前往北境', guide: '镇子最北边的冰湖上多了一圈发蓝的符文 —— 两个人一起走进去',
+      done: function (n) { return !!n.entered; } },
+    { name: '在北境发现信件和雪橇', guide: '营地附近有一辆旧雪橇，旁边落着一封信，走近看看',
+      done: function (n) { return !!(n.letter && n.sled); } },
+    { name: '探索北境的挖掘点', guide: '雪地上有几处不一样的地方（松软、石头、旧木头、脚印），走过去踩一踩',
+      done: function (n) { var d = n.digs || {}; return !!(d.soft && d.stone && d.dull && d.prints); } },
+    { name: '获得铲子', guide: '回镇上找老木匠，极夜之后他会把那把旧雪铲换给你们（木材 8 + 材料 2）',
+      done: function (n) { return !!n.shovel; } },
+    { name: '用铲子完成挖掘', guide: '带着铲子回到北境，把「这里不一样」的那处挖开 —— 底下有东西',
+      done: function (n) { var d = n.digs || {}; return !!d.treasure; } },
+    { name: '双人共同寻找钥匙', guide: '两个人分别站到左右两块星纹上，站满两秒，星门会开、门缝里浮出星钥',
+      done: function (n) { return !!(n.gateOpen && n.key); } },
+    { name: '双人共同开启宝箱', guide: '拿到星钥后，两个人一起回到宝箱前，把它打开',
+      done: function (n) { return !!n.opened; } },
+    { name: '查看宝箱里的东西', guide: '箱子里是禾的地图、御寒衣和极光盒子 —— 看完就都明白了',
+      done: function (n) { return !!(n.map && n.coat && n.auroraBox); } }
+  ];
+
+  /* 支线是否已经触发（读过阿信的来信 = 进入这条支线） */
+  function northSideActive() {
+    var n = northData();
+    return !!(n && n.hint && n.hint.at);
+  }
+  /* 支线当前进行到第几步（0 基；全做完返回步数 = 长度） */
+  function northSideStep() {
+    var n = northData() || {};
+    var w = curWorld() || {};
+    for (var i = 0; i < NORTH_SIDE_QUEST.length; i++) {
+      if (!NORTH_SIDE_QUEST[i].done(n, w)) return i;
+    }
+    return NORTH_SIDE_QUEST.length;
+  }
+  /* 支线还剩几步没做（给左上角蓝色 chip 用） */
+  function northSideRemain() {
+    var step = northSideStep();
+    return Math.max(0, NORTH_SIDE_QUEST.length - step);
+  }
+
+  /* v5.4.4：左上角蓝色支线 chip —— 支线触发后显示，点开看详情。
+     只在「读过阿信的来信」之后出现（之前不剧透北境这条线）。 */
+  function sideChipText() {
+    if (!northSideActive()) return '';
+    var step = northSideStep();
+    if (step >= NORTH_SIDE_QUEST.length) return '❄️ 北境支线 · 已完成';
+    var cur = NORTH_SIDE_QUEST[step];
+    return '❄️ 北境支线 ' + (step + 1) + '/' + NORTH_SIDE_QUEST.length + ' · ' + cur.name;
+  }
+  var _lastSideChip = '';
+  function refreshSideChip() {
+    var chip = $('#side-chip');
+    if (!chip) return;
+    var txt = sideChipText();
+    if (txt === _lastSideChip) return;
+    _lastSideChip = txt;
+    if (!txt) { chip.classList.add('hidden'); return; }
+    chip.textContent = txt;
+    chip.classList.remove('hidden');
+  }
+
+  /* 支线详情面板：9 步逐条列出，当前步高亮并给出「下一步指引」 */
+  function openSidePanel() {
+    var body = $('#side-body');
+    if (!body) return;
+    var n = northData() || {};
+    var w = curWorld() || {};
+    var step = northSideStep();
+    var rows = '<p class="side-note">北境是条隐藏的支线：从阿信的来信开始，一路走到极夜、星门、宝箱。</p>';
+    for (var i = 0; i < NORTH_SIDE_QUEST.length; i++) {
+      var q = NORTH_SIDE_QUEST[i];
+      var done = q.done(n, w);
+      var cur = (i === step && !done);
+      rows += '<div class="side-line' + (done ? ' done' : (cur ? ' cur' : '')) + '">' +
+        '<span class="side-mark">' + (done ? '✔' : (cur ? '▶' : '·')) + '</span>' +
+        '<span>' + esc(q.name) + '</span></div>';
+      if (cur) {
+        rows += '<div class="side-guide"><span>🧭</span><span>' + esc(q.guide) + '</span></div>';
+      }
+    }
+    if (step >= NORTH_SIDE_QUEST.length) {
+      rows += '<div class="side-guide done"><span>✔</span><span>北境支线全部完成。极光、地图、御寒衣——都收好了。</span></div>';
+    }
+    body.innerHTML = rows;
+    $('#side-panel').classList.remove('hidden');
+    pause();
   }
 
   function renderAdminTestline() {
@@ -6830,19 +6964,22 @@ window.Game = (function () {
    *   • 真正消耗的是木材 / 鲜花 / 手工礼物，也就是「自己种自己做的」那些。
    *   • 冰岛仍受 hidden 保护：没满足条件前，连这张票都不出现在列表里。
    */
+  /* v5.4.4：车票经济 —— 所有目的地都要花钱买票，不再「条件满足自动送」。
+     取消赛里木湖的首张免费票；去掉「特产」门槛（收集品不该当购票门槛），
+     改成纯素材价格，价格随目的地递增、贴合小镇经济（种花≈6小时、木匠每天 +3 木）。
+     冰岛不在表里：它是剧情票（开北境宝箱拿禾的地图解锁），不花钱买。 */
   var TICKET_REDEEM = {
-    tibet: { spec: 1, wood: 8, materials: 1 },
-    doha: { spec: 2, wood: 12, flowers: 8 },
-    wuhan: { spec: 3, wood: 16, materials: 2 },
-    wuhai: { spec: 5, wood: 20, materials: 3 },
-    kl: { spec: 7, wood: 24, materials: 4 },
-    iceland: { spec: 10, wood: 30, materials: 6, flowers: 20 }
+    sayram: { wood: 4 },
+    tibet: { wood: 8, flowers: 4 },
+    doha: { wood: 12, flowers: 8 },
+    wuhan: { wood: 16, materials: 2 },
+    wuhai: { wood: 20, materials: 3 },
+    kl: { wood: 24, materials: 4 }
   };
   function redeemCostText(id) {
     var c = TICKET_REDEEM[id];
     if (!c) return '';
     var out = [];
-    if (c.spec) out.push('🌏 特产 ' + c.spec + ' 件');
     if (c.wood) out.push('🪵 ' + c.wood);
     if (c.flowers) out.push('🌸 ' + c.flowers);
     if (c.materials) out.push('🎁 ' + c.materials);
@@ -6851,7 +6988,6 @@ window.Game = (function () {
   function redeemReady(id) {
     var c = TICKET_REDEEM[id];
     if (!c) return false;
-    if (specCount() < (c.spec || 0)) return false;
     var r = worldRes();
     if ((r.wood || 0) < (c.wood || 0)) return false;
     if ((r.flowers || 0) < (c.flowers || 0)) return false;
@@ -6861,9 +6997,9 @@ window.Game = (function () {
   function redeemTicket(id) {
     if (hasTicket(id)) return;
     var c = TICKET_REDEEM[id];
-    if (!c) { toast('这张票只能靠自己走过去拿', 3000); return; }
+    if (!c) { toast('这张票要等北境的剧情解锁', 3000); return; }
     if (!redeemReady(id)) {
-      toast('还差点：' + redeemCostText(id) + '（特产不消耗，只是要带够）', 4400);
+      toast('还差素材：' + redeemCostText(id), 4400);
       return;
     }
     mutate(function (w) {
@@ -6873,17 +7009,16 @@ window.Game = (function () {
       if ((w.res.wood || 0) < (c.wood || 0)) return undefined;
       if ((w.res.flowers || 0) < (c.flowers || 0)) return undefined;
       if ((w.res.materials || 0) < (c.materials || 0)) return undefined;
-      if (Object.keys(w.spec || {}).length < (c.spec || 0)) return undefined;
       if (c.wood) w.res.wood -= c.wood;
       if (c.flowers) w.res.flowers -= c.flowers;
       if (c.materials) w.res.materials -= c.materials;
       w.tickets[id] = Date.now();
       return w;
     }).then(function (ok) {
-      if (!ok) { toast('没换成：可能对方刚好换过，或者材料被用掉了', 4000); refreshHUD(); openStationPanel(); return; }
+      if (!ok) { toast('没买成：可能对方刚好买过，或者素材被用掉了', 4000); refreshHUD(); openStationPanel(); return; }
       Snd.sfx('ding');
       var d = TravelMaps.get(id);
-      toast('🎫 换到「' + (d ? d.name : id) + '」的车票了！', 4200);
+      toast('🎫 买到「' + (d ? d.name : id) + '」的车票了！', 4200);
       refreshHUD();
       openStationPanel();
     });
@@ -6916,24 +7051,26 @@ window.Game = (function () {
 
       var body = document.createElement('div');
       body.className = 'station-card-body';
-      /* v5.4.3：每张票都明确标出「票价」（资源兑换价）。
-         第一站免费、冰岛最贵（剧情票，不走兑换，但标出它的价值锚点），
-         让玩家一眼看清「想去哪、要付出什么」。 */
+      /* v5.4.4：每张票都明确标出「票价」。未买票的目的地直接显示价格和
+         「购买」入口（点击卡片 = 花素材买票）；冰岛是剧情票，标「剧情解锁」。 */
       var priceText = '';
-      if (d.id === 'iceland') {
-        priceText = owned ? '' : '❄️ 北境剧情解锁 · 无价之票';
-      } else if (d.ticket && d.ticket.cond && d.ticket.cond.length === 1 && d.ticket.cond[0].type === 'free') {
-        priceText = '🎟️ 首张免费';
-      } else {
-        priceText = '🎫 ' + redeemCostText(d.id);
+      var canBuy = !!TICKET_REDEEM[d.id];
+      if (!owned) {
+        if (d.id === 'iceland') {
+          priceText = '❄️ 北境剧情解锁 · 无价之票';
+        } else if (canBuy) {
+          priceText = '🎫 ' + redeemCostText(d.id);
+        }
       }
       body.innerHTML =
         '<b>' + esc(owned ? d.name : '？？？') + '</b>' +
         '<span class="station-sub">' + esc(owned ? d.sub : '目的地未知') + '</span>' +
         '<p>' + esc(owned ? d.card : ticketHint(d.id)) + '</p>' +
-        (priceText && !owned ? '<em class="station-price">' + esc(priceText) + '</em>' : '') +
+        (priceText ? '<em class="station-price">' + esc(priceText) + '</em>' : '') +
         '<em class="station-state">' +
-        (!owned ? '🔒 还没有这张票' : (visited ? '✓ 去过了' : '🎫 有票 · 随时可以走')) +
+        (owned
+          ? (visited ? '✓ 去过了' : '🎫 有票 · 随时可以走')
+          : (canBuy ? '🎫 点击购买这张车票' : '🔒 剧情未解锁')) +
         (got ? ' · 💭 找到了那里的东西' : '') +
         '</em>';
       card.appendChild(body);
@@ -6942,9 +7079,14 @@ window.Game = (function () {
         /* v4.10：走带票根动画的转场（enterMap 本身没变，仍然直接可用，
            dev 钩子和"回到上次的地图"都继续走它） */
         card.addEventListener('click', function () { travelTo(d.id, card); });
+      } else if (canBuy) {
+        /* v5.4.4：没买票就点卡片 → 花素材买票（redeemTicket 里有余额/重复购买校验） */
+        card.addEventListener('click', function () {
+          redeemTicket(d.id);
+        });
       } else {
         card.addEventListener('click', function () {
-          toast('🎫 ' + ticketHint(d.id), 3400);
+          toast('❄️ ' + ticketHint(d.id), 3400);
         });
       }
       list.appendChild(card);
@@ -6977,12 +7119,12 @@ window.Game = (function () {
           '<span class="tk-name">' + esc(d.name) + '</span>' +
           '<span class="tk-cost">' + redeemCostText(d.id) + '</span>' +
           (ok
-            ? '<button class="btn ghost small" type="button" data-redeem="' + d.id + '">换票</button>'
-            : '<span class="tk-state" style="color:rgba(232,220,200,.55)">还差</span>') +
+            ? '<button class="btn ghost small" type="button" data-redeem="' + d.id + '">买票</button>'
+            : '<span class="tk-state" style="color:rgba(232,220,200,.55)">素材不足</span>') +
           '</div>');
       });
       rd.innerHTML = rows.length
-        ? ('<div class="panel-name" style="font-size:13px;margin:12px 0 7px">🎁 用纪念品换票 <span class="panel-sub">特产不消耗，只作门槛</span></div>' + rows.join(''))
+        ? ('<div class="panel-name" style="font-size:13px;margin:12px 0 7px">🎫 购买车票 <span class="panel-sub">素材不足时先在小镇攒一攒</span></div>' + rows.join(''))
         : '';
       rd.querySelectorAll('[data-redeem]').forEach(function (b) {
         b.addEventListener('click', function (e) {
@@ -7014,14 +7156,19 @@ window.Game = (function () {
 
       var info = document.createElement('div');
       info.className = 'ticket-info';
-      var conds = (d.ticket && d.ticket.cond || []).map(condText).filter(Boolean);
+      /* v5.4.4：未获得的票显示「素材价格」，不再显示旧的解锁条件 */
+      var priceStr = '';
+      if (!owned) {
+        if (d.id === 'iceland') priceStr = '❄️ 北境剧情解锁';
+        else if (TICKET_REDEEM[d.id]) priceStr = redeemCostText(d.id);
+      }
       info.innerHTML =
         '<b>' + esc(owned ? d.name : '？？？') + '</b>' +
         '<span class="ticket-sub">' + esc(owned ? d.sub : '目的地未知') + '</span>' +
         '<span class="ticket-state">' +
         (owned ? '🎫 已获得' + (travelVisited(d.id) ? ' · 去过了' : '') : '🔒 未获得') +
         '</span>' +
-        (owned ? '' : '<span class="ticket-cond">' + esc(conds.join(' 或 ') || '再走走就会遇到') + '</span>');
+        (priceStr ? '<span class="ticket-cond">' + esc(priceStr) + '</span>' : '');
       row.appendChild(info);
       list.appendChild(row);
     });
@@ -7030,7 +7177,7 @@ window.Game = (function () {
     $('#ticket-count').textContent = n >= tt ? (n + ' / ' + tt) : ('已得 ' + n + ' 张');
     $('#ticket-note').textContent = n >= tt
       ? '集齐了。' + tt + ' 张票、' + tt + ' 个地方，都去过一遍。'
-      : '有票才能上车。每张票都只差一件小事——看看下面写的那行字。';
+      : '有票才能上车。缺的票，去车站用素材买下来。';
     $('#ticket-panel').classList.remove('hidden');
     pause();
   }
@@ -7715,6 +7862,16 @@ window.Game = (function () {
       ]);
       return;
     }
+    /* v5.4.4：开箱必须双人共同触发 —— 箱盖上的两个星形槽，得两把「手」一起按下去。 */
+    var cx = (window.NorthMap && NorthMap.chest) ? NorthMap.chest.x : S.self.x;
+    var cy = (window.NorthMap && NorthMap.chest) ? NorthMap.chest.y : S.self.y;
+    if (!partnerNear(cx, cy, 150)) {
+      openDialog('🧰 古老宝箱', [
+        '你把星钥按进凹槽，箱盖只抬起来一道缝，又合上了。',
+        '另一侧的凹槽还空着 —— 这箱子，得' + name2() + '也把手放上来。'
+      ]);
+      return;
+    }
     if (S.chestFx) return;
     S.chestFx = { t0: Date.now() };
     pause();
@@ -7777,6 +7934,17 @@ window.Game = (function () {
   /* ---------- 星钥 ---------- */
   function takeNorthKey() {
     if (northHas('key')) return;
+    /* v5.4.4：寻找钥匙必须双人协作 —— 一个人站到门缝前不够，要两个人都在。
+       星钥是禾留给「两个人」的，一个人取不下来。 */
+    var arch = (window.NorthMap && NorthMap.gate) ? NorthMap.gate.arch : { x: S.self.x, y: S.self.y };
+    if (!partnerNear(arch.x, arch.y, 150)) {
+      openDialog('🗝 星钥', [
+        '钥匙悬在门缝里，指尖差一点就够到了。',
+        '可它轻轻一晃，又飘回那束光里。',
+        '……它不肯一个人跟你走。得等' + name2() + '也站到门前来。'
+      ]);
+      return;
+    }
     mutate(function (w) {
       w.north = w.north || {};
       if (w.north.key) return undefined;
@@ -7788,7 +7956,7 @@ window.Game = (function () {
       try { Snd.sfx('craft'); } catch (e) { }
       showItemGet('key', '北境星钥', '钥齿是一颗星 · 宝箱在等它');
       openDialog('🗝 北境星钥', [
-        '钥匙从门缝里浮出来，落进你手心的时候还是温的。',
+        '两个人同时伸手，钥匙从门缝里浮出来，落进你们交叠的手心。',
         '钥齿是一颗五角星 —— 和宝箱盖上那两个凹槽，一模一样。',
         name2() + '说：「他连钥匙都留在这儿了……是笃定会有人来。」'
       ]);
@@ -8564,7 +8732,7 @@ window.Game = (function () {
   var PANEL_IDS = ['#dlg', '#tree-panel', '#outfit-modal', '#menu-panel', '#mem-photo',
     '#book-panel', '#plot-panel', '#craft-panel', '#res-panel', '#quest-panel', '#settings-panel',
     '#station-panel', '#ticket-panel', '#admin-panel', '#pack-panel', '#mail-panel', '#party-panel',
-    '#lottery-panel'];
+    '#lottery-panel', '#side-panel'];
 
   /* 所有「离开面板」的路径最后都落到这两个函数上（✕ / 关闭按钮 / 点遮罩 / ESC /
      切到别的面板 / 进照片 / 结局开场……）。所以管理员会话的失效就挂在这里：
@@ -9142,14 +9310,21 @@ window.Game = (function () {
   function spotList() {
     var out = [];
     var spots = S.spots || {};
+    /* v5.4.4：每张地图精简成 1 个最有代表性的打卡点。
+       旧存档里可能记了「地图:1」「地图:2」这种已删除的点，这里统一回退到
+       保留的那个点（idx 0），并按地图去重 —— 既不会出现「读不出来的照片」，
+       也不会因为旧的多个点而重复列同一张图。 */
+    var seen = {};
     Object.keys(spots).forEach(function (key) {
       var p = key.split(':');
       var d = window.TravelMaps && TravelMaps.get(p[0]);
       if (!d) return;
+      if (seen[d.id]) return;                 // 同一地图只保留最早那次
+      seen[d.id] = true;
       var idx = parseInt(p[1], 10) || 0;
-      var sp = d.spots && d.spots[idx];
+      var sp = (d.spots && d.spots[idx]) || (d.spots && d.spots[0]);
       out.push({
-        mapId: d.id, mapName: d.name, idx: idx,
+        mapId: d.id, mapName: d.name, idx: sp ? idx : 0,
         label: (sp && sp.label) ? String(sp.label).replace(/^📷\s*/, '') : '在这里合影',
         at: spots[key]
       });
@@ -9982,6 +10157,9 @@ window.Game = (function () {
       if (qc) qc.textContent = qt;
     }
 
+    /* v5.4.4：北境支线蓝色 chip（触发后才出现） */
+    refreshSideChip();
+
     /* dev 专用：实测帧率与移动速度。
        iPhone 实测时打开 ?dev=1，分别记录「Safari 里」和「主屏幕 PWA 里」的数字，
        两者都应该稳定在 150 px/s（推到底）——若 PWA 明显更高，就是时间步长出了问题。 */
@@ -10482,6 +10660,9 @@ window.Game = (function () {
     /* v4.1 给验收脚本用的口子（只在 ?dev=1 时有意义，但本身不改变游戏行为） */
     devTicketBook: function () { openTicketBook(); },
     devBook: function () { openBook(); },
+    /* v5.4.4 验收口：直接走真实买票 / 打开支线面板（和玩家点按钮同一条路径） */
+    devBuyTicket: function (id) { if (!devHook()) return false; redeemTicket(id); return true; },
+    devSide: function () { if (!devHook()) return false; openSidePanel(); return true; },
     devAdmin: function () { if (!devHook() && !adminOk) return false; openAdminGate(); return true; },
     /* app.js 的连接监听推过来的真实在线状态（只读给 UI 用，不改任何进度） */
     setOnline: function (on) { S.online = !!on; return S.online; },
