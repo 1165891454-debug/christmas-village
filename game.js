@@ -88,6 +88,7 @@ window.Game = (function () {
     northHintBusy: false, polarBusy: false, farmBusy: false,
     cineBusy: false, storySaid: {},
     shovelIntroSaid: false,
+    sunrisePending: false,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -959,8 +960,10 @@ window.Game = (function () {
     if (!fx || !fx.type) return;
     var t = fx.type;
     if (t === 'chestOpen') {
-      /* 对方开宝箱：本地也播一段「镜头压过去 + 光效 + 三件物品卡片」，
-         和发起方看到的是同一套东西（只是不写存档、不重复发奖励）。 */
+      /* 对方开宝箱：本地也播「镜头压过去 + 光效 + 三件物品卡片 + 完整文字」，
+         和发起方看到的是同一套（只是不写存档、不重复发奖励）。
+         v5.4.5：补上 openDialog 的完整宝箱内容文字 —— 之前非互动方只看到
+         图标卡片和一句 toast，看不到「箱子里」那段剧情文字。 */
       try { Snd.sfx('spark'); } catch (e) { }
       var c = window.NorthMap && NorthMap.chest;
       if (c) {
@@ -970,12 +973,28 @@ window.Game = (function () {
       showItemGet('map', '禾的地图', '边角标着比北境更北的地方');
       setTimeout(function () { showItemGet('coat', '北境御寒衣', '穿上它，风就咬不动你了'); }, 1400);
       setTimeout(function () { showItemGet('auroraBox', '极光盒子', '盒盖上刻着一道光'); }, 2800);
+      setTimeout(function () {
+        openDialog('🧰 箱子里', [
+          '箱盖打开的那一下，没有声音。',
+          '里面没有金币，也没有珠宝 —— 三样东西，摆得整整齐齐，像是有人临走前特意放好的。',
+          '一张卷起来的地图，边角画着比北境更北的地方，墨迹被呵气洇开过。',
+          '一件叠好的厚外套，领口缝着一圈白毛，还带着一点点松木味。',
+          '还有一个巴掌大的木盒。盒盖上刻着一道光，从底一直划到顶。',
+          '地图背面有一行小字：「光不是消失了。它只是退回它来的地方。」'
+        ]);
+      }, 4200);
       toast('🧰 你们一起打开了北境的宝箱', 4200);
     } else if (t === 'key') {
       try { Snd.sfx('craft'); } catch (e) { }
       var g = window.NorthMap && NorthMap.gate;
       if (g) burst(g.arch.x, g.arch.y - 20, 'spark', 6);
       showItemGet('key', '北境星钥', '钥齿是一颗星 · 宝箱在等它');
+      /* v5.4.5：非互动方也看到完整的钥匙文字（之前只有图标卡片） */
+      openDialog('🗝 北境星钥', [
+        '两个人同时伸手，钥匙从门缝里浮出来，落进你们交叠的手心。',
+        '钥齿是一颗五角星 —— 和宝箱盖上那两个凹槽，一模一样。',
+        name2() + '说：「他连钥匙都留在这儿了……是笃定会有人来。」'
+      ]);
       toast('🗝 你们一起拿到了北境星钥', 3800);
     } else if (t === 'shovel') {
       try { Snd.sfx('craft'); } catch (e) { }
@@ -993,6 +1012,23 @@ window.Game = (function () {
       toast('❄️ 镇子最北边多了一道发蓝的光', 4200);
     } else if (t === 'aurora') {
       toast('🌌 冰岛的极光……你们一起看到了', 4200);
+    } else if (t === 'sunrise') {
+      /* v5.4.5：对方那边天亮了 —— 本机也补播日出动画 + 文字。
+         只播表现，不写 revived（发起方已经写完）；用 S.cineBusy 去重。
+         若本机此刻不在镇上（在冰岛/别的图），先记 pending，回镇再补播。 */
+      if (S.cineBusy) return;
+      if (S.mapId || S.interId || S.ending || S.photo || S.traveling) {
+        S.sunrisePending = true;
+        return;
+      }
+      S.cineBusy = true;
+      playSunriseCine(function () {
+        S.cineBusy = false;
+        try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
+        refreshHUD();
+        showSunriseDialog();
+        setTimeout(finalPrepOffer, 2200);
+      });
     }
   }
 
@@ -1354,6 +1390,7 @@ window.Game = (function () {
   var chapterSeen = -1;        // 这台设备已经"结算"到第几章（0 基章节号）
   var chapterQueue = [];       // 等着播的章节（0 基）
   var chapterCardOpen = false;
+  var chapterCardPending = false;   // v5.4.5：有卡片待播、但被对话/演出挡着，等确定事件再触发
   var chapterCardTimer = 0;
 
   function chapterSeenKey() { return 'omo_chapter_seen_' + (S.code || 'local'); }
@@ -1399,7 +1436,12 @@ window.Game = (function () {
     /* 一口气推进了好几章（离线补偿 / 一次性满足多条）时只留最后一张，
        否则会连播好几屏，把玩家按在原地。 */
     while (chapterQueue.length > 2) chapterQueue.shift();
-    if (!chapterCardOpen) showNextChapterCard();
+    /* v5.4.5：push 后**不立即**弹卡 —— 章节推进常常伴随「开对话」，
+       而 demo 后端 / 某些 Firebase 回调会把 onData 同步地夹在 openDialog 之前，
+       此时立即弹卡会让卡片先弹、紧接着又被 pause() 关掉（卡片丢失）。
+       改为标记 pending，由「对话关闭」（closeAllPanels）或「主循环兜底」来触发，
+       这样 openDialog 一定先落地，卡片一定在对话之后才出现。 */
+    chapterCardPending = true;
   }
 
   /* 1..20 → 一、二、…… 十、十一。章节标题用中文数字，更像"章节" */
@@ -1414,15 +1456,16 @@ window.Game = (function () {
     if (!chapterQueue.length) { chapterCardOpen = false; return; }
     /* 特殊演出正在放（极光 / 天亮 / 合影 / 转场）或者玩家正开着面板 / 对话框时先让路。
        卡片是"庆祝"，不该把人从正在做的事里拽出来。
-       v5.4.4：除了 S.paused，再显式看「对话浮层是否还开着」—— 两者在个别
-       时序（Firebase 事务提交回来的那一拍）可能短暂不同步，S.paused 已经复位
-       但 #dlg 还没来得及隐藏，卡片就会叠在 NPC 对话上。 */
+       v5.4.5：不再靠固定延时轮询 —— 阻塞时标记 pending 直接返回，
+       由「关闭对话」（closeAllPanels）或「演出结束」这些**确定性事件**来再次触发；
+       主循环的 onData 也保留一次兜底触发，避免极端时序下卡片被漏掉。 */
     var dlgUp = $('#dlg') && !$('#dlg').classList.contains('hidden');
     if (S.cineBusy || S.ending || S.photo || S.traveling || S.paused || dlgUp) {
       chapterCardOpen = false;
-      setTimeout(showNextChapterCard, 1200);
+      chapterCardPending = true;
       return;
     }
+    chapterCardPending = false;
     var el = $('#chapter-done');
     if (!el) { chapterQueue.length = 0; chapterCardOpen = false; return; }
     var idx = chapterQueue.shift();
@@ -4974,7 +5017,9 @@ window.Game = (function () {
             done ? '📷 再拍一张' : sp.label, { spot: sp, idx: si, mapId: mp.id });
         });
       }
-      /* v4.10 北境寻宝：有铲子才能挖；信和宝箱随时可看（宝箱要先挖出来） */
+      /* v4.10 北境寻宝：有铲子才能挖；信和宝箱随时可看（宝箱要先挖出来）
+         v5.4.5：没铲子时，挖掘点也显示出来，但提示「积雪太深」，引导回村找木匠 ——
+         不再让玩家一头雾水地在雪地里乱走。 */
       if (mp.id === NORTH_ID && window.NorthMap) {
         var ndi = northData();
         if (ndi.shovel) {
@@ -4986,6 +5031,13 @@ window.Game = (function () {
             consider('northDig', sp.x, sp.y, sp.r || 62,
               dug ? '👀 看看挖过的坑' : sp.label, sp);
           });
+        } else if (ndi.entered) {
+          /* 没铲子：只给第一个挖掘点一个「积雪太深」的提示，引导回村 */
+          var firstDig = (NorthMap.digs || [])[0];
+          if (firstDig) {
+            consider('northDig', firstDig.x, firstDig.y, firstDig.r || 62,
+              '⛏ 雪太深，空手挖不动 —— 回村找老木匠借把铲子', firstDig);
+          }
         }
         if (NorthMap.sled) {
           consider('northSled', NorthMap.sled.x, NorthMap.sled.y, NorthMap.sled.r || 70,
@@ -5983,18 +6035,22 @@ window.Game = (function () {
       done: function (n) { return !!n.entered; } },
     { name: '在北境发现信件和雪橇', guide: '营地附近有一辆旧雪橇，旁边落着一封信，走近看看',
       done: function (n) { return !!(n.letter && n.sled); } },
-    { name: '探索北境的挖掘点', guide: '雪地上有几处不一样的地方（松软、石头、旧木头、脚印），走过去踩一踩',
-      done: function (n) { var d = n.digs || {}; return !!(d.soft && d.stone && d.dull && d.prints); } },
-    { name: '获得铲子', guide: '回镇上找老木匠，极夜之后他会把那把旧雪铲换给你们（木材 8 + 材料 2）',
+    /* v5.4.5：先找铲子再探索 —— 雪太深，空手挖不动 */
+    { name: '回村找一把铲子', guide: '北境的雪积得太深，空手挖不动。回镇上找老木匠，他会把那把旧雪铲换给你们（木材 8 + 材料 2）',
       done: function (n) { return !!n.shovel; } },
-    { name: '用铲子完成挖掘', guide: '带着铲子回到北境，把「这里不一样」的那处挖开 —— 底下有东西',
+    { name: '探索北境的挖掘点', guide: '带着铲子回到北境，雪地上有几处不一样的地方（松软、石头、旧木头、脚印），走过去挖一挖',
+      done: function (n) { var d = n.digs || {}; return !!(d.soft && d.stone && d.dull && d.prints); } },
+    { name: '用铲子挖出宝箱', guide: '把「这里不一样」的那处挖开 —— 底下有东西',
       done: function (n) { var d = n.digs || {}; return !!d.treasure; } },
     { name: '双人共同寻找钥匙', guide: '两个人分别站到左右两块星纹上，站满两秒，星门会开、门缝里浮出星钥',
       done: function (n) { return !!(n.gateOpen && n.key); } },
     { name: '双人共同开启宝箱', guide: '拿到星钥后，两个人一起回到宝箱前，把它打开',
       done: function (n) { return !!n.opened; } },
     { name: '查看宝箱里的东西', guide: '箱子里是禾的地图、御寒衣和极光盒子 —— 看完就都明白了',
-      done: function (n) { return !!(n.map && n.coat && n.auroraBox); } }
+      done: function (n) { return !!(n.map && n.coat && n.auroraBox); } },
+    /* v5.4.5：北境完成后，引导回村 → 去冰岛 */
+    { name: '回村和村民聊聊冰岛', guide: '北境的事都办完了。回镇上，圣诞老人和木匠有话对你们说 —— 地图指向更北的冰岛',
+      done: function (n, w) { return !!((w.travel && w.travel.iceland) || n.auroraDone); } }
   ];
 
   /* 支线是否已经触发（读过阿信的来信 = 进入这条支线） */
@@ -7624,7 +7680,15 @@ window.Game = (function () {
   /* ---------- 挖 ---------- */
   function startDig(spot) {
     if (!spot || S.dig) return;
-    if (!northHas('shovel')) { toast('🪏 得先有一把铲子', 2400); return; }
+    if (!northHas('shovel')) {
+      /* v5.4.5：没铲子时给完整引导 —— 雪太深、回村找木匠 */
+      openDialog('⛏ 积雪太深', [
+        '雪压得又厚又硬，两只手刨下去，只带起一层浮雪。',
+        '北边的雪，不是空手能挖开的。',
+        '回镇上找老木匠吧 —— 他那把旧雪铲，正好借来用用。'
+      ]);
+      return;
+    }
     if (northDug(spot.id)) {
       var d0 = northData();
       toast(d0.chest && spot.kind === 'treasure' ? '⛏ 坑还在，箱子已经挖出来了' : '⛏ 这个坑已经看过了', 2200);
@@ -8081,6 +8145,11 @@ window.Game = (function () {
       setTimeout(function () {
         cv.classList.add('hidden');
         unpause();
+        /* v5.4.5：演出结束也是确定性事件 —— 放行被演出挡住的章节卡片 */
+        if (chapterCardPending) {
+          chapterCardPending = false;
+          try { showNextChapterCard(); } catch (e) { }
+        }
         if (onDone) onDone();
       }, 900);
     }
@@ -8179,18 +8248,16 @@ window.Game = (function () {
     if (S.cineBusy) return;
     if (northHas('revived')) return;
     S.cineBusy = true;
-    /* v5.2：日出过程加三张章节字幕卡（淡入 / 停留 / 淡出），不遮角色与小镇。 */
-    runChapterCards();
-    /* 天亮锁要在黑场淡出之前落下，否则演出结束那一瞬间会闪回夜晚。 */
-    setTimeout(function () {
-      try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
-    }, 8600);
-    runCine('sunrise', 9.5, function () {
+    playSunriseCine(function () {
       var now = Date.now();
       mutate(function (w) {
         w.north = w.north || {};
         if (w.north.revived) return undefined;
         w.north.revived = now;
+        /* v5.4.5：天亮作为共享剧情事件发出去，让对方那台设备也补播日出动画。
+           事件和 revived 状态在同一笔事务里原子写入 —— 谁先拿到谁播，
+           奖励（revived）幂等只写一次，动画靠 fx 事件去重。 */
+        emitFxInTx(w, 'sunrise');
         return w;
       }).then(function () {
         S.cineBusy = false;
@@ -8198,16 +8265,33 @@ window.Game = (function () {
         try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
         refreshHUD();
         logAdmin('小镇恢复光明', 'revived', null, null, true);
-        openDialog('🌤', [
-          '你睁开眼的时候，屋檐在滴水。',
-          '不是雪化了 —— 是光回来了。',
-          '街上的灯一盏一盏灭掉，因为已经不需要了。',
-          '圣诞老人站在门口，眯着眼睛看天，看了很久。',
-          '然后他回头喊：「都出来吧 —— 天亮了。」'
-        ]);
+        showSunriseDialog();
         setTimeout(finalPrepOffer, 2200);
       }, function () { S.cineBusy = false; });
     });
+  }
+
+  /* v5.4.5：日出动画 + 收尾文字抽出来复用 ——
+     发起方（startSunrise）和接收方（consumeFx 里的 sunrise 事件）都走这里，
+     只播动画和文字、不写存档。 */
+  function playSunriseCine(onDone) {
+    /* v5.2：日出过程加三张章节字幕卡（淡入 / 停留 / 淡出），不遮角色与小镇。 */
+    runChapterCards();
+    /* 天亮锁要在黑场淡出之前落下，否则演出结束那一瞬间会闪回夜晚。 */
+    setTimeout(function () {
+      try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
+    }, 8600);
+    runCine('sunrise', 9.5, onDone);
+  }
+
+  function showSunriseDialog() {
+    openDialog('🌤', [
+      '你睁开眼的时候，屋檐在滴水。',
+      '不是雪化了 —— 是光回来了。',
+      '街上的灯一盏一盏灭掉，因为已经不需要了。',
+      '圣诞老人站在门口，眯着眼睛看天，看了很久。',
+      '然后他回头喊：「都出来吧 —— 天亮了。」'
+    ]);
   }
 
   /* 三张章节收尾字幕：THE FORGOTTEN NORTH → THE LIGHT RETURNS → 完结。
@@ -8688,6 +8772,20 @@ window.Game = (function () {
     } catch (e) { }
     /* v5.0：从冰岛看完极光回来 → 天亮 */
     try { maybeSunrise(fromId); } catch (e) { }
+    /* v5.4.5：如果错过了对方的「天亮」事件（当时不在镇上），回镇后补播 */
+    if (S.sunrisePending && !S.cineBusy && northHas('revived')) {
+      S.sunrisePending = false;
+      S.cineBusy = true;
+      try {
+        playSunriseCine(function () {
+          S.cineBusy = false;
+          try { if (window.TownLife && TownLife.setDayLock) TownLife.setDayLock(true); } catch (e) { }
+          refreshHUD();
+          showSunriseDialog();
+          setTimeout(finalPrepOffer, 2200);
+        });
+      } catch (e) { S.cineBusy = false; }
+    }
   }
 
   /* ---------- 室内 / 室外 ---------- */
@@ -8766,6 +8864,13 @@ window.Game = (function () {
       var fn = dlgDone;
       dlgDone = null;
       try { fn(); } catch (e) { if (window.console) console.warn('[dlgDone]', e); }
+    }
+    /* v5.4.5：对话关闭是一个确定性事件 —— 这里把等待中的章节卡片放出来。
+       首次和圣诞老人对话触发章节推进时，卡片被对话挡着（pending），
+       等玩家看完对话、点关闭，卡片才在这一刻真正弹出，绝不与对话重叠。 */
+    if (wasDlg && chapterCardPending) {
+      chapterCardPending = false;
+      try { showNextChapterCard(); } catch (e) { }
     }
   }
   function closeAllPanelsSilent() {
@@ -10159,6 +10264,17 @@ window.Game = (function () {
 
     /* v5.4.4：北境支线蓝色 chip（触发后才出现） */
     refreshSideChip();
+
+    /* v5.4.5：章节卡片兜底 —— 若仍有待播卡片、且此刻没有任何阻塞（对话已关、
+       演出已结束、无面板），就放行。这是确定性事件之外的最后一层保险，
+       专门兜住 photo / 转场这些没有显式「结束回调」的短暂阻塞，避免卡片漏播。 */
+    if (chapterCardPending && !S.paused && !S.cineBusy && !S.ending && !S.photo && !S.traveling) {
+      var _dlgUp2 = $('#dlg') && !$('#dlg').classList.contains('hidden');
+      if (!_dlgUp2) {
+        chapterCardPending = false;
+        try { showNextChapterCard(); } catch (e) { }
+      }
+    }
 
     /* dev 专用：实测帧率与移动速度。
        iPhone 实测时打开 ?dev=1，分别记录「Safari 里」和「主屏幕 PWA 里」的数字，
