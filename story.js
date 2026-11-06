@@ -1590,6 +1590,160 @@ window.Story = (function () {
     ctx.restore();
   }
 
+  /* v5.4.6：圣诞节最终结局的转场 —— 圣诞树灯光逐层亮起、圣诞老人作别、
+     镜头拉开展示完整村庄，最后定格一句「Merry Christmas, Charles & Julie.」。
+     像素风：色块 + 简单几何 + 暖金光点，不引入新美术风格。 */
+  function drawChristmasTransition(ctx, w, h, t, p) {
+    var k = Math.max(0, Math.min(1, p));
+    ctx.save();
+    ctx.clearRect(0, 0, w, h);
+
+    /* 夜空：深蓝偏紫，从中间慢慢透出一点暖 */
+    var sky = ctx.createLinearGradient(0, 0, 0, h * 0.78);
+    sky.addColorStop(0, lerpHex('#05060f', '#141a33', k));
+    sky.addColorStop(0.55, lerpHex('#0a1024', '#242a4a', k));
+    sky.addColorStop(1, lerpHex('#101b36', '#3a3352', k));
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h * 0.78);
+
+    /* 星星：越到结尾越亮、越多 */
+    var seed = 20261225;
+    function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+    for (var st = 0; st < 60; st++) {
+      var sx = rnd() * w, sy = rnd() * h * 0.6;
+      var tw = 0.25 + 0.75 * Math.abs(Math.sin(t * 1.8 + st * 1.7));
+      ctx.fillStyle = 'rgba(255,240,210,' + (k * (0.3 + 0.7 * tw)).toFixed(3) + ')';
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+
+    /* 雪地 */
+    var snow = ctx.createLinearGradient(0, h * 0.72, 0, h);
+    snow.addColorStop(0, lerpHex('#0d1524', '#dfe9f7', k));
+    snow.addColorStop(1, lerpHex('#16223a', '#fffdf8', k));
+    ctx.fillStyle = snow;
+    ctx.fillRect(0, h * 0.72, w, h * 0.28);
+
+    /* 小镇剪影：几间小屋，窗户的暖灯随着 k 一盏盏亮 */
+    var houseSeed = 31;
+    function hrnd() { houseSeed = (houseSeed * 1103515245 + 12345) % 2147483648; return houseSeed / 2147483648; }
+    for (var hi = 0; hi < 8; hi++) {
+      var bw = w * (0.055 + hrnd() * 0.045);
+      var bh = h * (0.06 + hrnd() * 0.05);
+      var bx = w * (0.05 + hi * 0.125) + hrnd() * 12;
+      var by = h * 0.76;
+      ctx.fillStyle = lerpHex('#0a1220', '#5d4b3c', k);
+      ctx.fillRect(bx, by - bh, bw, bh);
+      ctx.beginPath();
+      ctx.moveTo(bx - 2, by - bh);
+      ctx.lineTo(bx + bw / 2, by - bh - bh * 0.5);
+      ctx.lineTo(bx + bw + 2, by - bh);
+      ctx.closePath();
+      ctx.fill();
+      var wl = Math.max(0, Math.min(1, k * 1.5 - 0.2 - hi * 0.05));
+      if (wl > 0.02) {
+        ctx.fillStyle = 'rgba(255,214,140,' + wl.toFixed(3) + ')';
+        ctx.fillRect(bx + bw * 0.24, by - bh * 0.58, bw * 0.16, bh * 0.2);
+        ctx.fillRect(bx + bw * 0.60, by - bh * 0.58, bw * 0.16, bh * 0.2);
+      }
+    }
+
+    /* 中央的圣诞树：逐层亮起（树形 + 灯点） */
+    var tx = w * 0.5, ty = h * 0.775;
+    ctx.fillStyle = lerpHex('#0a1c16', '#1d4a35', k);
+    for (var tier = 0; tier < 4; tier++) {
+      var twid = w * (0.115 - tier * 0.024);
+      var tyy = ty - tier * h * 0.052;
+      ctx.beginPath();
+      ctx.moveTo(tx, tyy - h * 0.085);
+      ctx.lineTo(tx + twid, tyy);
+      ctx.lineTo(tx - twid, tyy);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = lerpHex('#0a1c16', '#5a3b22', k);
+    ctx.fillRect(tx - w * 0.008, ty, w * 0.016, h * 0.03);
+    /* 树顶星 + 灯点，逐层亮 */
+    if (k > 0.12) {
+      var sk = Math.max(0, Math.min(1, (k - 0.12) / 0.5));
+      var starY = ty - 4 * h * 0.052 - h * 0.085;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var sgr = ctx.createRadialGradient(tx, starY, 0, tx, starY, h * 0.04);
+      sgr.addColorStop(0, 'rgba(255,236,170,' + sk.toFixed(3) + ')');
+      sgr.addColorStop(1, 'rgba(255,200,110,0)');
+      ctx.fillStyle = sgr;
+      ctx.fillRect(tx - h * 0.05, starY - h * 0.05, h * 0.1, h * 0.1);
+      ctx.fillStyle = 'rgba(255,230,160,' + sk.toFixed(3) + ')';
+      ctx.beginPath();
+      for (var sp = 0; sp < 5; sp++) {
+        var sa2 = -Math.PI / 2 + sp * 1.2566;
+        var sx2 = tx + Math.cos(sa2) * h * 0.018, sy2 = starY + Math.sin(sa2) * h * 0.018;
+        if (sp === 0) ctx.moveTo(sx2, sy2); else ctx.lineTo(sx2, sy2);
+      }
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    if (k > 0.3) {
+      var lk2 = (k - 0.3) / 0.7;
+      for (var lt = 0; lt < 26; lt++) {
+        var lax = tx + Math.sin(lt * 2.1) * w * (0.055 - (lt % 4) * 0.01);
+        var lay = ty - (lt % 6) * h * 0.042 - h * 0.02;
+        var lp = 0.4 + 0.6 * Math.abs(Math.sin(t * 2.4 + lt));
+        ctx.fillStyle = 'rgba(255,214,130,' + (lk2 * lp).toFixed(3) + ')';
+        ctx.fillRect(lax, lay, 2.4, 2.4);
+      }
+    }
+
+    /* 圣诞老人剪影在树旁作别（挥一下手） */
+    if (k > 0.2) {
+      var sk2 = (k - 0.2) / 0.5;
+      var sx3 = tx - w * 0.16, sy3 = h * 0.76;
+      ctx.fillStyle = 'rgba(180,52,60,' + (sk2 * 0.95).toFixed(3) + ')';
+      ctx.fillRect(sx3 - w * 0.014, sy3 - h * 0.055, w * 0.028, h * 0.055);
+      ctx.fillStyle = 'rgba(255,224,210,' + (sk2 * 0.9).toFixed(3) + ')';
+      ctx.fillRect(sx3 - w * 0.009, sy3 - h * 0.075, w * 0.018, h * 0.02);
+      ctx.fillStyle = 'rgba(240,240,245,' + sk2.toFixed(3) + ')';
+      ctx.fillRect(sx3 - w * 0.008, sy3 - h * 0.075, w * 0.016, h * 0.012);
+      var handY = sy3 - h * 0.028 + Math.sin(t * 3) * h * 0.006;
+      ctx.fillStyle = 'rgba(255,224,210,' + (sk2 * 0.9).toFixed(3) + ')';
+      ctx.fillRect(sx3 + w * 0.018, handY, w * 0.014, h * 0.008);
+    }
+
+    /* 底部暖光 */
+    if (k > 0.15) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var rg2 = ctx.createRadialGradient(w * 0.5, h * 0.92, 0, w * 0.5, h * 0.92, w * 0.75);
+      rg2.addColorStop(0, 'rgba(255,226,170,' + (0.22 * k).toFixed(3) + ')');
+      rg2.addColorStop(1, 'rgba(255,210,150,0)');
+      ctx.fillStyle = rg2;
+      ctx.fillRect(0, h * 0.7, w, h * 0.3);
+      ctx.restore();
+    }
+
+    /* 最终纪念文字（结尾才完整浮现） */
+    var ak = Math.max(0, Math.min(1, (k - 0.55) / 0.45));
+    if (ak > 0) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(12,16,30,' + (ak * 0.55).toFixed(3) + ')';
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = ak;
+      ctx.fillStyle = '#ffe6b0';
+      ctx.font = 'bold ' + Math.round(w * 0.052) + 'px "PingFang SC", sans-serif';
+      ctx.fillText('Merry Christmas, Charles & Julie.', w * 0.5, h * 0.34);
+      ctx.fillStyle = '#f4ead8';
+      ctx.font = Math.round(w * 0.028) + 'px "PingFang SC", sans-serif';
+      ctx.fillText('有些礼物会被拆开，有些回忆会一直留在心里。', w * 0.5, h * 0.34 + h * 0.07);
+      ctx.fillStyle = '#ffe6b0';
+      ctx.font = Math.round(w * 0.026) + 'px "PingFang SC", sans-serif';
+      ctx.fillText('谢谢你们，让这个圣诞村庄变得如此特别。', w * 0.5, h * 0.34 + h * 0.125);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
   /* 十六进制颜色插值 */
   function lerpHex(a, b, t) {
     t = Math.max(0, Math.min(1, t));
@@ -1623,6 +1777,7 @@ window.Story = (function () {
     AURORA_SECONDS: AURORA_SECONDS,
     drawAurora: drawAurora,
     drawSunrise: drawSunrise,
+    drawChristmasTransition: drawChristmasTransition,
     /* 给测试/调试用：把烘出来的位图作废（改尺寸后重新烘） */
     clearCache: function () { CACHE = {}; CACHE_ORDER = []; }
   };

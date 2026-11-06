@@ -89,6 +89,7 @@ window.Game = (function () {
     cineBusy: false, storySaid: {},
     shovelIntroSaid: false,
     sunrisePending: false,
+    christmasEnding: false,
     prevPresence: null, prevStage: -1, heartT: 0,
     q: { lvl: 2, acc: 0, n: 0 },
     quest: { step: 0, talked: {}, visited: {}, found: {} },
@@ -1029,6 +1030,13 @@ window.Game = (function () {
         showSunriseDialog();
         setTimeout(finalPrepOffer, 2200);
       });
+    } else if (t === 'christmasEnding') {
+      /* v5.4.6：对方触发了圣诞节最终结局 —— 本机同步播放圣诞转场 + 平安夜结局。
+         只播表现，不写 ended（发起方在结局收尾时写）；用 S.christmasEnding 去重。 */
+      if (S.christmasEnding || S.ended || S.ending) return;
+      S.christmasEnding = true;
+      try { Snd.sfx('ding'); } catch (e) { }
+      runChristmasTransition();
     }
   }
 
@@ -3728,6 +3736,23 @@ window.Game = (function () {
   /* 圣诞夜那天才开演（和原来一样；管理员 / ?dev=1 的门照旧放开） */
   function partyDayOk() { return endingUnlocked(); }
 
+  /* ---------- v5.4.6 圣诞节最终结局 ----------
+   * 现实 12/25（或之后，含 dev / 管理员放行）当天，且玩家把整条路都走完：
+   *   主线 12 章全过 + 北境天亮(revived) + 冰岛极光(auroraDone)
+   *   + 六种特产收齐(六份礼物) + 最终圣诞筹备(finalPrep)。
+   * 全部复用 world 里现成的字段，不再另建一套资格系统。 */
+  function christmasEndingReady() {
+    if (S.ended) return false;
+    if (!endingUnlocked()) return false;
+    var w = curWorld() || {};
+    if (chapterNo() < CHAPTERS.length) return false;     // 主线 12 章全过
+    if (!northHas('revived')) return false;               // 北境走完、天已亮
+    if (!northHas('auroraDone')) return false;            // 冰岛极光看完
+    if (specCount() < 6) return false;                    // 六份礼物（六种特产）收齐
+    if (!w.finalPrep) return false;                       // 最终圣诞筹备已完成
+    return true;
+  }
+
   function santaNpc() {
     var list = (window.World && World.npcs) || [];
     for (var i = 0; i < list.length; i++) if (list[i].id === 'santa') return list[i];
@@ -3771,6 +3796,9 @@ window.Game = (function () {
   function talkSanta() {
     var st = partyState();
     var w = curWorld() || {};
+    /* v5.4.6：圣诞节最终结局 —— 现实 12/25 且全部走完，金色叹号在这儿
+       打开最终对话 + 转场 + 结局。优先级最高，不抢普通庆典。 */
+    if (christmasEndingReady()) { startChristmasEnding(); return true; }
     if (st === 'started' && !S.ended) { openPartyPanel('live'); return true; }
     if (st === 'done' || (w && w.ended)) { openPartyPanel('done'); return true; }
     if (!partyFestivalReady()) return false;
@@ -3962,6 +3990,42 @@ window.Game = (function () {
 
   /* ---------- 结局流程 ---------- */
   var FIN_TALK_HINT = '轻触继续 ▸';
+
+  /* v5.4.6：圣诞节最终结局入口 —— 玩家主动点金色叹号后才开始。
+     流程：温暖最终对话 → 圣诞转场（树灯亮起 + 完整村庄 + 纪念文字）→ 现有平安夜结局。
+     只允许正式触发一次（S.christmasEnding 闸门 + w.ended 落盘去重）。 */
+  function startChristmasEnding() {
+    if (S.christmasEnding || S.ended) return;
+    S.christmasEnding = true;
+    /* 发一条共享事件，让另一台设备也同步看到转场 + 结局（最终对话是
+       触发方主动和圣诞老人说的，对方只同步后半段的动画与纪念文字）。 */
+    mutate(function (w) {
+      w = emitFxInTx(w, 'christmasEnding');
+      return w;
+    });
+    openDialog('🎅 圣诞老人', [
+      '「就是今天了。」老人看着你们，眼睛在镜片后面弯成两条缝。',
+      '「从一棵小树苗开始，你们给这个村子搭起了屋子、点亮了树、寄出了信。',
+      '「陪着镇上的人过了整整一年，去了湖边、沙丘、还有更北的地方。',
+      '「这些都是你们俩，一步一步走出来的。」',
+      '他慢慢直起腰，声音比哪一次都轻：',
+      '「圣诞节的礼物早就摆好了 —— 有些会被拆开，有些会一直留在心里。」',
+      '「Merry Christmas。」'
+    ], function () {
+      /* 对话读完 → 转场动画 → 现有平安夜结局 */
+      runChristmasTransition();
+    });
+  }
+
+  /* 圣诞转场：圣诞树灯光逐渐亮起 + 完整村庄 + 最终纪念文字。 */
+  function runChristmasTransition() {
+    if (S.cineBusy) { startEnding(); return; }
+    S.cineBusy = true;
+    runCine('christmas', 9.0, function () {
+      S.cineBusy = false;
+      startEnding();
+    });
+  }
 
   function startEnding() {
     if (S.ending || S.ended) return;   // 只允许启动一次：重复点击 / 双端同时触发都不会来第二遍
@@ -4843,7 +4907,7 @@ window.Game = (function () {
      湖边看风景、沙漠指向远方、双子塔仰头、冰岛牵手看极光。 */
   var TRAVEL_POSE = {
     sayram: 'gaze',    // 赛里木湖：并排看湖
-    tibet: 'point',    // 西藏：指着雪山
+    tibet: 'gaze',     // 西藏：并排看雪山
     doha: 'gaze',      // 多哈：海滨背影
     wuhan: 'sit',      // 武汉：江边长椅坐着
     wuhai: 'wave',     // 乌海：沙丘上朝镜头挥手
@@ -6750,6 +6814,7 @@ window.Game = (function () {
     memories: '补齐全部回忆',
     tree: '直接把树点亮到最终阶段',
     ending: '立刻开启最终结局',
+    christmas: '直达金色叹号前（测结局）',
     gifts: '解锁全部礼品（图鉴）',
     restore: '恢复上次备份'
   };
@@ -6811,6 +6876,29 @@ window.Game = (function () {
       S.paused = false;
       setTimeout(function () { if (!S.ending) startEnding(); }, 260);
       return;
+    } else if (kind === 'christmas') {
+      /* v5.4.6：把正式存档推进到「圣诞节最终结局」的资格线 —— 主线全过 +
+         北境天亮 + 冰岛极光 + 六种特产 + 最终筹备 + 日期放行。
+         不写 ended、不触发结局，只让圣诞老人头顶的金色叹号出现，
+         方便管理员走到广场亲自点它、走一遍完整流程。 */
+      S.adminEnding = true;   // 日期闸门放行（本机内存，刷新即失效）
+      mutate(function (w) {
+        w.chapter = CHAPTERS.length;              // 主线 12 章全过
+        w.north = w.north || {};
+        w.north.revived = w.north.revived || Date.now();     // 北境走完、天亮
+        w.north.auroraDone = w.north.auroraDone || Date.now(); // 冰岛极光看完
+        w.north.completed = w.north.completed || Date.now();
+        w.finalPrep = w.finalPrep || Date.now();   // 最终圣诞筹备
+        w.spec = w.spec || {};
+        (window.Travels && Travels.list ? Travels.list : []).forEach(function (p) {
+          if (Object.keys(w.spec).length < 6 && !w.spec[p.id]) w.spec[p.id] = Date.now();
+        });
+        return w;
+      }).then(function (ok) {
+        logAdmin('直达金色叹号前', 'christmas', null, null, !!ok);
+        renderAdminStatus();
+        toast(ok ? '🎄 条件已就绪 —— 走到广场，圣诞老人头顶有金色叹号' : '⚠️ 没写入成功，再试一次', 4600);
+      });
     } else if (kind === 'restore') {
       /* 这里已经不会走到：restore 在 adminDo 开头就分流到 adminRestore()。 */
     }
@@ -8137,6 +8225,7 @@ window.Game = (function () {
       var p = Math.min(1, t / seconds);
       try {
         if (kind === 'aurora') Story.drawAurora(ctx2, w, h, t, p);
+        else if (kind === 'christmas') Story.drawChristmasTransition(ctx2, w, h, t, p);
         else Story.drawSunrise(ctx2, w, h, t, p);
       } catch (e) { if (window.console) console.warn('[cine]', e); }
       if (now - t0 < total) { cineRun = requestAnimationFrame(frame); return; }
@@ -10161,6 +10250,8 @@ window.Game = (function () {
           var tagY = vy - (n.id === 'santa' ? 84 : (v && v.sit ? 52 : 66));
           nameTag(ctx, vx, tagY, n.name, false, '#ffe08a');
           if (n.id === 'postman' && northHintStage() === 1) hintMark(ctx, vx, tagY - 30, ts);
+          /* v5.4.6：圣诞节最终结局的金色叹号（圣诞老人头顶） */
+          if (n.id === 'santa' && christmasEndingReady()) goldHintMark(ctx, vx, tagY - 34, ts);
         } });
       });
 
@@ -10443,6 +10534,40 @@ window.Game = (function () {
     ctx.strokeStyle = 'rgba(8,20,38,.85)';
     ctx.strokeText('!', x, yy);
     ctx.fillStyle = '#8fe3ff';
+    ctx.fillText('!', x, yy);
+    ctx.restore();
+  }
+
+  /* v5.4.6：圣诞节最终结局的金色叹号 —— 只画在圣诞老人头顶，
+     条件（christmasEndingReady）满足才出现，和普通蓝色叹号明显区分。
+     金色 + 更大的光晕 + 微微旋转的小星星，一眼就知道「这是大事」。 */
+  function goldHintMark(ctx, x, y, ts) {
+    var bob = Math.sin(ts / 460) * 3;
+    var yy = y + bob;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    var g = ctx.createRadialGradient(x, yy + 2, 1, x, yy + 2, 26);
+    g.addColorStop(0, 'rgba(255,214,120,.62)');
+    g.addColorStop(0.55, 'rgba(255,196,90,.28)');
+    g.addColorStop(1, 'rgba(255,180,80,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, yy + 2, 26, 0, 7); ctx.fill();
+    /* 一圈缓缓旋转的金色小星 */
+    var spin = ts / 900;
+    for (var i = 0; i < 5; i++) {
+      var a = spin + i * 1.2566;
+      var px = x + Math.cos(a) * 22, py = yy + Math.sin(a) * 22;
+      ctx.fillStyle = 'rgba(255,224,150,' + (0.35 + 0.3 * Math.sin(ts / 240 + i)).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(px, py, 2.2, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.font = 'bold 21px "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3.4;
+    ctx.strokeStyle = 'rgba(40,26,8,.9)';
+    ctx.strokeText('!', x, yy);
+    ctx.fillStyle = '#ffd766';
     ctx.fillText('!', x, yy);
     ctx.restore();
   }
@@ -10942,6 +11067,17 @@ window.Game = (function () {
     devLotGrant: function (n) { if (!devHook()) return Promise.resolve(false); return grantLottery(n || 1, '测试'); },
     devLotDraw: function (n) { if (!devHook()) return false; drawLottery(n || 1); return true; },
     devStageShot: function (n) { if (!devHook()) return false; showStageShot(n | 0); return true; },
-    devStageShots: function () { return devHook() ? JSON.parse(JSON.stringify((curWorld() || {}).stageShots || {})) : null; }
+    devStageShots: function () { return devHook() ? JSON.parse(JSON.stringify((curWorld() || {}).stageShots || {})) : null; },
+    /* v5.4.6：圣诞节最终结局的只读判定（验收脚本用，不改任何东西） */
+    devChristmas: function () {
+      return {
+        ready: christmasEndingReady(),
+        ended: !!S.ended,
+        chapter: chapterNo(), chapterTotal: CHAPTERS.length,
+        revived: northHas('revived'), auroraDone: northHas('auroraDone'),
+        spec: specCount(), finalPrep: !!((curWorld() || {}).finalPrep),
+        dayOk: endingUnlocked()
+      };
+    }
   };
 })();

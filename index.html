@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <title>Omo's Christmas Village</title>
-  <link rel="stylesheet" href="style.css?v=5.4.5" />
+  <link rel="stylesheet" href="style.css?v=5.4.6" />
   <script src="vendor/firebase-app-compat.js"></script>
   <script src="vendor/firebase-auth-compat.js"></script>
   <script src="vendor/firebase-database-compat.js"></script>
@@ -197,7 +197,7 @@
 
       <!-- 主线任务 / 资源（可点开对应面板） -->
       <button id="quest-chip" class="quest-chip" type="button"></button>
-      <!-- v5.4.5 北境支线：蓝色进度提示，触发后才出现，点开看详情 -->
+      <!-- v5.4.6 北境支线：蓝色进度提示，触发后才出现，点开看详情 -->
       <button id="side-chip" class="side-chip hidden" type="button"></button>
       <button id="res-chip" class="res-chip" type="button">🪵 0 · 🌸 0 · 🌱 0 · 🎁 0</button>
       <div id="dev-chip" class="dev-chip hidden">🛠️ DEV</div>
@@ -377,6 +377,7 @@
               <button class="btn ghost small" data-admin="memories">补齐全部回忆</button>
               <button class="btn ghost small" data-admin="tree">直接点亮最终的树</button>
               <button class="btn primary small" data-admin="ending">开启最终结局</button>
+              <button class="btn ghost small" data-admin="christmas">🎄 直达金色叹号前（测结局）</button>
               <button class="btn ghost small" data-admin="restore">恢复上次备份</button>
             </div>
             <!-- v4.4.0 Final：礼品图鉴 + 素材补充（素材行由 game.js 按真实注册表生成） -->
@@ -597,7 +598,7 @@
         <div class="panel-actions"><button class="btn ghost small" data-close="quest-panel">关闭</button></div>
       </div>
 
-      <!-- v5.4.5 北境支线详情（蓝色） -->
+      <!-- v5.4.6 北境支线详情（蓝色） -->
       <div id="side-panel" class="panel hidden" role="dialog" aria-modal="true">
         <div class="panel-head side-head">
           <div class="panel-name">❄️ 北境支线 · 被遗忘的北境</div>
@@ -774,18 +775,18 @@
     <div class="tc-line"></div>
   </div>
 
-  <script src="firebase-config.js?v=5.4.5"></script>
-  <script src="memories.js?v=5.4.5"></script>
-  <script src="chars.js?v=5.4.5"></script>
-  <script src="sprites.js?v=5.4.5"></script>
-  <script src="world.js?v=5.4.5"></script>
-  <script src="north.js?v=5.4.5"></script>
-  <script src="maps.js?v=5.4.5"></script>
-  <script src="specialties.js?v=5.4.5"></script>
-  <script src="life.js?v=5.4.5"></script>
-  <script src="story.js?v=5.4.5"></script>
-  <script src="game.js?v=5.4.5"></script>
-  <script src="app.js?v=5.4.5"></script>
+  <script src="firebase-config.js?v=5.4.6"></script>
+  <script src="memories.js?v=5.4.6"></script>
+  <script src="chars.js?v=5.4.6"></script>
+  <script src="sprites.js?v=5.4.6"></script>
+  <script src="world.js?v=5.4.6"></script>
+  <script src="north.js?v=5.4.6"></script>
+  <script src="maps.js?v=5.4.6"></script>
+  <script src="specialties.js?v=5.4.6"></script>
+  <script src="life.js?v=5.4.6"></script>
+  <script src="story.js?v=5.4.6"></script>
+  <script src="game.js?v=5.4.6"></script>
+  <script src="app.js?v=5.4.6"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {

@@ -1305,7 +1305,7 @@ window.TravelMaps = (function () {
       cond: [{ type: 'mem', n: 8 }, { type: 'tree', n: 3 }],
       hint: '到车站买下这张票，就能去武汉了。' },
     spots: [
-      { x: 762, y: 1020, r: 86, label: '📷 在桥景前合影', pose: 'point' }
+      { x: 762, y: 1020, r: 86, label: '📷 在桥景前合影', pose: 'gaze' }
     ],
     obstacles: [
       { x: 612, y: 960, w: 96, h: 40 },
@@ -1557,7 +1557,7 @@ window.TravelMaps = (function () {
       cond: [{ type: 'mem', n: 10 }, { type: 'craft', n: 4 }],
       hint: '到车站买下这张票，就能去乌海了。' },
     spots: [
-      { x: 1310, y: 1092, r: 86, label: '📷 在沙丘上合影', pose: 'point' }
+      { x: 1310, y: 1092, r: 86, label: '📷 在沙丘上合影', pose: 'wave' }
     ],
     obstacles: [
       { x: 408, y: 884, w: 232, h: 74 },   // 越野车（车头朝湖，挡着别穿过去）
