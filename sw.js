@@ -18,7 +18,7 @@
  *   同一版本号内的功能补齐，缓存名不变（仍是 omo-v4.6.0）——这一版是首次上线，
  *   还没有手机缓存过它，所以不需要再换名。
  */
-var CACHE = 'omo-v5.4.6';
+var CACHE = 'omo-v5.4.6-b';
 var CORE = [
   './',
   './index.html',
@@ -36,6 +36,9 @@ var CORE = [
   './game.js?v=5.4.6',
   './app.js?v=5.4.6',
   './manifest.webmanifest',
+  './icons/apple-touch-icon.png',
+  './icons/favicon.png',
+  './icons/favicon.ico',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './vendor/firebase-app-compat.js',
